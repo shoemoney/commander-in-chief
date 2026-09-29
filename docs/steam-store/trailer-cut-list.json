@@ -1,0 +1,11 @@
+{
+  "status": "local gameplay trailer draft; not approved for publication",
+  "clips": [
+    {"take": "build/trailer-current.YSYUiS/field", "start_frame": 300, "frame_count": 480, "purpose": "Opening gate fight and onward scrolling"},
+    {"take": "build/trailer-current.YSYUiS/rust", "start_frame": 420, "frame_count": 480, "purpose": "Later terrain, armor encounter and ford crossing"},
+    {"take": "build/trailer-current.YSYUiS/finale", "start_frame": 90, "frame_count": 300, "purpose": "Final-chapter approach and encounter telegraphs"}
+  ],
+  "logo": "build/trailer-logo-fresh-20260907/fresh-render.png",
+  "logo_sha256": "37bcc9352ec6939bc855d40adc35df1587130bac08a1b33be2a4ec1ab77a6578",
+  "review_notes": "Current HUD-visibility build, actual bot-driven gameplay; one explicit draw per movie frame and OS gameplay input disabled. HUD retained. No victory or successful completion is claimed. Endless recording is QA evidence, not part of this cut. Existing game audio is included; no new speech generated. Listening and rights approval remain pending."
+}

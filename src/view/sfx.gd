@@ -152,6 +152,7 @@ var _shop := AudioStreamPlayer.new()         # a3-15: calm pad, up in the interm
 var _beds: Dictionary = {}                   # a3-15: the three ambience-bed loop WAVs (built in _synth_beds)
 var _pb: AudioStreamPlaybackPolyphonic
 var _ui_pb: AudioStreamPlaybackPolyphonic
+var _shutting_down := false
 var _lpf: AudioEffectLowPassFilter   # held by reference, not effect-index
 var _reverb: AudioEffectReverb       # biome space on the SFX chain (see _ready / set_ambience_march)
 var _eshot_rr := 0   # enemy MG shot round-robin cursor (see _shot_rr)
@@ -269,6 +270,19 @@ func _drain_pending_vo() -> void:
 	_vo_pending = {}
 	if Engine.get_physics_frames() <= int(p["until"]):
 		play_vo(String(p["key"]), int(p["priority"]), bool(p["dry"]))
+
+
+func shutdown_audio() -> void:
+	if _shutting_down:
+		return
+	_shutting_down = true
+	process_mode = Node.PROCESS_MODE_DISABLED
+	for player in find_children("*", "", true, false):
+		if player is AudioStreamPlayer or player is AudioStreamPlayer2D or player is AudioStreamPlayer3D:
+			player.stop()
+			player.stream = null
+	_pb = null
+	_ui_pb = null
 
 
 func _notification(what: int) -> void:
@@ -403,6 +417,8 @@ func _ready() -> void:
 
 
 func _finish_boot_audio() -> void:
+	if _shutting_down:
+		return
 	# opt-loop pass 4: kick the death-yell/spawn-shout MP3 banks off threaded, here rather
 	# than lazily on first play — ResourceLoader.load_threaded_request runs on Godot's own
 	# background thread (doesn't block this or any rendered frame), and _process's

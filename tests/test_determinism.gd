@@ -759,13 +759,31 @@ const SEED := 0xDEADBEEF
 ## The bounty_kill event now ships the coin actually BANKED (0 when the throttle
 ## zeroed it) instead of the gross bounty; events are checksum-EXCLUDED, so that
 ## half moves nothing.
+## RE-RECORDED (2026-09-05, SECTOR STAND-UP BUDGET): campaign/arcade/boss_rush can now LOSE.
+## rally_is_free() tested `mode == "endless"` alone, so the broke timer respawned a downed
+## campaign squad forever — measured on the pre-fix tree, 67 knockdowns over 20,000 ticks
+## and the run never ended in any of the three modes. It now also asks
+## standups_exhausted(): a sector absorbs SimWorld.SECTOR_STANDUPS (8) knockdowns and the
+## last one latches the existing _latch_wipe through the existing broke-timer expiry branch
+## (no new wipe call site, no new checksummed field — deaths_since_gate was already hashed).
+## THIS TORTURE NOW WIPES AT TICK 2385 (9 knockdowns, ZERO gates opened), so samples 0-2
+## (t = 600/1200/1800) are BYTE-IDENTICAL and only 3-5 move. That split is the proof the
+## change is confined to the run-ending seam; had samples 0-2 moved, something else shifted.
+## ⚠️ Samples 3-5 are now the FROZEN post-wipe state and differ from each other only by
+## tick_count — a real COVERAGE loss for the back two-thirds of the window, which the goldens
+## would happily record. SURVIVOR_GOLDEN above is the mitigation: a second 2P campaign arm on
+## seed 2, measured to stay alive for all 3,600 ticks (2 gates, 13 knockdowns, budget never
+## exhausted). ENDLESS_GOLDEN verified UNCHANGED in the same run — measured, not assumed:
+## rally_is_free()'s endless arm is byte-identical (`_all_players_down() and (mode ==
+## "endless" or ...)` short-circuits exactly as before) and endless returns -1 from
+## standups_left(), so the budget never engages there.
 const GOLDEN: Array[int] = [
 	6044423000615395277,
 	2139797004594887183,
 	1608768388581761891,
-	4936081844458363408,
-	4443335141363457582,
-	490832867800499075,
+	5499881388938480621,
+	2091554856139180245,
+	4066974192190555357,
 ]
 
 
@@ -1000,6 +1018,66 @@ const ENDLESS_GOLDEN: Array[int] = [
 	1517746335345395172,
 	3109521952156665276,
 ]
+
+
+## A SECOND 2P campaign torture, on a seed measured to stay ALIVE for all 3,600 ticks.
+##
+## It exists because the primary torture no longer does. The stand-up budget
+## (SimWorld.SECTOR_STANDUPS) makes campaign losable, and SEED 0xDEADBEEF's scripted input
+## flails hard enough to spend it: measured on this tree, the primary torture opens ZERO
+## gates and wipes at TICK 2385 with 9 knockdowns. `step()` returns immediately once `wiped`
+## latches, so samples 3-5 (t = 2400/3000/3600) are the FROZEN state and differ from each
+## other only by `tick_count` — real coverage of post-2385 sim state is gone from GOLDEN.
+## That is a coverage loss, not a determinism loss, and the goldens would happily record it.
+##
+## Seed 2 was picked by measurement, not taste: of 20 candidate seeds driven through the
+## same 3,600-tick 2P script, exactly two (0x2 and 0xBEEF) survive the whole window. Seed 2
+## opens 2 gates and takes 13 knockdowns without ever exhausting a sector's budget, so all
+## six samples here are LIVE state — including the two-thirds of the window the primary arm
+## now freezes through.
+##
+## If a future change makes this seed wipe inside 3,600 ticks, do NOT just re-record: the
+## arm has stopped doing its job and needs a new measured seed.
+const SURVIVOR_SEED := 2
+
+const SURVIVOR_GOLDEN: Array[int] = [
+	7449142217846026843,
+	1552270895264212174,
+	909812820081486267,
+	5854500623987812469,
+	7654712912715878751,
+	5724322050536523911,
+]
+
+
+func _run_survivor() -> Array[int]:
+	var sim := SimWorld.new(SURVIVOR_SEED, 2, "campaign")
+	var samples: Array[int] = []
+	for tick in TICKS:
+		sim.step([scripted_input(tick, 0), scripted_input(tick, 1)])
+		if (tick + 1) % SAMPLE_EVERY == 0:
+			samples.append(sim.checksum())
+	return samples
+
+
+func test_campaign_survivor_replay_determinism() -> void:
+	var sim := SimWorld.new(SURVIVOR_SEED, 2, "campaign")
+	for tick in TICKS:
+		sim.step([scripted_input(tick, 0), scripted_input(tick, 1)])
+	Runner.T.ok(not sim.wiped,
+		"the survivor seed still outlives the stand-up budget for the whole window — "
+			+ "a wiped run freezes step() and this arm stops covering anything")
+	var run_a := _run_survivor()
+	var run_b := _run_survivor()
+	for i in run_a.size():
+		Runner.T.eq(run_a[i], run_b[i], "survivor run A/B checksum diverged at sample %d" % i)
+	if SURVIVOR_GOLDEN.is_empty():
+		print("      SURVIVOR GOLDEN CHECKSUMS (record these): ", run_a)
+	else:
+		Runner.T.eq(run_a.size(), SURVIVOR_GOLDEN.size(), "survivor golden sample count")
+		for i in mini(run_a.size(), SURVIVOR_GOLDEN.size()):
+			Runner.T.eq(run_a[i], SURVIVOR_GOLDEN[i],
+				"cross-platform survivor golden mismatch at sample %d — determinism broke" % i)
 
 
 func _run_sim(mode := "campaign") -> Array[int]:

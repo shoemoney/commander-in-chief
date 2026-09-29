@@ -15,6 +15,42 @@ const MainScript := preload("res://src/main.gd")
 const DT := 1.0 / 60.0   # one 60 Hz frame
 
 
+func test_visibility_apertures_follow_both_players_without_changing_simulation() -> void:
+	for count in [1, 2]:
+		var sw := SimWorld.new(3, count, "endless")
+		for i in count:
+			sw.players[i]["x"] = (170 + i * 220) * Fixed.ONE
+			sw.players[i]["y"] = sw.camera_top + (16 + i * 20) * Fixed.ONE
+		var before := sw.checksum()
+		var positions := Hud.visibility_positions(sw)
+		Runner.T.eq(positions[0], Vector2(170, 16), "P1 aperture uses screen coordinates")
+		Runner.T.eq(positions[1], Vector2(390, 36) if count == 2 else Vector2(-1000, -1000),
+			"P2 follows its own position, or is disabled in solo play")
+		sw.players[0]["alive"] = false
+		Runner.T.eq(Hud.visibility_positions(sw)[0], positions[0], "downed body stays findable")
+		sw.players[0]["alive"] = true
+		Runner.T.eq(sw.checksum(), before, "HUD sampling leaves simulation unchanged")
+		var m := MainScript.new()
+		m.sim = sw
+		var hud := Hud.new()
+		hud.main = m
+		var outer := Control.new()
+		var backing := PanelContainer.new()
+		hud.add_child(outer)
+		outer.add_child(backing)
+		hud._sync_visibility()
+		Runner.T.eq(hud.material.get_shader_parameter("player_one"), positions[0],
+			"runtime material receives the actual player position")
+		Runner.T.ok(outer.use_parent_material and backing.use_parent_material,
+			"nested canvas children inherit the same aperture as hand-drawn readouts")
+		sw.players[0]["y"] += 180 * Fixed.ONE
+		hud._sync_visibility()
+		Runner.T.eq(hud.material.get_shader_parameter("player_one"), Vector2(170, 196),
+			"moving away restores the previous HUD location without stale masking")
+		hud.free()
+		m.free()
+
+
 func test_caption_tier_preserves_accessibility_warning_over_screen_danger() -> void:
 	# Same numeric ladder used by main/sfx: lethal=4, player-state=3, objective=2,
 	# teaching=1, flavor=0. Equal lethal copy survives; lower speech yields.
@@ -3776,6 +3812,37 @@ func test_reduced_verb_chip_emits_only_surviving_segments() -> void:
 	h.verb_used("wheel")
 	h._verb_legend()
 	Runner.T.eq(h.ops.size(), 0, "a fully-retired chip draws nothing at all — not even its plate")
+	h.main.free()
+	h.free()
+
+
+func test_verb_chip_tracks_driver_gunner_bail_and_return_to_foot() -> void:
+	var h := _CaptureHud.new()
+	h.main = _VerbMain.new()
+	h.main.sim = SimWorld.new(3, 2)
+	var sw: SimWorld = h.main.sim
+	sw.players[0]["in_tank"] = 0
+	sw.tanks.assign([{"occupant": 0, "burning": false}])
+	h._verb_show = 300.0
+	h._verb_legend()
+	var labels := h.ops.filter(func(op: Dictionary): return op["k"] == "label").map(func(op: Dictionary): return op["id"])
+	Runner.T.eq(labels, ["CANNON", "SUPPLY WHEEL"], "driver reminder names cannon, never unusable roll or hand grenade")
+	var plate := h.verb_chip_rect()
+	for op in h.ops:
+		Runner.T.ok(plate.encloses(op["box"]), "contextual label and glyph stay inside their measured plate")
+	sw.tanks[0]["occupant"] = 1
+	h.ops.clear()
+	h._verb_legend()
+	labels = h.ops.filter(func(op: Dictionary): return op["k"] == "label").map(func(op: Dictionary): return op["id"])
+	Runner.T.eq(labels, ["SUPPLY WHEEL"], "gunner never gets the driver's cannon control")
+	sw.tanks[0]["burning"] = true
+	Runner.T.ok(not h.verb_chip_rect().has_area(), "bail warning replaces optional teaching")
+	sw.players[0]["in_tank"] = -1
+	Runner.T.eq(Hud.verb_active_segs(h._verb_used, sw), Hud.VERB_SEGS, "dismount restores still-untaught foot controls")
+	h.verb_used("roll")
+	Runner.T.ok(not (["roll", "ROLL"] in Hud.verb_active_segs(h._verb_used, sw)), "seat changes do not undo actual teaching retirement")
+	sw.players[0]["alive"] = false
+	Runner.T.ok(not h.verb_chip_rect().has_area(), "downed player gets recovery controls, not combat teaching")
 	h.main.free()
 	h.free()
 

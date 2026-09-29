@@ -22,6 +22,9 @@ extends RefCounted
 ##      dirty on 4 of 6 runs and clean on 2 -- a race, not a leak.
 ## With both, e2e_playthrough and smoke each report ZERO leaked objects on 6 of 6
 ## runs. There is no residual engine floor to exempt.
+## Fixed-FPS capture also substitutes a synthetic delta for SceneTreeTimer. A
+## half-second timer measured only 5ms with accelerated time, so the release
+## deadline must use the monotonic clock, not accumulated engine-frame deltas.
 ##
 ## Usage, from any SceneTree tool, before quit():
 ##     const Quiesce := preload("res://tools/quiesce.gd")
@@ -38,5 +41,9 @@ static func teardown(tree: SceneTree, node: Node) -> void:
 		if n is AudioStreamPlayer or n is AudioStreamPlayer2D or n is AudioStreamPlayer3D:
 			n.stop()
 			n.stream = null
-	await tree.create_timer(AUDIO_DRAIN_SEC).timeout
+	var release_at := Time.get_ticks_msec() + int(ceil(AUDIO_DRAIN_SEC * 1000.0))
+	while Time.get_ticks_msec() < release_at:
+		# Yield to the tree without depending on pause, time_scale or fixed FPS.
+		# The timer only paces polling; the real clock decides when it is safe.
+		await tree.create_timer(0.01, true, false, true).timeout
 	node.free()

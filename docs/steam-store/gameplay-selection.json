@@ -1,0 +1,27 @@
+[
+  {
+    "take": "build/steam-current.pKhThM/sector1",
+    "file": "gameplay-009.png",
+    "name": "01-gate-combat.png"
+  },
+  {
+    "take": "build/steam-current.pKhThM/sector1",
+    "file": "gameplay-011.png",
+    "name": "02-river-approach.png"
+  },
+  {
+    "take": "build/steam-current.pKhThM/sector3",
+    "file": "gameplay-007.png",
+    "name": "03-crossfire.png"
+  },
+  {
+    "take": "build/steam-current.pKhThM/sector5",
+    "file": "gameplay-004.png",
+    "name": "04-explosions.png"
+  },
+  {
+    "take": "build/steam-current.pKhThM/sector6",
+    "file": "gameplay-006.png",
+    "name": "05-last-stand.png"
+  }
+]

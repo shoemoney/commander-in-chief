@@ -1,72 +1,87 @@
-# GodotSteam API version this bridge targets
+# Pinned GodotSteam API and verification scope
 
-`src/steam/steam_bridge.gd` is written against no specific vendored
-GodotSteam build -- this repo does not currently ship the GodotSteam
-GDExtension binary itself (see the SCOPE NOTES in
-`.shoop/specs/steamworks-and-steam-input.txt`; a real `.framework`/`.so`/
-`.dll` is a multi-hundred-MB per-platform binary artifact that doesn't belong
-committed to this repo sight-unseen). Every call to the `Steam` engine
-singleton goes through `SteamBridge._call()`, which checks `has_method()`
-first and `push_warning()`s the exact missing name instead of throwing an
-untested "Invalid call" -- so a version mismatch fails loudly and
-diagnosably instead of silently.
+The bridge targets **GodotSteam 4.22.1 / Steamworks 1.65**. Its method names,
+argument types, and signal shapes were checked against the real Steam singleton
+in the official Godot 4.7.2 macOS module build, not just the hand-written mock.
 
-**What IS exercised today:** `tests/mock_steam_singleton.gd` is a hand-rolled
-GDScript stand-in that implements this exact method surface (see the list
-below) and gets registered as the real `Engine` "Steam" singleton for the
-duration of a handful of `tests/test_steam_bridge.gd` cases. That runs the
-REAL `steam_bridge.gd` code paths -- `_init()`'s init/connect/manifest-stage
-sequence, the `current_stats_received` -> achievement-reconcile flow, the
-`find_or_create_leaderboard` -> `leaderboard_find_result` ->
-`upload_leaderboard_score` -> `leaderboard_score_uploaded` round trip, and
-both players' action-handle button/trigger reads -- instead of only ever
-hitting the `_steam == null` early-return every other test in that file
-covers. It is NOT the real GodotSteam binding: it proves `steam_bridge.gd`'s
-own call sequencing and callback wiring are internally consistent, not that
-the method names/signal shapes below match a specific real GodotSteam
-release. That last mile still needs the real GDExtension installed once.
+## Pin and primary evidence
 
-**When vendoring the real GodotSteam GDExtension**, record the exact version
-here (release tag + godotsteam.com docs link) and diff `steam_bridge.gd`'s
-method names against that version's actual API surface before shipping:
-`steamInitEx`, `request_current_stats`, `get_achievement`, `set_achievement`,
-`store_stats`, `find_or_create_leaderboard`, `upload_leaderboard_score`,
-`set_rich_presence`, `set_input_action_manifest_file_path`,
-`get_connected_controllers`, `get_action_set_handle`, `activate_action_set`,
-`get_analog_action_handle`, `get_analog_action_data`,
-`get_digital_action_handle`, `get_digital_action_data`, `run_callbacks`.
-`_call()`'s warnings will also flag any that don't match the moment the game
-runs with Steam present -- and `tests/mock_steam_singleton.gd` should get its
-method signatures corrected to match at the same time, so the mock stays a
-useful regression harness instead of quietly drifting from reality.
+- [Official release](https://codeberg.org/godotsteam/godotsteam/releases/tag/v4.22.1)
+- [Pinned binding source](https://codeberg.org/godotsteam/godotsteam/src/commit/5853a7741d174cfa37edee1ca44a11581a989d0b/godotsteam.cpp)
+- [Official macOS archive](https://github.com/GodotSteam/GodotSteam/releases/download/v4.22.1/macos-g472-s165-gs4221-editor.tar.xz)
+- Verified archive SHA-256:
+  `ea4cfd17e3b6afe5e8e7fbc0fb49f92a871256a45d7751cfa114847f525b9c86`
 
-**Signal handler arg counts** (`_on_stats_received`, `_on_leaderboard_found`,
-`_on_leaderboard_uploaded`) are documented individually above each handler
-in `steam_bridge.gd`, along with why every param defaults so a leaner
-emitted-arg-count from a real vendored build can't error the callback pump.
-Re-check those doc comments against the vendored build's actual signal
-signatures at the same time.
+The downloaded engine lives under ignored `build/godotsteam-4.22.1/`; it did not
+replace the installed editor, modify project autoloads, or become a vendored
+runtime dependency. The probe does **not** initialize Steam, request account
+data, upload scores, set achievements, or change the Steam client.
 
-**Steam Input status:** both players' `fire` (AnalogTrigger) and all five
-Button actions (`grenade`/`roll`/`interact`/`revive`/`buy`) now read through
-the action-handle API in `main.gd`'s `_gather_inputs()`, ORed with the
-existing raw `Input`/`pad_pressed()` reads so nothing regresses when Steam
-Input isn't active. `move`/`aim` stay on raw joystick axes -- they're
-`StickPadGyro` motion actions in `actions.vdf` and don't need the handle API
-to satisfy Deck Verified (gyro aim would be the reason to migrate them,
-and nothing in this game uses gyro). Both P1 and P2 controller handles are
-resolved in `_refresh_action_handles()`. None of this blocks Deck Verified
-today since the *manifest* is staged and active (glyphs + rebinding already
-work through Steam's own overlay/config) even before a real binary is
-vendored.
+## Repaired mismatches
 
-**`assets/input/actions.vdf` validation:** without the Steamworks SDK (or a
-vendored GodotSteam binary that can load it), `test_steam_bridge.gd`'s
-`test_actions_vdf_is_well_formed_keyvalues()` runs a small hand-rolled
-KeyValues/VDF balance-checker (matched quotes, matched braces) over the file
-and confirms every action name `steam_bridge.gd`/`main.gd` expect is actually
-declared in it. That is NOT the real Steam manifest parser and won't catch
-every rule the Big Picture / Deck overlay enforces (e.g. localization-token
-resolution, per-controller-type glyph mapping) -- run the manifest through
-the actual Steamworks SDK controller config tester once a Steamworks app ID
-and the SDK are available.
+The original real-binding probe failed on fifteen method names and
+`current_stats_received`. Most methods in this release are camelCase
+(`getAchievement`, `storeStats`, `getConnectedControllers`, etc.);
+`run_callbacks` remains snake_case.
+
+- The bridge uses `requestUserStats(getSteamID())` and
+  `user_stats_received(game_id, result, user_id)` for its explicit offline-cache
+  reconciliation refresh. Only EResult OK (1) for the requested account permits
+  reconciliation. Failed and other-user responses do not.
+- `requestCurrentStats` is no longer exposed by this binding. Valve documents
+  it as deprecated because current-user stats are preloaded before launch.
+  Our explicit refresh is bridge policy, not a Steam initialization requirement.
+  See [ISteamUserStats](https://partner.steamgames.com/doc/api/ISteamUserStats#RequestCurrentStats).
+- Steam Input is explicitly initialized. Failed manifest staging or input
+  initialization leaves the existing raw-input fallback active.
+- Digital action dictionaries use `state` and `active`; analog actions also
+  report `active`. Inactive actions cannot trigger firing or button presses.
+- `uploadLeaderboardScore` receives `PackedInt32Array` details. Its callback
+  consumes all three native arguments: success, handle, and result dictionary.
+
+The mock matches the pinned names and typed argument surface, but still
+simulates callbacks and controllers. It is not a network or hardware test.
+
+## Repeat the real-binding check
+
+Use the official module engine in an isolated profile. Plain Godot must fail
+this probe because it has no real Steam singleton.
+
+```sh
+rtk proxy env \
+  GDA_GODOT="$PWD/build/godotsteam-4.22.1/GodotSteam.app/Contents/MacOS/Godot" \
+  GDA_PROJECT="$PWD" \
+  STEAM_API_REPORT="$PWD/build/godotsteam-4.22.1/api-after.json" \
+  gda --user-data-root "$PWD/build/godotsteam-4.22.1/probe-profile" \
+  script run res://tools/verify_godotsteam_api.gd --strict --json
+```
+
+Require `GODOTSTEAM API PASS missing=[]`, zero exit status, and no runtime
+errors. The report contains native method/signal metadata. The probe compares
+the mock's method argument counts/types and connected signal counts/types
+with the real engine. This is a surface check, not a full semantic validator.
+
+## Remaining release gates
+
+- Matching module templates are now installed separately and used by explicit
+  Steam macOS/Linux/Windows presets. See `steam-candidate-validation.md` for
+  archive/file pins, the sidecar-copying builder and actual candidate evidence.
+  The exact exported Mac release binary passes a separate names/signals probe;
+  this is not full game execution or live account validation. Windows/Linux
+  runtime execution and native argument/type inspection remain open.
+- Exercise initialization, stats/achievement persistence, uploads and presence
+  against the intended app/account. No live account was used in this pass.
+- Validate `actions.vdf` with the actual Steam Input configuration/parser;
+  the existing quote/brace checker cannot prove acceptance.
+- Verify physical controller ordering, reconnect, rebinding, glyphs, raw-input
+  coexistence, and both-player behavior. Automatic device-callback refresh now
+  has mock regression coverage: late connections, stale-input removal,
+  replacement handles, stable surviving seats and batched duplicate events.
+  This proves the bridge/pump wiring, not physical hardware behavior or the
+  raw-device mapping. Move/aim still use raw axes.
+- Achievement-cache separation and fresh-process persistence now have local
+  regression coverage (see `steam_cloud_paths.md`). Verify live account behavior,
+  Cloud conflicts and the remaining OS-profile-scoped bests/settings/replays.
+- Test native builds on Windows, macOS, Linux, Proton and Steam Deck.
+
+No Steam Deck certification, store approval, upload, or publication is claimed.

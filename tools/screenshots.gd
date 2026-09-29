@@ -123,6 +123,7 @@ func _run() -> void:
 			continue
 		digests[digest] = path
 		print("SAVED %s (colors=%d stddev=%.2f)" % [path, st["colors"], st["stddev"]])
+	await preload("res://tools/quiesce.gd").teardown(self, main)
 	if failures > 0:
 		push_error("screenshots: %d of %d shots are unusable — refusing to report success" % [failures, shots.size()])
 		print("SHOTS UNUSABLE — %d of %d failed; do not hand these to a reviewer" % [failures, shots.size()])
@@ -263,6 +264,11 @@ func _dress_river(m: Node2D) -> void:
 	m._dust_prev[0] = Vector2i(q["x"] - 3 * F, q["y"] - 5 * F)
 	var q2: Dictionary = m.sim.players[1]
 	m._dust_prev[1] = Vector2i(q2["x"] + 4 * F, q2["y"] - 4 * F)
+	# Animation no longer consumes the dust cache on repaint. Seed its own
+	# previous-tick samples so this frozen QA pose retains the intended wakes.
+	for i in m.sim.players.size():
+		m._player_motion[i] = {"entity": m.sim.players[i], "position": m._dust_prev[i],
+			"tick": m.sim.tick_count - 1, "delta": Vector2.ZERO}
 
 
 func _cam(sim: SimWorld, offset_px: int) -> int:

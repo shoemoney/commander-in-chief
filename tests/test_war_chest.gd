@@ -89,7 +89,7 @@ func test_buy_is_edge_triggered() -> void:
 	buy.buy = 2   # kind 1 = grenades
 	for i in 10:
 		sim.step([buy])
-	Runner.T.eq(sim.war_chest, 500 - SimWorld.SHOP_GRENADE_COST, "held buy purchased once")
+	Runner.T.eq(sim.war_chest, 500 - (SimWorld.SHOP_GRENADE_COST + 3) / 4, "held buy purchased one grenade once")
 
 
 func test_partial_buy_announces_what_it_delivered() -> void:
@@ -108,6 +108,22 @@ func test_partial_buy_announces_what_it_delivered() -> void:
 		if ev.get("t") == "buy":
 			got = int(ev.get("n", -1))
 	Runner.T.eq(got, 1, "the buy event carries the quantity actually delivered, not the catalogue 4")
+	Runner.T.eq(sim.war_chest, 500 - (SimWorld.SHOP_GRENADE_COST + 3) / 4,
+		"partial stock debits only the delivered fraction, rounded up")
+	var p: Dictionary = sim.players[0]
+	for stock in range(SimWorld.MG_AMMO_MAX + 1):
+		p["mg_ammo"] = stock
+		var delivered := mini(30, SimWorld.MG_AMMO_MAX - stock)
+		var expected: int = (sim._supply_cost(0) * delivered + 29) / 30
+		Runner.T.eq(sim.supply_price(p, 0), expected, "ammo quote matches available headroom")
+		Runner.T.eq(sim.supply_price(p, 0, 0), 0, "free stock remains free")
+	p["mg_ammo"] = 98
+	sim.war_chest = 1
+	sim.pickups.clear()
+	sim.pickups.append({"x": p["x"], "y": p["y"], "kind": 0, "cost": 30})
+	sim._collect_pickups(p, 0)
+	Runner.T.eq(p["mg_ammo"], 99, "partial crate is affordable at its quoted price")
+	Runner.T.eq(sim.war_chest, 0, "crate debits the same quote as the wheel")
 	Runner.T.eq(sim.players[0]["grenade_ammo"], SimWorld.GRENADE_AMMO_MAX, "the top-up still landed")
 	var ms: Script = load("res://src/main.gd")
 	# Singular: the COUNT was already honest here, the NOUN was not — a clamped top-up of one

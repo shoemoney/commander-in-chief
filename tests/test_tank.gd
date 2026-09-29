@@ -84,6 +84,70 @@ func test_cannon_draws_grenade_ammo() -> void:
 	Runner.T.ok(sim.grenades.size() == 1 and sim.grenades[0]["shell"], "shell projectile spawned")
 
 
+func _cannon_denials(sim: SimWorld) -> Array:
+	return sim.events.filter(func(ev: Dictionary): return ev.get("t") == "cannon_deny")
+
+
+func test_cannon_denial_names_the_actual_refusal_and_never_repeats_a_hold() -> void:
+	var sim := SimWorld.new(3, 1)
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	var press := SimInput.new()
+	press.grenade = true
+	for reason in ["empty", "cooldown"]:
+		sim.step([_idle()])
+		p["grenade_ammo"] = 0 if reason == "empty" else 2
+		tank["fire_cd"] = 0 if reason == "empty" else 1
+		var ammo: int = p["grenade_ammo"]
+		sim.step([press])
+		var denied := _cannon_denials(sim)
+		Runner.T.eq(denied.size(), 1, "each refused cannon edge emits one cue")
+		if not denied.is_empty():
+			Runner.T.eq(denied[0].get("reason"), reason, "cue names the resolved refusal")
+			Runner.T.eq(denied[0].get("i"), 0, "cue belongs to the driver")
+		Runner.T.eq(p["grenade_ammo"], ammo, "refusal consumes no ammo")
+		sim.step([press])
+		Runner.T.eq(_cannon_denials(sim).size(), 0, "held input does not repeat a refused edge")
+	# At zero cooldown, the next distinct press succeeds with no denial.
+	sim.step([_idle()])
+	sim.step([press])
+	Runner.T.eq(_cannon_denials(sim).size(), 0, "successful shot has no denial")
+	Runner.T.eq(p["grenade_ammo"], 1, "ready cannon fires normally")
+
+
+func test_cannon_denial_does_not_override_bail_or_gunner_controls() -> void:
+	var sim := SimWorld.new(3, 2)
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board_two(sim, tank)
+	for player in sim.players:
+		player["grenade_ammo"] = 0
+	var press := SimInput.new()
+	press.grenade = true
+	sim.step([_idle(), press])
+	Runner.T.eq(_cannon_denials(sim).size(), 0, "gunner has no cannon and no cannon warning")
+	press.interact = true
+	sim.step([press, _idle()])
+	Runner.T.eq(p["in_tank"], -1, "bail still wins simultaneous cannon press")
+	Runner.T.eq(_cannon_denials(sim).size(), 0, "bail is not a failed cannon shot")
+
+
+func test_cannon_denial_uses_post_purchase_ammo() -> void:
+	var sim := SimWorld.new(3, 1)
+	var p := sim.players[0]
+	var tank := _park_tank(sim, p["x"], p["y"])
+	_board(sim, tank)
+	p["grenade_ammo"] = 0
+	sim.war_chest = 1000
+	var press := SimInput.new()
+	press.buy = 2
+	press.grenade = true
+	sim.step([press])
+	Runner.T.ok(sim.events.any(func(ev: Dictionary): return ev.get("t") == "tank_shot"), "same-tick refill can fund the cannon")
+	Runner.T.eq(_cannon_denials(sim).size(), 0, "pre-purchase empty stock cannot cause a false denial")
+
+
 func test_cannon_ignores_always_fire_and_is_edge_triggered() -> void:
 	## THE grenade-incinerator regression. ALWAYS-FIRE pins inp.fire permanently true, so
 	## a cannon on the fire verb emptied all 12 grenades in ~8 s of a 20 s ride and the

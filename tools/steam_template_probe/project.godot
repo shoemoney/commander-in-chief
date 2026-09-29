@@ -1,0 +1,12 @@
+config_version=5
+
+[application]
+config/name="CIC Steam template inspection"
+run/main_scene="res://main.tscn"
+
+[steam]
+initialization/processes/initialize_on_startup=false
+initialization/processes/embed_callbacks=false
+
+[rendering]
+renderer/rendering_method="gl_compatibility"

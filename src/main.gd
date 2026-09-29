@@ -252,7 +252,8 @@ var _result_t := 0.0             # debrief/victory card entrance ease (0→1)
 var _enemy_face := {}            # per-slot smoothed facing (view-only; kills the 180° snap)
 var _enemy_hp_prev := {}         # a2-11: per-slot prev hp — edge-detects a non-lethal hit
 var _enemy_flash := {}           # a2-11: per-slot decaying white hit-flash
-var _enemy_pos_prev := {}        # per-slot prev sim pos — gates the run-bob to actual movement
+var _enemy_pos_prev := {}        # per-slot, per-sim-tick motion samples (redraw-safe)
+var _player_motion := {}         # separate from dust emission; drawing cannot consume a stride
 var _enemy_slot_kind := {}       # per-slot kind stamp — the sim compacts with remove_at, so a
                                  # slot can be inherited by a different enemy; a kind mismatch
                                  # drops the stale face/prev-pos instead of lerping out of them
@@ -277,6 +278,7 @@ var _water_pushed: Array = []             # per pool rect: [band world-y, wsoot,
 var _bg_root: Node2D                 # opaque grass/dirt base (z=-2, under the water quads)
 var _bg_cam := -1                    # last (camera_top, march) painted onto _bg_root —
 var _bg_march := -1.0                # its ~90-rect rebuild is a pure function of these
+var _bg_sim: SimWorld = null         # replacing a run invalidates retained terrain, even at the same camera
 var _litter_cam_snap := 1 << 60      # camera_top when the march last stepped — litter rows south
 var _litter_march_prev := 0.0        # of it keep the pre-step pool (no on-screen prop identity swap)
 var _glow_root: Node2D               # additive blend pass: light-emitting FX brighten, never tint
@@ -630,7 +632,14 @@ var _splash_keyart: Texture2D      # the hero key-art poster, revealed on beat 4
 var _splash_vo_fired := false      # latch: fire the crawl narration once as the crawl beat begins
 
 
+var _quitting := false
+var _previous_auto_accept_quit := true
+const QUIT_AUDIO_DRAIN_SECONDS := 0.5
+
+
 func _ready() -> void:
+	_previous_auto_accept_quit = get_tree().auto_accept_quit
+	get_tree().auto_accept_quit = false
 	# draw_texture_rect(tile=true) silently edge-clamps unless the canvas item
 	# enables repeat — the 640px river banks were one stretched sand column.
 	texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
@@ -1818,6 +1827,7 @@ func _reset() -> void:
 	_tank_turret.clear()
 	_enemy_face.clear()
 	_enemy_pos_prev.clear()
+	_player_motion.clear()
 	_enemy_slot_kind.clear()
 	_enemy_hp_prev.clear()
 	_enemy_flash.clear()
@@ -2207,10 +2217,33 @@ func _flush_bests() -> void:
 		_seen_dirty = false
 
 
+func request_quit() -> void:
+	if _quitting or not is_inside_tree():
+		return
+	_quitting = true
+	# Stop gameplay before audio; no new shot/menu cue may start during drain.
+	process_mode = Node.PROCESS_MODE_DISABLED
+	_sfx.shutdown_audio()
+	if _resize_save_t > 0.0:
+		_resize_save_t = 0.0
+		if _menu == null or not _menu._opts_dirty:
+			_save_settings()
+	_flush_bests()
+	var tree := get_tree()
+	# AudioServer releases stopped voices on its own thread. Ignore pause and
+	# time scale so closing a paused/frozen game cannot strand the application.
+	await tree.create_timer(QUIT_AUDIO_DRAIN_SECONDS, true, false, true).timeout
+	tree.quit()
+
+
 func _exit_tree() -> void:
+	get_tree().auto_accept_quit = _previous_auto_accept_quit
 	_flush_bests()
 	if _replay_task != -1:
 		WorkerThreadPool.wait_for_task_completion(_replay_task)
+	# Input retains the generated cursor independently of this scene. Release it
+	# before RenderingServer shuts down, including rendered verification tools.
+	Input.set_custom_mouse_cursor(null)
 
 
 func _notification(what: int) -> void:
@@ -2244,6 +2277,9 @@ func _notification(what: int) -> void:
 			# save in this rare edge (resize, then edit OPTIONS, then focus out) is the safe trade.
 			if _menu == null or not _menu._opts_dirty:
 				_save_settings()
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		request_quit()
+		return
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
 		var splash_up := _splash_layer != null and _splash_layer.visible
 		# A focus notification can arrive while the scene is still entering the tree,
@@ -2697,6 +2733,14 @@ func _consume_events() -> void:
 			if _menu.mode == GameMenu.Mode.HIDDEN and _splash_t <= 0.0:
 				_sfx.caption_sfx(kind)
 		match kind:
+			"cannon_deny":
+				var pi := int(ev["i"])
+				if Engine.get_physics_frames() - _dry_grenade_frame[pi] >= 14:
+					_dry_grenade_frame[pi] = Engine.get_physics_frames()
+					var empty: bool = ev["reason"] == "empty"
+					# Reuse the on-foot refusal grammar, with a per-seat throttle.
+					_sfx.play("tank_board", -12.0 if empty else -16.0, 2.4 if empty else 1.6)
+					_grenade_dry[pi] = 12 if empty else 8
 			"bullet_dirt":
 				# Spent rounds kick dirt (or a splash) where they land — bullets
 				# used to just vanish mid-field. Silent by design (whiz covers
@@ -3194,26 +3238,38 @@ func _consume_events() -> void:
 				# Name the cause at the body while the directional wedge preserves
 				# where it came from. One compact line survives muted audio and does
 				# not wait for the debrief to explain a one-hit loss.
-				if not death_cause.is_empty():
-					_loss_sting(ev, "DOWNED — %s" % death_cause)
-				# force: the death beat interrupts any "hit" bark just fired above — but NOT when
-				# the run is ending this same tick. "Man down!" is the small line; the wipe call
-				# is the big one, and it loses the channel if this starts first.
-				if not wiping_now:
-					_cmd_bark("down", 0, true)
-				_hint("revive", TranslationServer.translate("FEED THE WAR CHEST TO REVIVE — [%s]") % (Art.pad_button_label(pad_bind_for_glyph("revive")) if Art.use_pad else GameMenu.key_label(bind("revive"))), true)
-				# The two GLOBAL costs of a body — one burned Commendation and the broken clean-gate
-				# streak — used to be taken in total silence, and the token chip simply popped out of
-				# the head bar. Sting them HERE, at the body, which is where the sim takes them. (The
-				# LOADOUT strip is stung at the REVIVE instead: that is the tick _respawn deletes it.)
+				#
+				# The two GLOBAL costs of a body — one burned Commendation and the broken
+				# clean-gate streak — are billed on the SAME line. They are taken HERE, at
+				# the body, which is where the sim takes them (the LOADOUT strip is stung at
+				# the REVIVE instead: that is the tick _respawn deletes it) — but they used
+				# to arrive as a SECOND
+				# _loss_sting on the same event at the same ev["x"]/ev["y"] on the same
+				# tick, so one knockdown put two red plates on one body and the arbiter
+				# was handed a stack it never needed to arbitrate. Precedent and reasoning
+				# are already in this file: _loss_summary exists because "seven
+				# simultaneous red receipts hid the revived player... so the battlefield
+				# gets one concise bill". The knockdown beat never got that treatment.
 				var down_token := int(ev.get("token", 0))
 				var down_streak := int(ev.get("streak", 0))
 				if down_token > 0:
 					_token_loss_t = 1.0   # ...and hold the head chip that just hit zero (hud._token_chip)
 				var down_summary := _down_loss_summary(down_token, down_streak)
 				if not down_summary.is_empty():
-					_loss_sting(ev, down_summary)
 					_sfx.play("deny", -5.0, 0.7)
+				if not death_cause.is_empty() or not down_summary.is_empty():
+					var down_bill := ("DOWNED — %s" % death_cause) if not death_cause.is_empty() else "DOWNED"
+					if not down_summary.is_empty():
+						down_bill += " · " + down_summary
+					_loss_sting(ev, down_bill)
+				# force: the death beat interrupts any "hit" bark just fired above — but NOT when
+				# the run is ending this same tick. "Man down!" is the small line; the wipe call
+				# is the big one, and it loses the channel if this starts first.
+				if not wiping_now:
+					_cmd_bark("down", 0, true)
+				var recovery_hint := _recovery_hint_text()
+				if not recovery_hint.is_empty():
+					_hint("revive", recovery_hint, true)
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "smoke"})
 				# Directional death-gore: the felling round's exit spray carries
 				# past the body, opposite the threat the wedge (_hit_dir) marks.
@@ -4228,30 +4284,42 @@ func _ev_kill(ev: Dictionary) -> void:
 	var sstreak: int = sim.kill_streak
 	if sstreak < _streak_popped:
 		_streak_popped = 0
-	if sstreak != _streak_popped and (sstreak == 5 or sstreak == 10 or sstreak == 20):
-		_streak_popped = sstreak
+	# Events arrive after the complete sim step: a multi-kill can cross 5/10/20
+	# without ending on it. Celebrate the highest earned tier once, not equality.
+	var milestone := 20 if sstreak >= 20 else 10 if sstreak >= 10 else 5 if sstreak >= 5 else 0
+	if milestone > _streak_popped:
+		_streak_popped = milestone
 		_cmd_bark("streak", 60)   # Commander gloats at a kill-streak milestone
-		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-			"rate": 0.02, "text": "x%d STREAK" % sstreak, "col": Color(1.0, 0.75, 0.3)})
-		# The sim awards a real +25/50/100% score bonus at these tiers, but only
-		# the 20-streak ever FELT it. Pop the earned bonus as a bold gold headline
-		# + a brief white flash so hitting 5 and 10 read as milestones, not noise.
-		var streak_bonus := 25 if sstreak == 5 else 50 if sstreak == 10 else 100
-		_fx.append({"x": ev["x"], "y": ev["y"] - 12, "t": -0.14, "kind": "floattext",
-			"rate": 0.016, "size": 13, "text": "+%d%%!" % streak_bonus, "col": Color(1.0, 0.92, 0.4)})
+		# One milestone, one receipt: keep the earned tier and bonus together,
+		# instead of stacking two oversized plates across the same firefight.
+		_streak_receipt(ev["x"], ev["y"], milestone)
 		# a1-12 VFX#8: a LOCALIZED gold bloom at the kill instead of a whole-screen
 		# white flash — the milestone pops without strobing the whole frame mid-fight.
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.05,
-			"r": 32.0 + float(sstreak) * 1.4, "col": Color(1.0, 0.82, 0.35)})
+			"r": 32.0 + float(milestone) * 1.4, "col": Color(1.0, 0.82, 0.35)})
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_circle",
 			"sz": 16.0, "grow": 1.1, "fade": 1.2, "rate": 0.05, "col": Color(1.0, 0.85, 0.4, 0.6)})
-		_sfx.play("buy_fanfare", -8.0, 0.9 + sstreak * 0.015)   # a2-16: kill-streak milestone
+		_sfx.play("buy_fanfare", -8.0, 0.9 + milestone * 0.015)   # a2-16: kill-streak milestone
 	# Big bounties get a coin moment; rusher pennies would be spam.
 	if big:
 		_coin_pop(ev["x"], ev["y"], "+%d¢" % ev["coin"], 3, FLOAT_INK_COIN, 0.025)
 	# A downed gunship is a finale, not a kill blip — ripple it apart.
 	if kkind == "boss":
 		_boss_death_finale(ev["x"], ev["y"])
+
+
+func _streak_receipt(x: int, y: int, streak: int) -> void:
+	if not [5, 10, 20].has(streak):
+		return
+	# A rapid tier upgrade replaces its older receipt, not unrelated rewards,
+	# loss messages, or warnings. Identity is semantic, never a text match.
+	for i in range(_fx.size() - 1, -1, -1):
+		if _fx[i].get("kind", "") == "floattext" and _fx[i].get("role", "") == "streak":
+			_fx.remove_at(i)
+	var bonus := 25 if streak == 5 else 50 if streak == 10 else 100
+	_fx.append({"x": x, "y": y, "t": 0.0, "kind": "floattext", "role": "streak",
+		"rate": 0.02, "size": 10, "text": "x%d STREAK +%d%%" % [streak, bonus],
+		"col": Color(1.0, 0.92, 0.4)})
 
 
 func _tick_spawn_yells() -> void:
@@ -5637,6 +5705,36 @@ func _check_smoke_edges() -> void:
 		_smoke_prev[i] = st
 
 
+func _recovery_hint_text() -> String:
+	# Read current rules, not the death-tick snapshot: a co-op partner can earn
+	# or spend the shared chest, recover, or fall while this teaching is visible.
+	if sim == null or sim.victory or sim.wiped:
+		return ""
+	for i in sim.players.size():
+		var p: Dictionary = sim.players[i]
+		if p["alive"]:
+			continue
+		if sim.last_stand:
+			return TranslationServer.translate("LAST STAND — NO REVIVES")
+		var cost: int = sim.revive_cost(p)
+		if sim.standups_exhausted() or sim.war_chest < cost:
+			if sim.rally_is_free():
+				return TranslationServer.translate("NO COIN NEEDED — RALLYING AT CHECKPOINT")
+			return TranslationServer.translate("NO REINFORCEMENTS — LAST BREATH") if sim.standups_exhausted() \
+				else TranslationServer.translate("CHEST TOO LOW — LAST BREATH")
+		var cap := Art.pad_button_label(pad_bind_for_glyph("revive", i)) if Art.use_pad or i == 1 \
+			else GameMenu.key_label(bind("revive"))
+		var prompt := TranslationServer.translate("%d¢ TO REVIVE — [%s]") % [cost, cap]
+		return ("P%d: " % (i + 1) + prompt) if sim.players.size() > 1 else prompt
+	return ""
+
+
+func _visible_hint_text() -> String:
+	# Keep the existing once-per-profile teaching window, but never display a
+	# stale promise or let an already-resolved recovery hide the next objective.
+	return _recovery_hint_text() if _hint_id == "revive" else _hint_text
+
+
 func _hint(id: String, text: String, urgent := false) -> void:
 	# Fire a just-in-time onboarding cue the FIRST time ever, then never again.
 	# Never during attract mode — the demo bot would burn every hint to disk
@@ -5694,6 +5792,14 @@ func _start_next_hint() -> void:
 	_hint_id = _hint_queue_ids.pop_front() if not _hint_queue_ids.is_empty() else ""
 	_hint_tier = _hint_queue_tiers.pop_front() if not _hint_queue_tiers.is_empty() else PresentationTier.TEACHING
 	_hint_t = _hint_queue_times.pop_front() if not _hint_queue_times.is_empty() else 1.0
+	if _hint_id == "revive" and _recovery_hint_text().is_empty():
+		# Recovery can finish while a lethal warning owns the teaching slot.
+		# Skip obsolete queued advice without recording it as delivered.
+		_hint_pending.erase(_hint_id)
+		_hint_id = ""
+		_hint_text = ""
+		_hint_t = 0.0
+		return
 	# Persist delivery, not enqueue. A hint suppressed until debrief/quit was never read.
 	if not _hint_id.is_empty():
 		_hint_pending.erase(_hint_id)
@@ -5851,6 +5957,12 @@ func _step_banner_readable_time(presentation_winner: String) -> void:
 
 
 func _step_hint_readable_time(presentation_winner: String) -> void:
+	if _hint_id == "revive" and _recovery_hint_text().is_empty():
+		# A resolved hint is finished, not merely suppressed: preserving its
+		# unread timer would strand queued teaching and revive it on the next death.
+		_hint_id = ""
+		_hint_text = ""
+		_hint_t = 0.0
 	if presentation_winner == "hint" and not _debrief and not sim.victory:
 		_hint_t = maxf(0.0, _hint_t - 0.006)
 	if _hint_t <= 0.02 and not _hint_queue.is_empty():
@@ -7295,7 +7407,7 @@ func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2(cr, cr), Vector2(cr, cr) * 2.0),
 			false, Color(0.03, 0.02, 0.02, 0.5))
 	var tint := mod * Art.tint(style_key)
-	draw_set_transform(pos.round(), angle, Vector2(s * x_stretch, s * stretch))
+	draw_set_transform(pos.round(), Art.facing_rotation(style_key, angle), Vector2(s * x_stretch, s * stretch))
 	var origin := -t.get_size() / 2.0
 	if with_rim and Art.outlined(style_key):
 		# 1.4px screen-space dark rim so units/vehicles read on any ground.
@@ -7342,6 +7454,30 @@ func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
 
 func _aim_angle(p: Dictionary) -> float:
 	return atan2(p["aim_y"] * PX, p["aim_x"] * PX)
+
+
+static func sample_character_motion(cache: Dictionary, slot: int, entity: Dictionary,
+		tick: int) -> Vector2:
+	# Repainting the same sim tick (resize, pause, hitstop, capture) must return
+	# the SAME stride, not consume travel and switch the next repaint to idle.
+	# Entity identity also prevents a compacted enemy slot inheriting its neighbor's motion.
+	var now := Vector2i(entity["x"], entity["y"])
+	var delta := Vector2.ZERO
+	if cache.has(slot):
+		var prev: Dictionary = cache[slot]
+		if is_same(prev["entity"], entity):
+			if tick == prev["tick"]:
+				return prev["delta"]
+			if tick > prev["tick"]:
+				delta = Vector2(now - prev["position"])
+	cache[slot] = {"entity": entity, "position": now, "tick": tick, "delta": delta}
+	return delta
+
+
+static func character_anim_phase(tick: int, ticks_per_pose: int, slot: int, motion: float) -> int:
+	# Use game time, not the engine's ever-running clock: hitstop and pause freeze
+	# the pose, and a restart/replay begins at the same cadence regardless of menu time.
+	return 0 if motion < 0.5 else (int(tick / ticks_per_pose) + slot) & 1
 
 
 static func player_anim_state(p: Dictionary, move_delta: Vector2, concealed: bool,
@@ -7774,26 +7910,59 @@ func _hulk_sim_cover(h: Dictionary) -> bool:
 	return false
 
 
-func _draw_ready_tally() -> void:
-	## 2P shop skip is unanimous. Holding alone used to look like a dead bind.
-	if sim.mode != "endless" or sim.intermission_ticks <= 0 or sim.players.size() < 2:
-		return
+func _ready_tally_state() -> Dictionary:
+	## Solo gets the same live hold feedback as co-op. Rescue always takes priority.
+	if sim.mode != "endless" or sim.intermission_ticks <= 0 or sim.players.is_empty():
+		return {}
 	if _last_inputs.size() < sim.players.size():
-		return
+		return {}
 	var living := 0
 	var holding := 0
 	for i in sim.players.size():
 		if not sim.players[i]["alive"]:
-			continue
+			return {}   # the sim's ready vote is invalid while anyone needs rescue
 		living += 1
 		if i < _last_inputs.size() and (_last_inputs[i] as SimInput).revive:
 			holding += 1
-	if living < 2 or holding <= 0:
-		return
+	if holding <= 0:
+		return {}
 	var txt := "READY %d/%d — BOTH HOLD TO DEPLOY" % [holding, living]
 	if holding >= living:
 		txt = "READY %d/%d — DEPLOYING" % [holding, living]
-	Art.text_center(self, txt, 320, 54, 9, Color(1.0, 0.92, 0.55))
+	var seats: Array[String] = []
+	for i in sim.players.size():
+		var pressed: bool = _last_inputs[i].revive
+		seats.append("P%d %s" % [i + 1, "READY" if pressed else "HOLD REVIVE"])
+	var detail := " / ".join(seats)
+	if living == 1:
+		txt = "READY — DEPLOYING"
+		detail = "RELEASE TO KEEP SHOPPING"
+	return {"title": txt, "detail": detail,
+		"progress": clampf(float(sim.ready_hold) / float(SimWorld.READY_HOLD_TICKS), 0.0, 1.0)}
+
+
+func _draw_ready_tally() -> void:
+	var state := _ready_tally_state()
+	if state.is_empty():
+		return
+	var txt: String = state["title"]
+	var detail: String = state["detail"]
+	var title_size := Art.fs(9)
+	var detail_size := Art.fs(8)
+	var title_y := title_size + 2.0
+	var detail_y := title_y + detail_size + 4.0
+	var bar_y := detail_y + 4.0
+	var width := maxf(Art.tw(txt, title_size), Art.tw(detail, detail_size)) + 12.0
+	var slot := claim_label_slot(Rect2(320 - width / 2.0, 43, width, bar_y + 6.0), _label_slots,
+		0.0, false, _label_rail_ceiling, _label_safe_l, _label_safe_r)
+	_label_slots.append(slot)
+	draw_rect(slot, LABEL_PLATE_FILL)
+	var center := slot.get_center().x
+	Art.text_center(self, txt, center, slot.position.y + title_y, title_size, Color(1.0, 0.92, 0.55))
+	Art.text_center(self, detail, center, slot.position.y + detail_y, detail_size, Color.WHITE)
+	var progress: float = state["progress"]
+	draw_rect(Rect2(center - 60, slot.position.y + bar_y, 120, 3), Art.PRINT_INK)
+	draw_rect(Rect2(center - 60, slot.position.y + bar_y, 120 * progress, 3), Color(1.0, 0.92, 0.55))
 
 
 func _draw() -> void:
@@ -7843,6 +8012,12 @@ func _draw() -> void:
 	for r in rail:
 		_label_slots.append(r)
 	_label_rail_ceiling = label_rail_ceiling(rail)
+	# ...and the VISIBLE horizontal band the LABEL_EDGE_MARGIN is measured from. Same
+	# discipline as the rail ceiling: resolved once, off the production seam, so the margin
+	# and the pixels it protects can never name different edges.
+	var _lsafe := _safe_band_rect()
+	_label_safe_l = _lsafe.position.x
+	_label_safe_r = _lsafe.position.x + _lsafe.size.x
 	_wash_load = 0.0   # fresh full-frame wash budget every frame (see WASH_CAP)
 	# Position the water shader quads under the world and requeue the grass base.
 	# Driven from _draw (not _process) so it also runs under the screenshot harness,
@@ -7850,22 +8025,7 @@ func _draw() -> void:
 	# lag on _bg_root's requeue only affects decorative grass tiling — the water
 	# quads themselves are positioned in-frame here, so they stay aligned to units.
 	_sync_water()
-	if _bg_root != null:
-		# _paint_bg is a pure function of (camera_top, sector march): skip the
-		# ~90-rect grass/dirt rebuild whenever the camera is parked (wave fights,
-		# pause, debrief) and no gate/wave advanced — its retained canvas
-		# commands re-render as-is. _glow_root stays per-frame (animated FX).
-		var march := _sector_march()
-		if sim.camera_top != _bg_cam or march != _bg_march:
-			if march != _bg_march:
-				# Freeze the litter-pool threshold for ground already on screen —
-				# live march made ~20% of visible props swap identity the frame a
-				# gate opened; the wrecked look sweeps in from the top edge instead.
-				_litter_cam_snap = sim.camera_top
-				_litter_march_prev = maxf(_bg_march, 0.0)   # _bg_march starts -1.0
-			_bg_cam = sim.camera_top
-			_bg_march = march
-			_bg_root.queue_redraw()
+	_sync_ground_palette()
 	if _glow_root != null:
 		_glow_root.queue_redraw()
 	_draw_terrain()
@@ -7964,6 +8124,11 @@ func _draw() -> void:
 	_draw_fx()
 	_draw_telegraphs()
 	_draw_wheel()   # world-anchored (rings the player) — must ride the shake
+	# The title's live demo is scenery, not the user's run. Keep its battlefield
+	# moving, but do not let checkpoint receipts, threat rails or boss HUD compete
+	# with the logo/menu. Pause and actual gameplay keep their existing overlays.
+	if _menu.mode == GameMenu.Mode.TITLE:
+		return
 	# From here down everything is screen-anchored HUD/overlay: cancel the node's
 	# shake/zoom/roll so bars, markers and banners stay rock-steady while the world
 	# judders (mirrors the shake-immune $HUD CanvasLayer the icon HUD lives on).
@@ -8112,6 +8277,25 @@ func _draw_skyglow() -> void:
 	draw_set_transform_matrix(Transform2D())
 
 
+func _sync_ground_palette() -> void:
+	if sim == null or _bg_root == null:
+		return
+	var march := _sector_march()
+	var new_world := _bg_sim != sim
+	if not new_world and sim.camera_top == _bg_cam and march == _bg_march:
+		return
+	if new_world or march != _bg_march:
+		_litter_cam_snap = sim.camera_top
+		# There is no earlier terrain to preserve on a fresh chapter/run.
+		# During an ongoing run, keep the old treatment on visible rows while
+		# the new sector sweeps in from the top rather than popping in place.
+		_litter_march_prev = march if new_world else maxf(_bg_march, 0.0)
+	_bg_sim = sim
+	_bg_cam = sim.camera_top
+	_bg_march = march
+	_bg_root.queue_redraw()
+
+
 func _biome_ramp(march: float, stops: Array) -> Color:
 	## QUANTIZED biome journey (KIMK round-2: a lerp is muddiest exactly at the
 	## gates, the one moment the journey should punctuate): each sector wears
@@ -8174,7 +8358,13 @@ func _compute_sector_march() -> float:
 		for g in sim.gates:
 			if g["open"]:
 				mopened += 1
-		return clampf(float(mopened) / 5.0, 0.0, 1.0)
+		var sector := mopened
+		if sim.mode == "campaign" or sim.mode == "arcade":
+			# Chapter Select advances the stream cursor, not the open-gate list.
+			# Before its first stream the cursor counts skipped gates; afterward
+			# it includes the current gate, as the simulation's sector helper does.
+			sector = sim._gate_counter if sim.gates.is_empty() else sim._sector_index(mopened)
+		return clampf(float(sector) / 5.0, 0.0, 1.0)
 	return clampf(float(sim.wave) / 12.0, 0.0, 1.0)
 
 
@@ -10000,10 +10190,12 @@ func _draw_pickups() -> void:
 		# grey too or the arena litters with lootable-green rings that deliver
 		# nothing.
 		var maxed := false
+		var quoted_price: int = int(pk.get("cost", 0))
 		if pk["kind"] <= 3:
 			var buyer := sim._nearest_alive_player(pk["x"], pk["y"])
 			if not buyer.is_empty():
 				maxed = sim._supply_full(buyer, pk["kind"])
+				quoted_price = sim.supply_price(buyer, pk["kind"], quoted_price)
 		if maxed:
 			mod = Color(0.55, 0.55, 0.55)
 		# Crates sit on the ground like every other grounded prop (litter, barrels,
@@ -10065,12 +10257,12 @@ func _draw_pickups() -> void:
 			_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6), ppos)
 		elif pk.get("cost", 0) > 0:
 			# Price tinted by affordability (matches the spend-wheel language).
-			var afford: bool = sim.war_chest >= pk["cost"]
+			var afford: bool = sim.war_chest >= quoted_price
 			var pcol := Art.safe(Color(0.5, 1.0, 0.5)) if afford else Art.warn(Color(1.0, 0.45, 0.35))
 			# Coin + digits claim ONE slot through the world-text arbiter (the icon
 			# travels with its number) — the bare draws printed the price over fork
 			# signposts, plated labels and floattext toasts.
-			var pdigits := str(pk["cost"]) if afford else (str(pk["cost"]) + "×")
+			var pdigits := str(quoted_price) if afford else (str(quoted_price) + "×")
 			var pwant := Rect2(ppos.x - 15.0, ppos.y - 34.0, 11.0 + Art.tw(pdigits, 9), 13.0)
 			# Same SUBJECT gate as _world_label, on the SAME constant: no price without its
 			# crate. Gating on `pwant` instead dropped the price off a VISIBLE crate in the
@@ -10081,7 +10273,8 @@ func _draw_pickups() -> void:
 			# anchor, so it is on screen for the whole tolerance.
 			if not WORLD_LABEL_SUBJECT_FRAME.has_point(ppos):
 				continue
-			var pgot := claim_label_slot(pwant, _label_slots, 0.0, false, _label_rail_ceiling)
+			var pgot := claim_label_slot(pwant, _label_slots, 0.0, false, _label_rail_ceiling,
+				_label_safe_l, _label_safe_r)
 			_label_slots.append(pgot)
 			draw_rect(pgot, LABEL_PLATE_FILL)
 			var poff := pgot.position - pwant.position
@@ -10244,6 +10437,17 @@ static func telegraph_dir(sw: SimWorld, e: Dictionary) -> Vector2:
 	return Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0)))
 
 
+static func enemy_pose_facing(sw: SimWorld, e: Dictionary, target_face: float,
+		previous_face: float) -> float:
+	var kind: String = e.get("kind", "")
+	var firearm: bool = kind == "rusher" or kind == "sniper" or e.get("elite", false)
+	if firearm and (e.get("windup", 0) > 0 or enemy_anim_state(e, false, 0, false) == "shoot"):
+		var locked := telegraph_dir(sw, e)
+		if locked.length_squared() > 0.01:
+			return locked.angle()   # body, muzzle and painted shot promise the same lane
+	return lerp_angle(previous_face, target_face, 0.18)
+
+
 func _draw_live_rifleman_marker(pos: Vector2, windup: int) -> void:
 	## Ordinary infantry and their corpses share uniforms; only a living rifleman
 	## gets this warm footprint and downward chevron. Shape, not hue alone, carries
@@ -10367,21 +10571,16 @@ func _draw_enemies() -> void:
 		# swarm has cadence instead of gliding in lockstep (foot infantry only).
 		# Gated on actual movement (like the player bob) — a standing unit
 		# breathes instead of jogging in place.
-		var e_now := Vector2i(e["x"], e["y"])
-		var e_moved: bool = _enemy_pos_prev.has(eidx) and _enemy_pos_prev[eidx] != e_now
-		# #11: same freeze guard as the player _dust_prev cache above — don't let a
-		# frozen frame's redraw zero e_moved and collapse a running enemy to idle.
-		if _hitstop_frames == 0:
-			_enemy_pos_prev[eidx] = e_now
-		var enemy_phase := 0 if _motion < 0.5 else (int(Engine.get_physics_frames() / 7) + eidx) & 1
+		var e_moved := sample_character_motion(_enemy_pos_prev, eidx, e, sim.tick_count).length_squared() > 0.01
+		var enemy_phase := character_anim_phase(sim.tick_count, 7, eidx, _motion)
 		if e["kind"] != "frogman":
 			if e.get("windup", 0) == 0 and e_moved:
-				epos.y += absf(sin(float(Engine.get_physics_frames()) * 0.35 + float(eidx) * 1.7)) * -1.4 * _motion
+				epos.y += absf(sin(float(sim.tick_count) * 0.35 + float(eidx) * 1.7)) * -1.4 * _motion
 			else:
 				# Winding up / standing: the run-bob stops but a slow breath keeps the
 				# unit alive — nothing on the field should be a frozen statue.
 				# (Stilled under REDUCE MOTION like the parked jeep/boss hover.)
-				epos.y += sin(float(Engine.get_physics_frames()) * 0.12 + float(eidx) * 1.7) * -0.5 * _motion
+				epos.y += sin(float(sim.tick_count) * 0.12 + float(eidx) * 1.7) * -0.5 * _motion
 		var target: Dictionary = {}
 		var best_d2 := 0.0
 		for p in alive_players:
@@ -10401,7 +10600,7 @@ func _draw_enemies() -> void:
 		else:
 			# Smoothed per-slot facing: when the nearest player flips sides the sprite
 			# swings instead of snapping 180° in one frame. Slot-keyed like _enemy_water_prev.
-			face = lerp_angle(_enemy_face.get(eidx, face), face, 0.18)
+			face = enemy_pose_facing(sim, e, face, _enemy_face.get(eidx, face))
 		_enemy_face[eidx] = face
 		if e["kind"] == "frogman":
 			var st: int = e.get("surface_ticks", 0)
@@ -10987,13 +11186,15 @@ const FLOATTEXT_MAX_ONSCREEN := 4
 
 ## {index: true} for the floattext entries of fx_list that may draw this frame.
 ## Headline sizes (streak/bonus callouts) outrank small coin pops; within a size,
-## fresher outranks older (t grows with age, so the t: -0.14 delayed "+25%!"
-## correctly ranks newest). The one decision point the renderer consults, so the
+## fresher outranks older. Only drawable toasts count: suppressed, expired and
+## not-yet-started effects must not consume the available slots. The renderer's
 ## count bound holds over ANY producer set, present or future.
 static func _floattext_keep(fx_list: Array, max_n := FLOATTEXT_MAX_ONSCREEN) -> Dictionary:
 	var idxs := []
 	for i in fx_list.size():
-		if fx_list[i].get("kind", "") == "floattext":
+		var age: float = fx_list[i].get("t", 0.0)
+		if fx_list[i].get("kind", "") == "floattext" and age >= 0.0 and age < 1.0 \
+				and not fx_list[i].get("sup", false):
 			idxs.append(i)
 	var keep := {}
 	if idxs.size() <= max_n:
@@ -11109,6 +11310,16 @@ static func label_rail_ceiling(rail: Array[Rect2]) -> float:
 ## _label_slots — so the bound and the reservation can never name different pixels.
 var _label_rail_ceiling := 360.0
 
+## This frame's VISIBLE horizontal band — _safe_band_rect()'s edges, resolved once at the
+## top of _draw and passed to every claim_label_slot call, exactly the way
+## _label_rail_ceiling is. The safe_left/safe_right parameters existed (and their docstring
+## promised live call sites passed them) for the whole life of the field while 0 of 4 sites
+## did, so the LABEL_EDGE_MARGIN was being measured against the 640px design frame instead
+## of the pillarboxed visible one on 21:9/32:9. Defaults reproduce the design frame, so
+## headless nothing moves.
+var _label_safe_l := 0.0
+var _label_safe_r := 640.0
+
 
 ## This frame's boss HP docks, QUEUED by the world passes that own the boss and painted by
 ## _draw_boss_chrome() as the last screen-anchored pass. The docks are screen-anchored chrome
@@ -11130,6 +11341,24 @@ var _label_slots: Array[Rect2] = []
 ## want-rect misses this entirely names something the player cannot see, and is
 ## SUPPRESSED rather than relocated (see _world_label).
 const WORLD_LABEL_FRAME := Rect2(0.0, 0.0, 640.0, 360.0)
+
+## No world label's claimed footprint may touch the frame edge. `claim_label_slot`'s
+## x-clamp used to be `clampf(rect.position.x, safe_left, maxf(safe_left, safe_right - w))`
+## with safe_left/safe_right defaulting to 0/640 and NOT ONE of the four production call
+## sites passing them — so the arbiter was ENTITLED to hand back a plate whose ink is
+## pressed into the frame border, and it did. MEASURED on cf23387 over the exhaustive
+## sweep in test_view_honesty.gd::test_no_world_label_is_flush_against_the_frame_edge:
+## 212,773 of 496,984 grants (42.8%) landed flush against the left or right edge; 218,478
+## (44.0%) within 6px of one. No grant sat EXACTLY on the top/bottom edge (the ladder's
+## 11px stride rarely lands on y=0), but 31,064 sat inside the margin of one — so the y
+## half of this bound is a smaller repair, not a pure hold.
+##
+## 6.0 is the floattext halo's own horizontal grow (the toast draws
+## grow_individual(10, 4, 10, 4) OUTSIDE the claimed plate), rounded down to the nearest
+## even pixel at 1x. Applied UNCONDITIONALLY inside the arbiter rather than as another
+## opt-in parameter: safe_left/safe_right are the standing proof that an opt-in bound on
+## this function does not get passed (0 of 4 call sites, for the whole life of the field).
+const LABEL_EDGE_MARGIN := 6.0
 
 ## How far ABOVE the top edge a label's SUBJECT may sit and still be labelled.
 ## The gate below is deliberately a suppression, not a relocation — that is what took
@@ -11214,8 +11443,19 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	var h: float = rect.size.y
 	# X is clamped first and always: a label wider than its anchor can start off-frame
 	# before any dodging happens, and no amount of vertical travel fixes that.
-	# Clamp to safe band on ultrawide so labels stay in visible pixels, not black bars.
-	var x: float = clampf(rect.position.x, safe_left, maxf(safe_left, safe_right - w))
+	# Clamp to safe band on ultrawide so labels stay in visible pixels, not black bars,
+	# INSET BY LABEL_EDGE_MARGIN so the ink is never pressed into the frame border itself.
+	# maxf keeps a label wider than the margined band left-aligned rather than inverting
+	# the clamp (only the debrief's KNOCKDOWNS ledger row is that wide, and it is not
+	# world-space; every world-space producer measures <= 256px of plate at 200% TEXT SIZE).
+	var x_lo: float = safe_left + LABEL_EDGE_MARGIN
+	var x_hi: float = safe_right - LABEL_EDGE_MARGIN
+	var x: float = clampf(rect.position.x, x_lo, maxf(x_lo, x_hi - w))
+	# Same inset vertically. min_y (the band floor) and max_y (_label_rail_ceiling) still
+	# WIN wherever they are tighter — this only bites at the raw frame edges, which is
+	# where 31,064 of the swept grants were sitting (see LABEL_EDGE_MARGIN).
+	var y_lo: float = maxf(min_y, LABEL_EDGE_MARGIN)
+	var y_hi: float = minf(max_y, 360.0 - LABEL_EDGE_MARGIN)
 	# Candidate rows: where it wanted to sit, then alternating down/up in the same 11px
 	# stride the floattext block used, 6 each way. Down first — a callout belongs under
 	# the thing it names, and dropping keeps it out of the sprite it is labelling.
@@ -11224,7 +11464,7 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	# in the common case where row 0 is free.)
 	for dy in LABEL_ROWS:
 		var y: float = rect.position.y + dy
-		if y < min_y or y + h > max_y:
+		if y < y_lo or y + h > y_hi:
 			continue                      # off-frame / under-the-band / on-the-rail rows are never occupied
 		var cand := Rect2(x, y, w, h)
 		var cg := cand.grow(-0.5)         # invariant across `taken` — was recomputed per rect
@@ -11256,12 +11496,12 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	# whole frame really is full fall back to the row with the LEAST total overlap
 	# — never worse than the old clamp, and free in every case measured so far.
 	var py: float = rect.position.y
-	var k_lo := int(ceil((min_y - py) / 11.0))
-	var k_hi := int(floor((max_y - h - py) / 11.0))
+	var k_lo := int(ceil((y_lo - py) / 11.0))
+	var k_hi := int(floor((y_hi - h - py) / 11.0))
 	if k_lo > k_hi:
 		# Taller than the whole usable band — no in-frame row exists at any offset.
-		return Rect2(x, clampf(py, min_y, maxf(min_y, max_y - h)), w, h)
-	var best_y: float = clampf(py, min_y, maxf(min_y, max_y - h))
+		return Rect2(x, clampf(py, y_lo, maxf(y_lo, y_hi - h)), w, h)
+	var best_y: float = clampf(py, y_lo, maxf(y_lo, y_hi - h))
 	var best_ov := INF
 	var maxd: int = maxi(absi(k_lo), absi(k_hi))
 	for d in range(0, maxd + 1):
@@ -11286,7 +11526,7 @@ static func claim_label_slot(rect: Rect2, taken: Array[Rect2], min_y := 0.0, dro
 	# what makes the reservation stick — a persistent label pinned at max_y - h sits
 	# ABOVE the rail instead of on it. (On a SPARSE frame this arm never fires: the 13-row
 	# ladder finds a free row, and the reservation alone measures clean.)
-	return Rect2(x, clampf(best_y, min_y, maxf(min_y, max_y - h)), w, h)
+	return Rect2(x, clampf(best_y, y_lo, maxf(y_lo, y_hi - h)), w, h)
 
 
 ## a11y: the alpha floor an in-world callout's INK is held at. Same shape as
@@ -11379,7 +11619,8 @@ func _world_label(txt: String, pos: Vector2, col: Color, subject := Vector2.INF)
 		_world_label_placed = false
 		return Vector2.ZERO
 	_world_label_placed = true
-	var got := claim_label_slot(want, _label_slots, 0.0, false, _label_rail_ceiling)
+	var got := claim_label_slot(want, _label_slots, 0.0, false, _label_rail_ceiling,
+		_label_safe_l, _label_safe_r)
 	_label_slots.append(got)
 	draw_rect(got, LABEL_PLATE_FILL)
 	var off := got.position - want.position
@@ -11957,6 +12198,7 @@ func _draw_players() -> void:
 	for i in sim.players.size():
 		var p := sim.players[i]
 		if p["in_tank"] >= 0:
+			_player_motion.erase(i)   # dismount starts a fresh on-foot motion sample
 			# ...except the GUNNER, who rides the deck: small crew sprite + aim
 			# tick so the second seat is visible on the field (re-review).
 			var g_tank: Dictionary = sim.tanks[p["in_tank"]]
@@ -11966,29 +12208,23 @@ func _draw_players() -> void:
 				# lane is legible at a glance.
 				var gdpos := _to_screen(p["x"], p["y"]) + Vector2(0, -7.0)
 				var gunner_key := "player2" if i == 1 else "player1"
-				_spr_texture(Art.player_anim("idle"), gunner_key, gdpos, 0.0, 0.42,
+				_spr_texture(Art.player_anim(player_anim_state(p, Vector2.ZERO, false, 0)),
+					gunner_key, gdpos, _aim_angle(p), 0.42,
 					Color(1.1, 1.1, 1.05), 1.0, PLAYER_POSE_X_STRETCH)
 				var gaim := Vector2(p["aim_x"], p["aim_y"])
 				if gaim.length() > 0.01:
 					Art.line(self, gdpos, gdpos + gaim.normalized() * 16.0, Color(0.9, 0.97, 1.0, 0.9), 1.0)
 			continue   # driver renders as the tank
 		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO) + (_hit_flinch[i] if i < _hit_flinch.size() else Vector2.ZERO)
-		# Capture travel before _kick_dust advances the shared previous-position cache.
-		# This drives both the two-frame step and forward/backward selection relative
-		# to independent aim. A zero cache is first sighting, not a giant fake step.
-		var move_delta := Vector2.ZERO
-		if i < _dust_prev.size() and _dust_prev[i] != Vector2i.ZERO:
-			move_delta = Vector2(float(p["x"] - _dust_prev[i].x), float(p["y"] - _dust_prev[i].y))
-		var anim_phase := 0 if _motion < 0.5 else (int(Engine.get_physics_frames() / 6) + i) & 1
+		var move_delta := sample_character_motion(_player_motion, i, p, sim.tick_count)
+		var anim_phase := character_anim_phase(sim.tick_count, 6, i, _motion)
 		var concealed: bool = sim._in_grass(p) or sim._in_trench(p["x"], p["y"])
 		var anim_state := player_anim_state(p, move_delta, concealed, anim_phase)
 		# The poses carry locomotion now; only the tiny idle breath remains.
-		var idle_bob := sin(Engine.get_physics_frames() * 0.045 + i * PI) * 0.25 * _motion \
+		var idle_bob := sin(sim.tick_count * 0.045 + i * PI) * 0.25 * _motion \
 			if anim_state == "idle" else 0.0
 		var tex_name := "player1" if i == 0 else "player2"
-		# #11: freeze the pre-hitstop pose, don't advance it. _dust_prev is the cache
-		# move_delta reads above — rewriting it while frozen zeroes move_delta on the very
-		# next drawn (still-frozen) frame, so a running unit visibly collapsed to idle mid-freeze.
+		# Dust emission keeps its own travel cache; it cannot consume animation motion.
 		if _hitstop_frames == 0:
 			if p["alive"] and not sim._in_water(p["x"], p["y"]):
 				_kick_dust(i, p["x"], p["y"], _dust_prev, false)
@@ -12075,9 +12311,8 @@ func _draw_players() -> void:
 				if q == i or dp["alive"] or sim.last_stand:
 					continue
 				var dpos := _to_screen(dp["x"], dp["y"])
-				# Off-screen partner: an edge chevron in their colour points the way
-				# to the body — shown regardless of affordability so you can FIND a
-				# far-south downed buddy even before the chest covers the revive.
+				# Off-screen partner: retain casualty identity regardless of
+				# affordability, without an arrow suggesting a trip to the body.
 				if dpos.x < 8 or dpos.x > 632 or dpos.y < 30 or dpos.y > 352:
 					# Clamp by the CAP's half-width, not a frozen 12: a "Space"-bound
 					# revive puts the cap half 19.1px out, so the old clamp let it reach
@@ -12092,7 +12327,8 @@ func _draw_players() -> void:
 					# threat edges, the boss bars) — the gunship-bar idiom.
 					draw_set_transform_matrix(get_transform().affine_inverse())
 					Art.circle(self, edge, 5.0, Color(pcol.r, pcol.g, pcol.b, 0.85))
-					Art.line(self, edge, edge + bdir * 9.0, pcol, 2.0)
+					# A neutral casualty marker, not an arrow directing a rescue trip.
+					_world_label_centered("P%d DOWN" % [q + 1], edge.x, edge.y - 8, pcol, edge)
 					# force_pad on i (the REVIVER's seat), not a flat false: P2 is
 					# hardwired to pad 1 and never sets Art.use_pad, so a P2 reviver
 					# was being taught P1's keycap for a button they don't have.
@@ -12105,11 +12341,10 @@ func _draw_players() -> void:
 					# hidden exactly when you're short of it, so "feed the war
 					# chest" had no answer to "with how much?". Warm red, no
 					# pay-from-here dashes (you can't).
-					_world_label_centered("REVIVE %d" % cost, pos.x, pos.y - 16.0,
+					_world_label_centered("RALLY P%d HERE %d" % [q + 1, cost], pos.x, pos.y - 16.0,
 						Art.safe(Color(1.0, 0.5, 0.4)), pos)
 					continue
-				Art.dashed_line(self, pos, dpos, Color(0.5, 0.9, 1.0, 0.4), 1.0, 4.0)
-				var rtxt := "REVIVE %d" % cost
+				var rtxt := "RALLY P%d HERE %d" % [q + 1, cost]
 				# Label + keycap are ONE centered unit, so the pair is laid out by hand
 				# rather than through _world_label_centered: the glyph has to ride the
 				# label's claim offset (roff), which means it has to be measured off the
@@ -12760,7 +12995,8 @@ func _draw_fx() -> void:
 			# banked the whole punched plate above it, so the claim's top edge always
 			# clears the band (the old 11px-box claim needed a -16.5 fudge to say that).
 			var prect := floattext_claim_rect(fpivot, fw, fsz)
-			var fgot := claim_label_slot(prect, _label_slots, band_floor, true, _label_rail_ceiling)
+			var fgot := claim_label_slot(prect, _label_slots, band_floor, true, _label_rail_ceiling,
+				_label_safe_l, _label_safe_r)
 			if not fgot.has_area():
 				fx["sup"] = true   # dropped for good — no flicker as congestion shifts
 				continue
@@ -13321,7 +13557,8 @@ func _draw_threat_edges() -> void:
 			# a label ends up sitting beside its own background.
 			var rbase := 332.0 if rsy > 360.0 else 50.0
 			var rwant := _label_plate_rect(rlx, rbase, Art.tw("REVIVE", 9), 9)
-			var rgot := claim_label_slot(rwant, _label_slots, 0.0, false, _label_rail_ceiling)
+			var rgot := claim_label_slot(rwant, _label_slots, 0.0, false, _label_rail_ceiling,
+				_label_safe_l, _label_safe_r)
 			var roff := rgot.position - rwant.position
 			_label_slots.append(rgot)
 			if rsy > 360.0:
@@ -13645,7 +13882,7 @@ func _draw_wheel() -> void:
 			var ang := s * TAU / 8.0
 			var ipos := (c + Vector2.from_angle(ang) * 31.0).round()
 			var is_token: bool = int(item["kind"]) == 5
-			var acost: int = 1 if is_token else sim._supply_cost(item["kind"])   # wave-scaled in endless
+			var acost: int = 1 if is_token else sim.supply_price(p, item["kind"])
 			var afford: bool = (sim.tokens >= 1) if is_token else (sim.war_chest >= acost)
 			var selected: bool = _wheel[i]["sel"] == s
 			# Socket sprite authored nub-down (north slot); +90° per sector
@@ -13698,7 +13935,7 @@ func _draw_wheel() -> void:
 		if sel >= 0:
 			sel_item = WHEEL_ITEMS[_SECTOR_TO_ITEM[sel]]
 			sel_is_token = int(sel_item["kind"]) == 5
-			sel_cost = 1 if sel_is_token else sim._supply_cost(sel_item["kind"])
+			sel_cost = 1 if sel_is_token else sim.supply_price(p, sel_item["kind"])
 			sel_afford = (sim.tokens >= 1) if sel_is_token else (sim.war_chest >= sel_cost)
 		# Revive-guard (5-vote panel item): with a teammate down, a buy that
 		# would price their revive out of the shared chest is a silent trap —
@@ -13828,7 +14065,7 @@ func _top_center_priority() -> String:
 	if sim.is_campaign_world() and sim.observer.is_empty() \
 			and sim.stall_ticks > SimWorld.OBSERVER_STALL_TICKS - 180 and not sim.camera_held():
 		candidates.append("mortar")
-	if _hint_t > 0.02 and not _hint_text.is_empty():
+	if _hint_t > 0.02 and not _visible_hint_text().is_empty():
 		candidates.append("hint")
 	if _gate_objective_active():
 		candidates.append("boss")
@@ -13971,10 +14208,14 @@ func _band_top_text(top_msg: String) -> Dictionary:
 
 ## Build this frame's band. The ONE writer of `_band`.
 func _band_rows(top_msg: String) -> Array[Dictionary]:
+	# No invisible alert reservation in attract mode: world toasts need not dodge
+	# a message band that the title intentionally does not render.
+	if _menu.mode == GameMenu.Mode.TITLE:
+		return []
 	var top := _band_top_text(top_msg)
 	# One semantic winner means danger/objectives suppress lower rows instead of
 	# shouting beside them. band_rows() can still be tested with two rows as pure geometry.
-	var hint := _hint_text if top_msg == "hint" and _hint_t > 0.02 \
+	var hint := _visible_hint_text() if top_msg == "hint" and _hint_t > 0.02 \
 		and not _debrief and not sim.victory else ""
 	return band_rows(_banner_band_y(), String(top.get("text", "")), int(top.get("size", 11)),
 		bool(top.get("badge", false)), hint, sim.god_mode)

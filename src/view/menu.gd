@@ -3172,7 +3172,7 @@ func _activate() -> void:
 			"daily": main.start_daily()
 			"watch": _watch_last_run()
 			"setup": open(Mode.SETUP)   # c2-04: SETUP hub (run config + OPTIONS + INFO)
-			"quit": get_tree().quit()
+			"quit": main.request_quit()
 	else:
 		match id:
 			"resume": close()

@@ -7,6 +7,17 @@ extends RefCounted
 const Runner := preload("res://tests/run_tests.gd")
 
 
+func test_audio_shutdown_cannot_restart_from_deferred_boot() -> void:
+	var sfx := Sfx.new()
+	sfx.shutdown_audio()
+	sfx._finish_boot_audio()
+	Runner.T.eq(sfx.get_child_count(), 0, "a queued audio boot does not create players after shutdown")
+	Runner.T.ok(sfx._pb == null and sfx._ui_pb == null, "shutdown leaves no cached polyphonic playback")
+	sfx.shutdown_audio()
+	Runner.T.eq(sfx.process_mode, Node.PROCESS_MODE_DISABLED, "repeated shutdown stays inert")
+	sfx.free()
+
+
 func _opaque_row_width_avg(img: Image, y0: int, y1: int) -> float:
 	# Average per-row opaque-pixel span (rightmost minus leftmost alpha>0.05 column) across
 	# [y0, y1) -- used to compare the "girth" of two bands of a directional sprite (nt-03).

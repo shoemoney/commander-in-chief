@@ -785,6 +785,15 @@ static func enemy_anim(tex_name: String, state: String) -> Texture2D:
 	return poses.get(state, TEX.get(tex_name, TEX["enemy_assault"]))
 
 
+static func facing_rotation(style_key: String, heading: float) -> float:
+	# Authored overhead troops have their muzzle at the TOP of the image.
+	# Simulation headings use +X = zero; translate once at the render boundary.
+	# Other art (especially tank barrels) retains its existing caller convention.
+	if style_key == "player1" or style_key == "player2" or ENEMY_ANIM.has(style_key):
+		return heading + PI / 2.0
+	return heading
+
+
 static func draw_scale(name: String) -> float:
 	return SCALE.get(name, 1.0)
 

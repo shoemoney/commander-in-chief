@@ -51,6 +51,8 @@ class _StubMain extends Node2D:
 	var _current_seed := 0
 	var sim: SimWorld = null   # attract/PAUSE branches gate on this; a menu test has no live run
 	var _starts: Array = []    # records the mode-launch calls TITLE activation makes
+	var _quit_requests := 0
+	func request_quit() -> void: _quit_requests += 1
 	func start_game(endless: bool) -> void: _starts.append(["game", endless])
 	func start_daily() -> void: _starts.append(["daily"])
 	func start_boss_rush() -> void: _starts.append(["boss_rush"])
@@ -3262,6 +3264,26 @@ func test_c4_10_prepress_glyph_reserves_slot_and_fits_label() -> void:
 # Enter routed through the REAL input path: the first keydown arms, an ECHO (held
 # key auto-repeat) between the two edges is ignored, and only a second genuine
 # keydown fires. Proves activation can't come from a held/repeated key.
+func test_title_quit_confirmation_routes_to_application_cleanup() -> void:
+	var stub := _StubMain.new()
+	var m: Control = Menu.new()
+	m.main = stub
+	m.mode = Menu.Mode.TITLE
+	var found := false
+	var rows: Array[Dictionary] = m._menu_items()
+	for i in rows.size():
+		if rows[i]["id"] == "quit":
+			m.sel = i
+			found = true
+	Runner.T.ok(found, "title has an actual Quit action")
+	m._press()
+	Runner.T.eq(stub._quit_requests, 0, "first Quit press only arms confirmation")
+	m._press()
+	Runner.T.eq(stub._quit_requests, 1, "confirmed Quit uses application cleanup instead of immediate tree exit")
+	m.free()
+	stub.free()
+
+
 func test_destructive_confirm_needs_two_distinct_key_edges() -> void:
 	var stub := _StubMain.new()
 	var m := _pause_menu_headless(stub)

@@ -255,6 +255,38 @@ const MAX_ENEMIES := 64
 const REVIVE_BASE_COST := 50
 const BROKE_RESPAWN_TICKS := 300
 const BROKE_WAIT_MAX_MULT := 4      # ...and in ENDLESS it compounds to at most 4x that (20.0 s). See broke_wait_ticks().
+
+## A sector's KNOCKDOWN BUDGET: the squad may go down this many times between checkpoints,
+## and the last one is the one it does not get up from. standups_left() counts it down and
+## hits 0 exactly on that terminal knockdown, so it reads like a lives counter ("1 left" =
+## the next one ends the run). ENDLESS is exempt (standups_left returns -1): its brake is
+## the compounding revive price plus the compounding broke wait, and it already had a wipe.
+## BOSS_RUSH is NOT exempt and is NOT run-wide — it pre-authors its whole gate gauntlet in
+## _init instead of streaming it, so the gates still open and still reset deaths_since_gate,
+## one budget per gunship.
+##
+## CALIBRATED, not chosen. tools/probe_standup_budget.gd drives 8 seeds of real
+## (non-god-mode) campaign with main.gd's scripted demo_input bot and replays each run
+## against every candidate N. Measured on this tree:
+##
+##     N     wins/8   pre-finale wipes/8   median wipe tick
+##     4        1            7                  2291
+##     6        1            6                  2895
+##     8        1            3                  3441
+##     10       1            2                  5809
+##
+## ⚠️ The plan's calibration target ("smallest N where >=25% of seeds still reach victory
+## AND >=25% wipe pre-finale") is UNREACHABLE WITH THIS INSTRUMENT, and that is a fact about
+## the bot, not about N: with the budget neutralized entirely the bot still wins only 1 of 8
+## seeds (12.5%) — it dies at the Colossus in the other 7 — and the one seed it CAN win
+## (seed 3) never accrues 4 knockdowns in a sector, so it is untouched at every N from 4 to
+## 10. No N can move the win column. The substitute criterion is the half that does
+## discriminate, measured the same way: N must sit ABOVE the bot's MEDIAN per-sector
+## knockdown peak (7 across these 8 seeds) so a median run survives the budget, while still
+## losing the bad seeds. That is 8 — 3 of 8 seeds (37.5%) wipe before the finale, none at
+## the finale. And the bot aims OPEN-LOOP, so it is strictly worse than a player: a budget
+## that fails 37.5% of ITS runs fails fewer of a person's.
+const SECTOR_STANDUPS := 8
 const GOD_RESTORE_TICKS := 60      # DEBUG-ONLY god mode's heartbeat: once a second the downed get put back on their feet. See _god_restore().
 const COIN_RUSHER := 10
 const COIN_MG_NEST := 15   # stationary/telegraphed: pays less than a mobile elite
@@ -2009,7 +2041,7 @@ func _collect_pickups(p: Dictionary, i: int) -> void:
 		if not _dist_lte(p["x"], p["y"], pk["x"], pk["y"],
 				TANK_CRUSH_RADIUS if p["in_tank"] >= 0 else PICKUP_RADIUS):
 			continue
-		var cost: int = pk.get("cost", 0)
+		var cost: int = supply_price(p, pk["kind"], int(pk.get("cost", 0)))
 		if cost > 0 and war_chest < cost:
 			continue
 		# A supply the player is already capped on grants nothing (mini() eats it,
@@ -2061,10 +2093,18 @@ func _step_dead_player(_index: int, p: Dictionary, inp: SimInput) -> void:
 	# stranded for the rest of the run. It also disarms the other way (partner
 	# banks a kill and the chest covers you again), so dying broke stops being
 	# strictly cheaper than dying rich.
+	#
+	# ...and the SAME loop arms it for an EXHAUSTED squad, rich or not. Without that half,
+	# a solo player who had burnt the sector's stand-up budget while holding coin got no
+	# timer (the chest could pay) AND a refusing coin reader (the budget is spent): down
+	# forever, no wipe — the very indefinite strand this block was written to remove, just
+	# reached from the opposite direction. The wipe is latched by the expiry branch below,
+	# so this adds no new _latch_wipe call site.
+	var stranded := war_chest < revive_cost(p) or standups_exhausted()
 	if p["broke_timer"] == 0:
-		if war_chest < revive_cost(p):
+		if stranded:
 			p["broke_timer"] = broke_wait_ticks(p)
-	elif war_chest >= revive_cost(p):
+	elif not stranded:
 		p["broke_timer"] = 0
 	# The WIPE clock is not a brake. With nobody left standing this timer is not a
 	# rescue at all — it is the run ending — and a dead party must not sit through the
@@ -2163,13 +2203,43 @@ func broke_wait_ticks(p: Dictionary) -> int:
 	return BROKE_RESPAWN_TICKS * clampi(p["deaths"], 1, BROKE_WAIT_MAX_MULT)
 
 
+func standups_left() -> int:
+	## The sector's remaining stand-ups: how many more times this squad may be put back on
+	## its feet before the checkpoint is lost. -1 = UNBOUNDED (endless only — its brake is
+	## the compounding revive price and the compounding broke wait, and it already has a
+	## wipe). Keyed on deaths_since_gate, which already counts squad deaths since the last
+	## checkpoint, already resets on gate open, and is ALREADY in checksum() — so this adds
+	## no sim field and no new checksum term.
+	##
+	## ONE seam. rally_is_free()'s own docstring records what happens otherwise ("three
+	## copies shipped calling the death clock a free rescue"), so every view that wants to
+	## show the budget asks THIS rather than re-deriving SECTOR_STANDUPS - deaths_since_gate.
+	if mode == "endless":
+		return -1
+	return maxi(0, SECTOR_STANDUPS - deaths_since_gate)
+
+
+func standups_exhausted() -> bool:
+	return standups_left() == 0
+
+
 func rally_is_free() -> bool:
 	## Same branch as _step_dead_player's expiry: in ENDLESS with nobody left
 	## standing the broke timer does NOT rescue — it latches the wipe. Every view
 	## that renders p["broke_timer"] asks THIS instead of re-deriving the mode test
 	## (three copies shipped calling the death clock a free rescue). Live, not
 	## latched: it flips exactly like the arm/disarm loop the timer itself runs on.
-	return not (mode == "endless" and _all_players_down())
+	##
+	## The mode test used to be `mode == "endless"` ALONE, which made the free rally
+	## unconditional and INFINITE in campaign, arcade and boss_rush: 67 knockdowns over
+	## 20,000 ticks and the run never ended (measured on cf23387). standups_exhausted() is
+	## the second half — a sector absorbs SECTOR_STANDUPS knockdowns and the last one is
+	## terminal. Endless is byte-identical to before.
+	##
+	## _all_players_down() is deliberately still required in BOTH arms: a partner still
+	## standing rescues you, exactly as endless already ruled. The budget still costs
+	## yardage in 2P; it only ENDS the run when the whole squad is down.
+	return not (_all_players_down() and (mode == "endless" or standups_exhausted()))
 
 
 func _checkpoint_y() -> int:
@@ -2184,6 +2254,22 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 	## LAST STAND: once the Colossus is engaged, the coin reader is dead —
 	## no revives past the final gate (the arcade's no-continue finale).
 	if last_stand:
+		return
+	# ...and so is it once the SECTOR's stand-up budget is spent. Refusing here rather than
+	# waiving is what stops coin from buying past the budget: measured over seeds 2 and 3,
+	# 100% of stand-ups (11/12 and 10/10) were PAID, so a budget placed on the free path
+	# alone would never have fired for a player with money. The denial is LOUD — the event
+	# carries `exhausted` so the view can say why instead of just refusing. Events are
+	# checksum-excluded: golden-safe.
+	if standups_exhausted():
+		for j in players.size():
+			var t := players[j]
+			if t["alive"]:
+				continue
+			if reviver_index == -1 and t != reviver:
+				continue
+			events.append({"t": "revive_deny", "x": t["x"], "y": t["y"],
+				"cost": revive_cost(t), "exhausted": true})
 		return
 	# Self-revive used to be blocked outright while ANY partner was standing, to
 	# keep the rescue theirs to perform. That left a downed player with a rich
@@ -2588,6 +2674,20 @@ func _supply_cost(kind: int) -> int:
 	return _econ_scale(base)
 
 
+func supply_price(p: Dictionary, kind: int, catalogue := -1) -> int:
+	## One integer quote for wheel, ground stock and the debit. Partial refills
+	## cost the delivered fraction, rounded up so repeated small buys cannot
+	## undercut one full pack. Non-quantity supplies keep their catalogue price.
+	var price: int = _supply_cost(kind) if catalogue < 0 else catalogue
+	var pack := 30 if kind == 0 else 4
+	var units := pack
+	if kind == 0:
+		units = clampi(MG_AMMO_MAX - int(p["mg_ammo"]), 0, pack)
+	elif kind == 1:
+		units = clampi(GRENADE_AMMO_MAX - int(p["grenade_ammo"]), 0, pack)
+	return (price * units + pack - 1) / pack
+
+
 func _supply_full(p: Dictionary, kind: int) -> bool:
 	## True when this supply would deliver NOTHING to p (already at the cap /
 	## already wearing it). Shared by every path that hands out a supply so none
@@ -2660,7 +2760,7 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 	## War Chest — the same pool that funds revives. That's the decision.
 	if kind < 0 or kind >= SUPPLY_COSTS.size():
 		return
-	var cost: int = _supply_cost(kind)
+	var cost: int = supply_price(p, kind)
 	var player_bags := player_sandbag_count()
 	if kind == 4 and (player_bags + 2 > SANDBAG_FIELD_CAP or p["in_tank"] >= 0):
 		# Sandbag-specific denials: field cap reached, or buying from a tank
@@ -2908,6 +3008,12 @@ func _drive_tank(player_index: int, p: Dictionary, inp: SimInput, interact_edge:
 			"vy": Fixed.mul(p["aim_y"], SHELL_SPEED),
 			"z": 0, "zv": SHELL_ZVEL, "owner": player_index, "shell": true,
 		})
+	elif grenade_edge:
+		# Report the resolved attempt, after purchases and bail/seat arbitration.
+		# A view-side pre-check would falsely click empty on a same-tick refill.
+		# Events are presentation-only; no cooldown, ammo or input rules change.
+		events.append({"t": "cannon_deny", "i": player_index,
+			"reason": "empty" if p["grenade_ammo"] == 0 else "cooldown"})
 
 	# Treads: crush infantry, mint coin.
 	for e in enemies:

@@ -17,7 +17,7 @@
 
 ![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-1183%20methods%20%C2%B7%2037.4k%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1217%20methods%20%C2%B7%2038.5k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-1.2%20%C2%B7%20gold-gold)
@@ -180,7 +180,7 @@ instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
 |---|---|---|
 | Move | WASD | Left stick |
 | Aim (decoupled) | Mouse or arrow keys | Right stick |
-| Fire / tank cannon 🔫 — **always on**, there is no fire button: aim *is* the weapon | — | — |
+| Machine gun 🔫 — **automatically fires** while aiming; the tank cannon uses the grenade button and grenade ammo | — | — |
 | Grenade 💣 — **hold through the apex = AIRBURST** 🎈 | E (Shift = alt) / RMB | L1 |
 | Dodge roll (i-frames) 🤸 | C | B |
 | Interact 🚜 (board/exit tank · **gunner seat** on an occupied hull · **salvage hulks** · plant claymores) | F | X |
@@ -238,7 +238,7 @@ Every threat telegraphs before it resolves — that's the **readable chaos** pil
 | 🏃 Rushers & red elites | The 1986 grammar — touch = death, elites drop capsules | Shoot, dodge, kite |
 | 💥 Grenadier | Telegraphed lob, edge-detect markers | Move off your ground |
 | 🔭 Sniper | Laser paint line before the shot | Break the line |
-| 🌿 Ghillie sniper | Cloaked ambush, bullet-immune dug in | Flush it out |
+| 🌿 Ghillie sniper | Cloaked ambush, bullet-immune dug in | Close in or attack during its laser window |
 | 🛡️ Riot shield | Front-arc bullet block | Flank, grenade, or **Rend** through it |
 | 🧨 Sapper | Lays a live mine trail | Mind your feet |
 | 🏅 Courier | Flees with a fat bounty (4× elite) | Cut it off |
@@ -341,7 +341,7 @@ the engine-error gate fail a perfectly clean diff with *"no log carried this run
 
 </details>
 
-**1,183 test methods / 37,400+ assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
+**1,217 test methods / 38,500+ assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
 grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus, every archetype's behavior
 contract (nest armor, technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop,
 lockstep loopback, replay integrity, checksum coverage classification, and the campaign+endless **golden

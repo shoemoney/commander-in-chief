@@ -84,6 +84,11 @@ const CHIP_PRIO := {
 	# It still yields to HOSTILES itself, and the submerged diver ALSO carries an in-world grenade
 	# glyph (see main.gd) so the immunity reads even if this one chip is ever squeezed out.
 	"hostiles_immune": 89,
+	# The sector's remaining stand-ups (SimWorld.standups_left). Objective band, one step
+	# under HOSTILES: it is the only readout that says how close the RUN is to ending, so it
+	# outranks the wave/sector progress cursor and every vanity chip. Endless never emits it
+	# (standups_left returns -1 there — its brake is the compounding revive price).
+	"reinforcements": 88,
 	"wave": 85, "sector": 82,
 	# lethal timers — active field effects / threat modifiers on a clock
 	# mutator2 = the wave-15+ STACKED mutator; one band under the primary so a
@@ -199,6 +204,49 @@ var _opt_keep := {}       # c1-06: id -> true for the optional chips the planner
 var _plate_ci := RID()    # panel backing on its own canvas item (z -1): drawn
                           # behind the chips but SIZED after the row is laid out,
                           # so it fits THIS frame's content (no 1-frame overhang)
+var _visibility_material: ShaderMaterial
+var _visibility_plate := RID()
+var _visibility_positions := PackedVector2Array()
+var _visibility_bottom := -1.0
+
+
+static func visibility_positions(sim: SimWorld) -> PackedVector2Array:
+	var positions := PackedVector2Array([Vector2(-1000, -1000), Vector2(-1000, -1000)])
+	for i in mini(2, sim.players.size()):
+		var p: Dictionary = sim.players[i]
+		# Include downed bodies and tank crews: all still need locating/rescuing.
+		positions[i] = Vector2(roundf(float(p["x"]) / Fixed.ONE),
+			roundf(float(p["y"] - sim.camera_top) / Fixed.ONE))
+	return positions
+
+
+func _inherit_visibility(node: Node) -> void:
+	for child in node.get_children():
+		if child is CanvasItem:
+			child.use_parent_material = true
+		_inherit_visibility(child)
+
+
+func _sync_visibility() -> void:
+	if _visibility_material == null:
+		_visibility_material = ShaderMaterial.new()
+		_visibility_material.shader = preload("res://src/view/hud_visibility.gdshader")
+		material = _visibility_material
+		_inherit_visibility(self)
+	if _plate_ci.is_valid() and _visibility_plate != _plate_ci:
+		RenderingServer.canvas_item_set_use_parent_material(_plate_ci, true)
+		_visibility_plate = _plate_ci
+	var positions := visibility_positions(main.sim)
+	if positions != _visibility_positions:
+		_visibility_positions = positions
+		_visibility_material.set_shader_parameter("player_one", positions[0])
+		_visibility_material.set_shader_parameter("player_two", positions[1])
+	var bottom := panel_bottom()
+	if bottom != _visibility_bottom:
+		_visibility_bottom = bottom
+		_visibility_material.set_shader_parameter("panel_bottom", bottom)
+
+
 const VERB_WINDOW := 1800.0  # c-onboard: UPPER BOUND (ticks) on the verb chip, armed at run start.
                           # It used to be 360 (~6s of wall clock) and each segment retired on that
                           # clock whether or not the player ever pressed the button — the window
@@ -464,7 +512,10 @@ func _ready() -> void:
 	var _ci := get_canvas_item()
 	if not _ci.is_valid():
 		return
-	_plate_ci = RenderingServer.canvas_item_create()
+	# ENTER_TREE may already have allocated the plate before READY runs.
+	# Replacing that handle would orphan a CanvasItem on every scene boot.
+	if not _plate_ci.is_valid():
+		_plate_ci = RenderingServer.canvas_item_create()
 	RenderingServer.canvas_item_set_parent(_plate_ci, _ci)
 	RenderingServer.canvas_item_set_z_index(_plate_ci, -1)
 	RenderingServer.canvas_item_set_visible(_plate_ci, is_visible_in_tree())
@@ -510,6 +561,7 @@ func _notification(what: int) -> void:
 func _process(delta: float) -> void:
 	if main == null or main.sim == null:
 		return
+	_sync_visibility()
 	var sim: SimWorld = main.sim
 	# c4-02: arm/advance the pulse VALUE only — the repaint request is owned by _anim_active's
 	# _drawn_pulse comparison below, so a pulse that isn't actually painted (reduce motion draws it as
@@ -769,9 +821,22 @@ func verb_used(act: String) -> void:
 ## c-onboard: the VERB_SEGS still worth showing — every segment whose verb the player has not
 ## used yet, in the canonical order. Pure, so a test can pin "a used verb retires, an unused
 ## one persists" without a live Control.
-static func verb_active_segs(used: Dictionary) -> Array:
+static func verb_active_segs(used: Dictionary, sim: SimWorld = null) -> Array:
+	var available := VERB_SEGS
+	if sim != null and not sim.players.is_empty():
+		var p := sim.players[0]
+		if not p["alive"]:
+			return []   # the recovery row owns the downed player's controls
+		var ti := int(p["in_tank"])
+		if ti >= 0 and ti < sim.tanks.size():
+			var tank := sim.tanks[ti]
+			if tank["burning"]:
+				return []   # bail warning owns the urgent input, not optional teaching
+			available = [["wheel", "SUPPLY WHEEL"]]
+			if tank["occupant"] == 0:
+				available = [["grenade", "CANNON"], ["wheel", "SUPPLY WHEEL"]]
 	var out: Array = []
-	for s in VERB_SEGS:
+	for s in available:
 		if not used.has(s[0]):
 			out.append(s)
 	return out
@@ -1110,6 +1175,12 @@ func _draw() -> void:
 					gcol_tank = Art.warn(Color(1.0, 0.25, 0.2) if _mblink(10) else Color(0.6, 0.2, 0.18))
 				elif p["grenade_ammo"] == SimWorld.GRENADE_AMMO_MAX:
 					gcol_tank = Color(0.6, 0.85, 1.0)
+				if main._grenade_dry[i] > 0:
+					# Immediate, steady acknowledgment of a refused cannon press.
+					# No blink phase can hide this short cue; burning's bail warning
+					# still owns the row above, and the gunner has no shell control.
+					twarn = true
+					gcol_tank = Art.warn(Color(1.0, 0.25, 0.2) if p["grenade_ammo"] == 0 else Color(1.0, 0.8, 0.3))
 				# c3-01: the cannon-shell count is a direct-draw tank chip — fit-guard it against the
 				# usable edge like every other player-row readout so a starved viewport surfaces a "+N"
 				# clip rather than clipping the shell count past RIGHT. A no-op at every supported width
@@ -1796,6 +1867,25 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 		# modes, was a hardcoded 5). Demotable (prio 82): above vanity/records
 		# but below the live SHOP/HOSTILES combat readouts, so an extreme-
 		# economy row sheds the progress chip into +N before dropping a live stat.
+		# REINFORCEMENTS n — the sector's remaining stand-ups. Campaign/arcade/boss_rush used
+		# to have NO fail state at all short of the Colossus (rally_is_free() tested only
+		# `mode == "endless"`, so the broke timer respawned you forever: 67 knockdowns over
+		# 20,000 ticks and the run never ended). Now a sector absorbs SECTOR_STANDUPS
+		# knockdowns and the last one is terminal — so the budget has to be VISIBLE, or the
+		# run ends on a rule the player was never shown. Reads sim.standups_left(), the one
+		# seam, rather than re-deriving SECTOR_STANDUPS - deaths_since_gate (rally_is_free's
+		# own docstring records what re-deriving costs: "three copies shipped calling the
+		# death clock a free rescue"). Suppressed on an untouched sector — same discipline as
+		# DEATHLESS: it appears with the first knockdown, which is also the first moment it
+		# means anything, and counts down from there.
+		var rleft: int = sim.standups_left()
+		if rleft >= 0 and rleft < SimWorld.SECTOR_STANDUPS:
+			var rtxt := "REINFORCEMENTS %d" % rleft
+			if _fits2("reinforcements", _tw(rtxt) + 8.0):
+				# Red at two or fewer: the same "this is the run now" cast _dead_chips gives
+				# LAST BREATH, reached before the last body rather than on it.
+				var rcol := Color(0.95, 0.82, 0.5) if rleft > 2 else Art.safe(Color(1.0, 0.42, 0.36))
+				x = _text(rtxt, x, y + ICON - 3.0, rcol) + 8.0
 		var opened := 0
 		for g in sim.gates:
 			if g["open"]:
@@ -2250,7 +2340,7 @@ func verb_chip_rect() -> Rect2:
 		return Rect2()
 	if _verb_show <= 0.0:
 		return Rect2()   # upper bound elapsed — fully gone, no persistent playfield overlay
-	var segs := verb_active_segs(_verb_used)
+	var segs := verb_active_segs(_verb_used, main.get("sim"))
 	if segs.is_empty():
 		return Rect2()   # every verb has been used — the reminder taught what it had to teach
 	var ext := verb_legend_extent(segs)
@@ -2262,7 +2352,7 @@ func _verb_legend() -> void:
 	var plate := verb_chip_rect()
 	if not plate.has_area():
 		return
-	var segs := verb_active_segs(_verb_used)
+	var segs := verb_active_segs(_verb_used, main.get("sim"))
 	var a := _verb_alpha(_verb_show, main._motion)   # same source the _process dirty check reads
 	var y: float = plate.position.y + 8.0            # the chip rect IS the geometry source
 	# Fades with the glyphs.

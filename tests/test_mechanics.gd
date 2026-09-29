@@ -4051,3 +4051,105 @@ func test_downed_colossus_keeps_advancing() -> void:
 	Runner.T.ok("%d,%d" % [sim.colossus["x"], sim.colossus["y"]] != before,
 		"the colossus keeps driving at where you fell instead of parking for the whole down window (%s -> %d,%d)"
 			% [before, sim.colossus["x"], sim.colossus["y"]])
+
+
+# ---------------------------------------------------------------------------
+# EVERY MODE CAN LOSE THE RUN BEFORE ITS FINALE
+# ---------------------------------------------------------------------------
+# rally_is_free() was `not (mode == "endless" and _all_players_down())`, so the free rally
+# was unconditional and INFINITE in campaign, arcade AND boss_rush: the broke timer at
+# _step_dead_player's expiry branch respawned you at the checkpoint forever, and the sim's
+# one `wiped = true` (_latch_wipe) had exactly two callers, one of which was unreachable in
+# three of the four modes. The only way to lose a campaign was to reach the Colossus and
+# die there — the finale was not the climax of a losable run, it was the whole fail state.
+#
+# This is the CLASS ratchet: it asks every mode, not the one a reviewer happened to play.
+# ENDLESS is the built-in control — it is the mode that could already be lost, so it goes
+# green on HEAD and proves the harness is capable of green.
+#
+# SAMPLING: no demo_input driver is involved (deaths are driven directly), so the ~764-tick
+# probe-defect trap does not apply. The cap is 20,000 ticks against a longest measured
+# campaign run of 9,055 ticks — 2.2x the longest instance.
+func test_every_mode_can_lose_the_run_before_its_finale() -> void:
+	var report: Array[String] = []
+	for mode in ["campaign", "arcade", "boss_rush", "endless"]:
+		var sim := SimWorld.new(0xC0FFEE, 1, mode)
+		sim.war_chest = 0
+		sim.god_mode = false
+		var p: Dictionary = sim.players[0]
+		var deaths := 0
+		var t := 0
+		while t < 20000 and not sim.wiped:
+			if p["alive"]:
+				sim._kill_player(p)
+				deaths += 1
+			sim.step([_idle()])
+			t += 1
+		report.append("%s: wiped=%s after %d deaths / %d ticks" % [mode, str(sim.wiped), deaths, t])
+		# ARM A — the class. Every mode must be losable, and losable BEFORE its finale:
+		# last_stand is the Colossus fail state, and if that is what ended the run then
+		# nothing changed.
+		Runner.T.ok(sim.wiped, "%s: a squad that keeps going down loses the run (%s)" % [mode, report[-1]])
+		Runner.T.ok(not sim.last_stand,
+			"%s: ...and it ended BEFORE the finale, not at the Colossus" % mode)
+		if mode == "endless":
+			# The documented exemption: endless is unbounded because its brake is the
+			# compounding revive price plus the compounding broke wait, and it already wiped.
+			Runner.T.eq(sim.standups_left(), -1, "endless keeps its unbounded rally (its brake is the price)")
+		else:
+			Runner.T.ok(sim.standups_exhausted(),
+				"%s: and what ended it is the sector stand-up budget (%d left)" % [mode, sim.standups_left()])
+			# ARM B — the BUDGET is what ended it, not some other clock.
+			Runner.T.ok(deaths <= SimWorld.SECTOR_STANDUPS + 1,
+				"%s: the run ended on the budget's own schedule (%d deaths vs a budget of %d)"
+					% [mode, deaths, SimWorld.SECTOR_STANDUPS])
+	# ARM C — the STRAND guard. _step_dead_player arms the broke timer only when the chest
+	# CANNOT pay. A rich, exhausted solo player therefore got no timer and a refusing coin
+	# reader: down forever, no wipe — the exact indefinite-strand failure the comments around
+	# that arm/disarm block were written about.
+	var rich := SimWorld.new(0xC0FFEE, 1, "campaign")
+	rich.god_mode = false
+	rich.war_chest = 9999
+	rich.deaths_since_gate = SimWorld.SECTOR_STANDUPS
+	var rp: Dictionary = rich.players[0]
+	rich._kill_player(rp)
+	rich.step([_idle()])
+	Runner.T.ok(rich.standups_exhausted(), "the rich player really is out of stand-ups")
+	Runner.T.ok(rp["broke_timer"] > 0,
+		"an EXHAUSTED player is put on the clock even with a full chest — money cannot buy an indefinite strand (timer %d)"
+			% int(rp["broke_timer"]))
+	# ...and the coin reader refuses, loudly rather than silently.
+	rich.events.clear()
+	var inp := SimInput.new()
+	inp.revive = true
+	rich.step([inp])
+	var denied := false
+	for e in rich.events:
+		if e.get("t", "") == "revive_deny" and bool(e.get("exhausted", false)):
+			denied = true
+	Runner.T.ok(denied, "...and pressing revive with a full chest is DENIED, with the reason on the event")
+	# ARM D — derived from source, so a stand-up path added tomorrow is covered the day it
+	# lands. Mirrors the _latch_wipe two-call-site discipline test_view_honesty already keeps.
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var sites := 0
+	var unguarded := 0
+	var worst := ""
+	var at := src.find("_respawn(")
+	while at >= 0:
+		if not src.substr(maxi(0, at - 6), 6).contains("func "):
+			sites += 1
+			var fstart := src.rfind("\nfunc ", at)
+			var head := src.substr(fstart, src.find("(", fstart + 1) - fstart)
+			var body := src.substr(fstart, at - fstart)
+			var guarded: bool = head.contains("_god_restore") \
+				or body.contains("rally_is_free()") or body.contains("standups_exhausted()")
+			if not guarded:
+				unguarded += 1
+				if worst == "":
+					worst = head.strip_edges()
+		at = src.find("_respawn(", at + 1)
+	Runner.T.ok(sites >= 3, "found the stand-up call sites in the sim (%d)" % sites)
+	Runner.T.eq(unguarded, 0,
+		"every stand-up path is either god-mode or gated on the rally/budget predicate (%d unguarded%s)"
+			% [unguarded, "" if worst == "" else " — " + worst])
+	print("STANDUP BUDGET: " + " | ".join(report))

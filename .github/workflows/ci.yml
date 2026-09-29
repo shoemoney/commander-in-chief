@@ -73,6 +73,13 @@ jobs:
         shell: bash
         run: python3 tools/i18n_check.py
 
+      - name: Verify shipping package contents for every preset
+        shell: bash
+        run: |
+          python3 -m unittest discover -s tools -p test_build_steam_candidates.py -v
+          python3 -m unittest discover -s tools -p test_verify_export_content.py -v
+          python3 tools/verify_export_content.py --godot godot
+
   # Cross-platform + cross-arch test gate: the deterministic core must produce
   # bit-identical golden checksums on every OS/arch combo the game ships on
   # (test_determinism.gd asserts this). SCRIPT ERROR in the log is a hard fail
@@ -145,6 +152,36 @@ jobs:
             grep -E "were leaked|resources still in use at exit|leaked [0-9]+ bytes" smoke.log
             exit 1
           fi
+
+      - name: Capture teardown uses real time
+        shell: bash
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          godot --headless --path . --fixed-fps 60 -s res://tools/verify_quiesce.gd 2>&1 | tee quiesce.log
+          grep -q 'QUIESCE PASS frozen=false' quiesce.log
+          grep -q 'QUIESCE PASS frozen=true' quiesce.log
+          if grep -qE '^ERROR:|SCRIPT ERROR|was leaked|were leaked|resources still in use at exit|leaked [0-9]+ bytes' quiesce.log; then
+            echo "::error::Capture teardown failed or leaked at shutdown"
+            exit 1
+          fi
+
+      - name: Production quit paths drain audio
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          for route in menu window paused-window; do
+            QUIT_PROBE_ROUTE="$route" godot --headless --path . -s res://tools/verify_game_quit.gd 2>&1 | tee "quit-$route.log"
+            if ! grep -q "QUIT DRAIN OBSERVED" "quit-$route.log"; then
+              echo "::error::Quit route $route did not stop gameplay/audio before exit"
+              exit 1
+            fi
+            if grep -qE '^ERROR:|SCRIPT ERROR|was leaked|were leaked|resources still in use at exit|leaked [0-9]+ bytes' "quit-$route.log"; then
+              echo "::error::Quit route $route failed or leaked at shutdown"
+              exit 1
+            fi
+          done
 
       - name: Full deterministic test suite
         shell: bash

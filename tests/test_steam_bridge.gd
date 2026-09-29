@@ -19,22 +19,26 @@ const MockSteam := preload("res://tests/mock_steam_singleton.gd")
 # other stash test in this suite this only restores on a normal return --
 # each test body between stash()/unstash() is kept deliberately tiny and
 # exception-free to make that a non-issue in practice.
-func _stash() -> String:
-	var path: String = SteamBridge.ACHIEVEMENTS_CACHE
-	var stash := path + ".test_stash"
-	if FileAccess.file_exists(stash) and not FileAccess.file_exists(path):
-		DirAccess.rename_absolute(stash, path)   # recover a crashed prior stash first
-	if FileAccess.file_exists(path):
-		DirAccess.rename_absolute(path, stash)
-	return stash
+func _stash() -> Dictionary:
+	var saved := {}
+	for user in [0, 1, 2]:
+		for suffix in ["", ".bak", ".tmp"]:
+			var path: String = SteamBridge.achievement_cache_path(user) + suffix
+			var stash: String = path + ".test_stash"
+			if FileAccess.file_exists(stash) and not FileAccess.file_exists(path):
+				DirAccess.rename_absolute(stash, path)
+			if FileAccess.file_exists(path):
+				DirAccess.rename_absolute(path, stash)
+			saved[path] = stash
+	return saved
 
 
-func _unstash(stash: String) -> void:
-	var path: String = SteamBridge.ACHIEVEMENTS_CACHE
-	if FileAccess.file_exists(path):
-		DirAccess.remove_absolute(path)
-	if FileAccess.file_exists(stash):
-		DirAccess.rename_absolute(stash, path)
+func _unstash(saved: Dictionary) -> void:
+	for path in saved:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
+		if FileAccess.file_exists(saved[path]):
+			DirAccess.rename_absolute(saved[path], path)
 
 
 func test_no_steam_singleton_is_fully_offline() -> void:
@@ -129,7 +133,7 @@ func test_signal_handlers_tolerate_a_leaner_arg_count() -> void:
 	# real Godot signal dispatch is at least this lenient, never less.
 	var b := SteamBridge.new()
 	b._on_stats_received()
-	Runner.T.ok(b._stats_ready, "_on_stats_received() with no args still runs its body")
+	Runner.T.ok(not b._stats_ready, "an empty stats callback must not authorize writes")
 	b._on_leaderboard_found()
 	Runner.T.ok(not b._lb_busy, "_on_leaderboard_found() with no args takes the safe not-found branch")
 	b._on_leaderboard_uploaded()
@@ -213,40 +217,256 @@ func test_mock_steam_init_stats_and_achievement_flow() -> void:
 	# Registers the mock as the real Engine "Steam" singleton so SteamBridge's
 	# ACTUAL online _init() path runs (init -> connect signals -> request
 	# stats), not just the "_steam == null" early return every test above
-	# covers. fire_signal() simulates the async current_stats_received
+	# covers. fire_signal() simulates the async user_stats_received
 	# callback Steamworks would normally deliver via run_callbacks().
 	var stash := _stash()
 	var mock := MockSteam.new()
 	Engine.register_singleton("Steam", mock)
 	var b := SteamBridge.new()
 	Runner.T.ok(b.available, "SteamBridge reports available against a mock Steam singleton that inits successfully")
-	Runner.T.ok(not b._stats_ready, "_stats_ready is still false before current_stats_received fires")
-	mock.fire_signal("current_stats_received", [1, 0, 1])
-	Runner.T.ok(b._stats_ready, "current_stats_received callback (via the real connect() path) flips _stats_ready")
+	Runner.T.eq(mock.requested_user, 1, "refresh requests the current Steam account")
+	Runner.T.ok(mock.input_initialized, "Steam Input is explicitly initialized after staging the manifest")
+	Runner.T.ok(b._warned_missing.is_empty(), "the pinned API has no missing call names")
+	Runner.T.ok(not b._stats_ready, "_stats_ready is still false before user_stats_received fires")
+	mock.fire_signal("user_stats_received", [1, 1, 1])
+	Runner.T.ok(b._stats_ready, "user_stats_received callback (via the real connect() path) flips _stats_ready")
 	b.unlock("FIRST_VICTORY")
-	Runner.T.ok(mock.achievements.get("FIRST_VICTORY", false), "unlock() reaches the mock's set_achievement() once stats are ready")
-	Runner.T.ok(mock.stats_stored, "unlock()'s default flush=true calls through to store_stats()")
+	Runner.T.ok(mock.achievements.get("FIRST_VICTORY", false), "unlock() reaches the mock's setAchievement() once stats are ready")
+	Runner.T.ok(mock.stats_stored, "unlock()'s default flush=true calls through to storeStats()")
 	Engine.unregister_singleton("Steam")
 	_unstash(stash)
 
 
+func test_stats_failure_and_foreign_user_do_not_authorize_unlocks() -> void:
+	var stash := _stash()
+	var mock := MockSteam.new()
+	Engine.register_singleton("Steam", mock)
+	var b := SteamBridge.new()
+	b.unlock("FIRST_VICTORY")
+	for reply in [[1, 0, 1], [1, 2, 1], [1, 1, 999]]:
+		mock.fire_signal("user_stats_received", reply)
+		Runner.T.ok(not b._stats_ready, "failed or foreign stats remain unconfirmed")
+		Runner.T.ok(mock.achievements.is_empty(), "unconfirmed replies do not push offline achievements")
+	mock.fire_signal("user_stats_received", [1, 1, 1])
+	Runner.T.ok(mock.achievements.get("FIRST_VICTORY", false), "a successful own-account reply reconciles the offline unlock")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_steam_accounts_do_not_share_cached_unlocks() -> void:
+	var stash := _stash()
+	var first := MockSteam.new()
+	Engine.register_singleton("Steam", first)
+	var a := SteamBridge.new()
+	a.unlock("FIRST_VICTORY")
+	Engine.unregister_singleton("Steam")
+	var second := MockSteam.new()
+	second.user_id = 2
+	Engine.register_singleton("Steam", second)
+	var b := SteamBridge.new()
+	Runner.T.ok(b._unlocked.is_empty(), "a second account cannot inherit the first account's local unlocks")
+	second.fire_signal("user_stats_received", [1, 1, 2])
+	Runner.T.ok(second.achievements.is_empty(), "reconciliation cannot push another account's unlocks")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_anonymous_cache_is_preserved_but_never_auto_claimed_by_steam() -> void:
+	var stash := _stash()
+	var legacy := ConfigFile.new()
+	legacy.set_value("achievements", "unlocked", {"FIRST_VICTORY": true})
+	legacy.save(SteamBridge.ACHIEVEMENTS_CACHE)
+	var original := FileAccess.get_file_as_bytes(SteamBridge.ACHIEVEMENTS_CACHE)
+	var offline := SteamBridge.new()
+	Runner.T.ok(offline._unlocked.get("FIRST_VICTORY", false), "legacy anonymous progress still loads offline")
+	var mock := MockSteam.new()
+	Engine.register_singleton("Steam", mock)
+	var online := SteamBridge.new()
+	mock.fire_signal("user_stats_received", [1, 1, 1])
+	Runner.T.ok(online._unlocked.is_empty(), "the account does not silently claim unattributed history")
+	Runner.T.ok(mock.achievements.is_empty(), "anonymous achievements are not uploaded")
+	Runner.T.eq(FileAccess.get_file_as_bytes(SteamBridge.ACHIEVEMENTS_CACHE), original, "sign-in preserves legacy file byte-for-byte")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_account_cache_reloads_with_schema_and_no_leftover_temp() -> void:
+	var stash := _stash()
+	var mock := MockSteam.new()
+	Engine.register_singleton("Steam", mock)
+	var first := SteamBridge.new()
+	first.unlock("WAVE_10")
+	var path := SteamBridge.achievement_cache_path(1)
+	var cf := ConfigFile.new()
+	Runner.T.eq(cf.load(path), OK, "account save is readable")
+	Runner.T.eq(cf.get_value("cache", "version"), SteamBridge.ACHIEVEMENTS_SCHEMA, "new saves have a schema")
+	Runner.T.eq(cf.get_value("cache", "account"), "1", "owner is recorded inside the file")
+	Runner.T.ok(not FileAccess.file_exists(path + ".tmp"), "successful rename consumes the temporary file")
+	var next := SteamBridge.new()
+	Runner.T.ok(next._unlocked.get("WAVE_10", false), "fresh bridge reloads the account's saved unlock")
+	mock.fire_signal("user_stats_received", [1, 1, 1])
+	Runner.T.ok(mock.achievements.get("WAVE_10", false), "own-account offline unlock reconciles after restart")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_invalid_primary_recovers_without_destroying_last_good_backup() -> void:
+	var stash := _stash()
+	var b := SteamBridge.new()
+	b.unlock("FIRST_VICTORY")
+	b.unlock("WAVE_10")
+	var path := SteamBridge.ACHIEVEMENTS_CACHE
+	var backup := FileAccess.get_file_as_bytes(path + ".bak")
+	var broken := ConfigFile.new()
+	broken.set_value("cache", "version", SteamBridge.ACHIEVEMENTS_SCHEMA)
+	broken.set_value("cache", "account", "0")
+	broken.set_value("achievements", "unlocked", "not a dictionary")
+	broken.save(path)
+	var recovered := SteamBridge.new()
+	Runner.T.ok(recovered._unlocked.get("FIRST_VICTORY", false), "invalid primary falls back to the prior good save")
+	Runner.T.ok(not recovered._unlocked.get("WAVE_10", false), "backup recovery does not fabricate the lost latest write")
+	recovered.unlock("BOSS_RUSH_CLEAR")
+	Runner.T.eq(FileAccess.get_file_as_bytes(path + ".bak"), backup, "repair never copies the broken primary over the good backup")
+	var restarted := SteamBridge.new()
+	Runner.T.ok(restarted._unlocked.get("BOSS_RUSH_CLEAR", false), "repaired primary persists a subsequent unlock")
+	_unstash(stash)
+
+
+func test_future_schema_and_wrong_owner_are_preserved_read_only() -> void:
+	var stash := _stash()
+	var path := SteamBridge.achievement_cache_path(1)
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	for future in [true, false]:
+		var fixture := ConfigFile.new()
+		fixture.set_value("cache", "version", 999 if future else SteamBridge.ACHIEVEMENTS_SCHEMA)
+		fixture.set_value("cache", "account", "1" if future else "2")
+		fixture.set_value("achievements", "unlocked", {"FIRST_VICTORY": true})
+		fixture.save(path)
+		var original := FileAccess.get_file_as_bytes(path)
+		var mock := MockSteam.new()
+		Engine.register_singleton("Steam", mock)
+		var b := SteamBridge.new()
+		Runner.T.ok(b._unlocked.is_empty(), "untrusted schema/owner is not loaded")
+		Runner.T.ok(not b._cache_writable, "protected save is not downgraded or reassigned")
+		b.unlock("WAVE_10")
+		Runner.T.eq(FileAccess.get_file_as_bytes(path), original, "new local progress never overwrites the protected file")
+		Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_inactive_steam_actions_cannot_fire_or_press_buttons() -> void:
+	var stash := _stash()
+	var mock := MockSteam.new()
+	Engine.register_singleton("Steam", mock)
+	var b := SteamBridge.new()
+	mock.set_analog_value(0, "fire", 1.0)
+	mock.set_digital_value(0, "grenade", true)
+	mock.actions_active = false
+	Runner.T.eq(b.fire_trigger_value(0), -1.0, "inactive analog data cannot fire")
+	Runner.T.ok(not b.button_pressed(0, "grenade"), "inactive digital state cannot throw a grenade")
+	mock.controllers.clear()
+	b._refresh_action_handles()
+	Runner.T.eq(b._controller_handles, [0, 0], "refresh clears disconnected controller handles")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_controller_reconnect_is_delivered_by_the_callback_pump() -> void:
+	var stash := _stash()
+	var mock := MockSteam.new()
+	mock.controllers.clear()
+	Engine.register_singleton("Steam", mock)
+	var b := SteamBridge.new()
+	Runner.T.ok(mock.device_callbacks_enabled, "device events are enabled after successful Input setup")
+	mock.controllers = [2001]
+	mock.set_analog_value(0, "fire", 0.8)
+	mock.set_digital_value(0, "grenade", true)
+	mock.device_events.append(["input_device_connected", 2001])
+	b.process()
+	Runner.T.eq(b._controller_handles, [2001, 0], "late connection is resolved through the production pump")
+	Runner.T.ok(b.fire_trigger_value(0) > 0.5, "late controller can fire")
+	Runner.T.ok(b.button_pressed(0, "grenade"), "late controller can use digital actions")
+	Runner.T.ok(mock.activated_sets.has([2001, 5000]), "late controller receives the Gameplay action set")
+	mock.controllers.clear()
+	mock.device_events.append(["input_device_disconnected", 2001])
+	b.process()
+	Runner.T.eq(b._controller_handles, [0, 0], "disconnect removes stale handles")
+	Runner.T.eq(b.fire_trigger_value(0), -1.0, "disconnected cached analog input cannot fire")
+	Runner.T.ok(not b.button_pressed(0, "grenade"), "disconnected cached button input cannot throw")
+	mock.controllers = [3001]
+	mock.device_events.append(["input_device_connected", 3001])
+	b.process()
+	Runner.T.eq(b._controller_handles, [3001, 0], "replacement handle works without restarting the bridge")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_controller_disconnect_does_not_steal_the_other_players_seat() -> void:
+	var stash := _stash()
+	var mock := MockSteam.new()
+	Engine.register_singleton("Steam", mock)
+	var b := SteamBridge.new()
+	mock.set_digital_value(1, "roll", true)
+	mock.controllers = [1002]
+	mock.device_events.append(["input_device_disconnected", 1001])
+	b.process()
+	Runner.T.eq(b._controller_handles, [0, 1002], "P2 stays P2 after P1 disconnects")
+	Runner.T.ok(not b.button_pressed(0, "roll"), "P2 cannot control the vacant P1 seat")
+	Runner.T.ok(b.button_pressed(1, "roll"), "P2 retains control")
+	mock.controllers = [1002, 4001]
+	mock.device_events.append(["input_device_connected", 4001])
+	b.process()
+	Runner.T.eq(b._controller_handles, [4001, 1002], "replacement fills the vacancy despite enumeration order")
+	mock.controllers = [1002, 4001, 4001, 0]
+	mock.device_events.append(["input_device_connected", 4001])
+	mock.device_events.append(["input_device_connected", 4001])
+	var before_batch := mock.activated_sets.size()
+	b.process()
+	Runner.T.eq(b._controller_handles, [4001, 1002], "duplicate/reordered device notifications do not exchange seats")
+	Runner.T.eq(mock.activated_sets.size() - before_batch, 2, "one callback batch refreshes each occupied seat once")
+	var activations := mock.activated_sets.size()
+	b.process()
+	Runner.T.eq(mock.activated_sets.size(), activations, "unchanged frames do not reinitialize Input actions")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_failed_manifest_or_input_init_keeps_raw_input_fallback() -> void:
+	var stash := _stash()
+	for manifest_failure in [true, false]:
+		var mock := MockSteam.new()
+		mock.manifest_ok = not manifest_failure
+		mock.input_ok = false
+		Engine.register_singleton("Steam", mock)
+		var b := SteamBridge.new()
+		Runner.T.ok(b.available, "Steamworks remains available independently of Steam Input")
+		Runner.T.ok(not b._input_ready, "failed manifest/init does not enable action reads")
+		Runner.T.ok(not mock.device_callbacks_enabled, "failed setup does not enable device callbacks")
+		mock.device_events.append(["input_device_connected", 1001])
+		b.process()
+		Runner.T.eq(b._controller_handles, [0, 0], "no handles are activated after setup failure")
+		Runner.T.eq(b.fire_trigger_value(0), -1.0, "fire falls back to the existing raw-input path")
+		Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
 func test_mock_steam_leaderboard_find_upload_round_trip() -> void:
-	# Exercises the full async chain: upload_score() -> find_or_create_leaderboard
+	# Exercises the full async chain: upload_score() -> findOrCreateLeaderboard
 	# -> (Steam answers) leaderboard_find_result -> _on_leaderboard_found ->
-	# upload_leaderboard_score -> (Steam answers) leaderboard_score_uploaded ->
+	# uploadLeaderboardScore -> (Steam answers) leaderboard_score_uploaded ->
 	# _on_leaderboard_uploaded. Nothing here hits the offline no-op path.
 	var stash := _stash()
 	var mock := MockSteam.new()
 	Engine.register_singleton("Steam", mock)
 	var b := SteamBridge.new()
-	mock.fire_signal("current_stats_received", [1, 0, 1])
+	mock.fire_signal("user_stats_received", [1, 1, 1])
 	b.upload_score("campaign", 4200)
-	Runner.T.eq(mock.find_calls.size(), 1, "upload_score() calls find_or_create_leaderboard() exactly once")
+	Runner.T.eq(mock.find_calls.size(), 1, "upload_score() calls findOrCreateLeaderboard() exactly once")
 	Runner.T.ok(b._lb_busy, "a find is in flight -- _lb_busy is set")
 	mock.fire_signal("leaderboard_find_result", [77, 1])
 	Runner.T.eq(mock.uploaded_scores.get(77, 0), 4200, "the found handler uploads the pending score to the found leaderboard handle")
 	Runner.T.ok(b._lb_busy, "still busy until the upload result itself comes back")
-	mock.fire_signal("leaderboard_score_uploaded", [true])
+	mock.fire_signal("leaderboard_score_uploaded", [true, 77, {}])
 	Runner.T.ok(not b._lb_busy, "the uploaded callback clears the busy flag, allowing the next run's upload")
 	Engine.unregister_singleton("Steam")
 	_unstash(stash)
@@ -260,7 +480,7 @@ func test_mock_steam_leaderboard_not_found_clears_busy() -> void:
 	var mock := MockSteam.new()
 	Engine.register_singleton("Steam", mock)
 	var b := SteamBridge.new()
-	mock.fire_signal("current_stats_received", [1, 0, 1])
+	mock.fire_signal("user_stats_received", [1, 1, 1])
 	b.upload_score("endless", 10)
 	mock.fire_signal("leaderboard_find_result", [0, 0])
 	Runner.T.ok(not b._lb_busy, "a not-found result still clears _lb_busy")

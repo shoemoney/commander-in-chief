@@ -60,9 +60,8 @@ src/main.gd:1232 — sfx.gd:3449 states this explicitly, not `play_vo()`.
 
 ## Note on `ASSETS.md`
 
-`ASSETS.md`'s audio table lists all 56 files here as one row ("ElevenLabs hosted TTS, stock voice
-roster"). That holds for the 14-file Radio VO group above; the 42 remaining files (`cmd/` +
-`intro_crawl.mp3`) have a git-recorded pipeline (fleet VoiceStudio, a voice clone, not a stock
-roster) that this file's breakdown reflects and `ASSETS.md`'s single row does not. Worth a
-follow-up edit to `ASSETS.md` by the owner; not made here since this job's scope is this README
-only.
+The September 7 store-preparation audit split `ASSETS.md` into these three groups
+and corrected the top-level stock-voice claim. The radio service remains inferred,
+the commander-bark pipeline is commit-recorded, and the intro service remains
+unconfirmed. Updating the inventory does not resolve the permissions review or
+the radio-role/caption discrepancy above.

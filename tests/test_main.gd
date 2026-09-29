@@ -8,11 +8,109 @@ const Runner := preload("res://tests/run_tests.gd")
 const Main := preload("res://src/main.gd")   # main.gd has no class_name — same local alias test_view_honesty.gd uses
 
 
+class CannonCueSfx extends Sfx:
+	var played: Array = []
+	func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
+		played.append([sound, vol_db, pitch])
+
+
+func test_cannon_refusal_reaches_audio_and_each_players_hud_without_spam() -> void:
+	var m := Main.new()
+	m._sfx.free()
+	var sound := CannonCueSfx.new()
+	m._sfx = sound
+	m.sim = SimWorld.new(3, 2)
+	m.sim.events = [{"t": "cannon_deny", "i": 0, "reason": "empty"},
+		{"t": "cannon_deny", "i": 1, "reason": "cooldown"}]
+	m._consume_events()
+	Runner.T.eq(sound.played.size(), 2, "both seats get their own refusal sound")
+	if sound.played.size() == 2:
+		Runner.T.ok(sound.played[0][2] > sound.played[1][2], "empty click and reload click have distinct pitches")
+	Runner.T.ok(m._grenade_dry[0] > 0 and m._grenade_dry[1] > 0, "both seats get their own ammo flash")
+	m._consume_events()
+	Runner.T.eq(sound.played.size(), 2, "same-frame duplicate cues are throttled per seat")
+	m.free()
+
+
 func _consts() -> Dictionary:
 	# Typed as the Script base (not the class) so the instance method resolves —
 	# calling it through the preloaded class type is a static-call error.
 	var ms: Script = load("res://src/main.gd")
 	return ms.get_script_constant_map()
+
+
+func test_authored_troop_muzzles_follow_all_eight_aim_directions() -> void:
+	var styles: Array = ["player1", "player2"]
+	styles.append_array(Art.ENEMY_ANIM.keys())
+	for style in styles:
+		for step in 8:
+			var heading := float(step) * PI / 4.0
+			var muzzle := Vector2.UP.rotated(Art.facing_rotation(style, heading))
+			Runner.T.ok(muzzle.is_equal_approx(Vector2.from_angle(heading)),
+				"%s muzzle agrees with aim at direction %d" % [style, step])
+	for style in ["tank", "tank_barrel", "bullet", "fx_smoke"]:
+		Runner.T.eq(Art.facing_rotation(style, 0.7), 0.7,
+			"non-troop %s keeps its existing rotation convention" % style)
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("draw_set_transform(pos.round(), Art.facing_rotation(style_key, angle)"),
+		"the actual shared sprite renderer applies the authored forward-axis correction")
+
+
+func test_character_motion_survives_redraw_stop_replacement_and_rewind() -> void:
+	var cache := {}
+	var p := {"x": 0, "y": 0}
+	Runner.T.eq(Main.sample_character_motion(cache, 0, p, 10), Vector2.ZERO, "first sighting is not a step")
+	p["y"] = -Fixed.ONE
+	var stride := Vector2(0, -Fixed.ONE)
+	Runner.T.eq(Main.sample_character_motion(cache, 0, p, 11), stride, "travel from world origin is real movement")
+	for _redraw in 20:
+		Runner.T.eq(Main.sample_character_motion(cache, 0, p, 11), stride,
+			"repainting a frozen tick must not consume its walking pose")
+	Runner.T.eq(Main.sample_character_motion(cache, 0, p, 12), Vector2.ZERO, "the next stopped tick really idles")
+	var replacement := {"x": 500 * Fixed.ONE, "y": 80 * Fixed.ONE}
+	Runner.T.eq(Main.sample_character_motion(cache, 0, replacement, 13), Vector2.ZERO,
+		"same-kind enemy slot replacement must not inherit travel")
+	replacement["x"] += Fixed.ONE
+	Runner.T.eq(Main.sample_character_motion(cache, 0, replacement, 14), Vector2(Fixed.ONE, 0), "replacement can walk")
+	Runner.T.eq(Main.sample_character_motion(cache, 0, replacement, 1), Vector2.ZERO, "rewinding re-seeds motion")
+	Runner.T.eq(cache.size(), 1, "one bounded record per slot, not a history per tick")
+
+
+func test_character_animation_clock_follows_game_time_and_reduce_motion() -> void:
+	for period in [6, 7]:
+		Runner.T.eq(Main.character_anim_phase(0, period, 0, 1.0), 0, "fresh run begins at step A")
+		Runner.T.eq(Main.character_anim_phase(period - 1, period, 0, 1.0), 0, "step A holds for its duration")
+		Runner.T.eq(Main.character_anim_phase(period, period, 0, 1.0), 1, "next interval uses step B")
+		Runner.T.eq(Main.character_anim_phase(period * 2, period, 0, 1.0), 0, "stride loops")
+		for repeat in 12:
+			Runner.T.eq(Main.character_anim_phase(period, period, 0, 1.0), 1, "frozen game clock freezes pose")
+			Runner.T.eq(Main.character_anim_phase(repeat, period, 1, 0.0), 0, "reduce motion stays still")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("character_anim_phase(sim.tick_count, 6, i, _motion)"), "player draw uses game-time cadence")
+	Runner.T.ok(src.contains("character_anim_phase(sim.tick_count, 7, eidx, _motion)"), "enemy draw uses game-time cadence")
+	Runner.T.ok(src.contains("sample_character_motion(_player_motion, i, p, sim.tick_count)"), "player draw samples once per tick")
+	Runner.T.ok(src.contains("sample_character_motion(_enemy_pos_prev, eidx, e, sim.tick_count)"), "enemy draw samples once per tick")
+
+
+func test_shooting_infantry_body_faces_its_committed_lane() -> void:
+	var sw := SimWorld.new(123, 1, "campaign")
+	var cases := [["rusher", false, SimWorld.RIFLEMAN_FIRE_CD_TICKS],
+		["rusher", true, SimWorld.ELITE_FIRE_CD_TICKS], ["sniper", false, SimWorld.SNIPER_FIRE_CD_TICKS]]
+	for entry in cases:
+		var e := {"kind": entry[0], "elite": entry[1], "windup": 5, "fire_cd": entry[2],
+			"aim_lx": 0, "aim_ly": Fixed.ONE}
+		for target_heading in [0.0, PI, -PI / 2.0]:
+			var face := Main.enemy_pose_facing(sw, e, target_heading, 0.0)
+			Runner.T.ok(is_equal_approx(face, PI / 2.0), "body holds its painted lane after target sidesteps")
+		e["windup"] = 0
+		Runner.T.ok(is_equal_approx(Main.enemy_pose_facing(sw, e, 0.0, 0.0), PI / 2.0), "recoil holds the fired lane")
+		e["fire_cd"] = 0
+		Runner.T.ok(is_equal_approx(Main.enemy_pose_facing(sw, e, 0.0, 0.0), 0.0), "recovery can face target again")
+		e["windup"] = 5
+		e["aim_ly"] = 0
+		Runner.T.ok(is_finite(Main.enemy_pose_facing(sw, e, 0.0, 0.0)), "missing/zero lock never creates invalid angle")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("face = enemy_pose_facing(sim, e, face,"), "real enemy renderer uses the committed-lane helper")
 
 
 func test_player_animation_selector_covers_every_real_action() -> void:
@@ -1577,7 +1675,7 @@ func test_reset_clears_every_slot_keyed_view_cache() -> void:
 	# which are deliberately kept.
 	var m := _fresh_main()
 	var slot_keyed := ["_tank_alive_prev", "_tank_hull", "_tank_prev", "_tank_turret",
-		"_enemy_face", "_enemy_pos_prev", "_enemy_slot_kind", "_enemy_hp_prev", "_enemy_flash",
+		"_enemy_face", "_enemy_pos_prev", "_player_motion", "_enemy_slot_kind", "_enemy_hp_prev", "_enemy_flash",
 		"_spawn_yelled", "_tech_lunge_prev", "_enemy_water_prev"]
 	for f in slot_keyed:
 		var live = m.get(f)
@@ -2346,6 +2444,67 @@ func test_floattext_cap_keeps_headlines_drops_old_pennies() -> void:
 	# Under the cap the set is identity — no reordering, no dropping.
 	var small: Dictionary = ms._floattext_keep(fx_list.slice(0, 3))
 	Runner.T.eq(small.size(), 2, "at or under the cap every toast draws (kept %d of 2)" % small.size())
+
+
+func test_streak_receipt_combines_tier_and_bonus_without_erasing_other_feedback() -> void:
+	var m := Main.new()
+	m.sim = SimWorld.new(7, 1)
+	var before := m.sim.checksum()
+	m._fx.append({"kind": "floattext", "text": "LOADOUT LOST", "t": 0.0})
+	for tier in [5, 10, 20]:
+		m._streak_receipt(320 * Fixed.ONE, 200 * Fixed.ONE, tier)
+		Runner.T.eq(m._fx.size(), 2, "one current streak receipt plus the untouched loss receipt")
+		var receipt: Dictionary = m._fx.back()
+		var bonus := 25 if tier == 5 else 50 if tier == 10 else 100
+		Runner.T.eq(receipt["text"], "x%d STREAK +%d%%" % [tier, bonus], "tier and earned bonus share one line")
+		Runner.T.eq(receipt["size"], 10, "compact milestone type")
+		Runner.T.eq(receipt["t"], 0.0, "immediate response without a delayed second burst")
+		Runner.T.eq(m._fx[0]["text"], "LOADOUT LOST", "unrelated feedback survives the upgrade")
+	m._streak_receipt(0, 0, 11)
+	Runner.T.eq(m._fx.size(), 2, "non-milestone cannot invent a reward receipt")
+	Runner.T.eq(m.sim.checksum(), before, "presentation never changes simulation or payout")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var start := src.find("func _ev_kill(")
+	var end := src.find("\nfunc ", start + 1)
+	Runner.T.ok(src.substr(start, end - start).contains('_streak_receipt(ev["x"], ev["y"], milestone)'),
+		"the actual kill handler invokes the receipt")
+	# Kill events are consumed after the whole simulation step. Two kills can
+	# jump 4 -> 6 (or 9 -> 11), so equality with the tier misses earned feedback.
+	for prior in [4, 9, 19]:
+		m._fx.clear()
+		m.sim = SimWorld.new(7, 1, "endless")
+		m.sim.kill_streak = prior
+		m.sim.kill_streak_timer = SimWorld.KILL_STREAK_WINDOW_TICKS
+		m._streak_popped = 0
+		for k in 2:
+			var enemy := {"x": 300 * Fixed.ONE, "y": 100 * Fixed.ONE,
+				"kind": "rusher", "alive": true, "elite": false}
+			m.sim.enemies.append(enemy)
+			m.sim._kill_enemy(enemy)
+		for event in m.sim.events:
+			if event["t"] == "kill":
+				m._ev_kill(event)
+		var receipts := m._fx.filter(func(fx): return fx.get("role", "") == "streak")
+		Runner.T.eq(receipts.size(), 1, "batched kills crossing a tier produce exactly one receipt")
+		Runner.T.eq(m._streak_popped, prior + 1, "the earned milestone is not skipped or repeated")
+	m.free()
+
+
+func test_floattext_cap_counts_only_currently_drawable_messages() -> void:
+	var fx := [
+		{"kind": "floattext", "t": -0.1, "size": 30},
+		{"kind": "floattext", "t": 0.1, "size": 30, "sup": true},
+		{"kind": "floattext", "t": 1.0, "size": 30},
+		{"kind": "floattext", "t": 0.0, "size": 9},
+		{"kind": "floattext", "t": 0.5, "size": 9},
+	]
+	var kept := Main._floattext_keep(fx, 2)
+	Runner.T.eq(kept.size(), 2, "two visible messages fill the available slots")
+	Runner.T.ok(kept.has(3) and kept.has(4), "invisible headlines cannot starve real feedback")
+	fx[0]["t"] = 0.0
+	kept = Main._floattext_keep(fx, 2)
+	Runner.T.ok(kept.has(0) and kept.has(3), "positive control: headline wins once it starts")
+	Runner.T.ok(not kept.has(1) and not kept.has(2), "suppressed and expired messages stay excluded")
 
 
 func test_intermission_airstrike_deny_is_truthful() -> void:

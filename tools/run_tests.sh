@@ -83,9 +83,9 @@ fi
 # leaks in bytes, so the pattern matches the shared substrings, not one sentence.
 # Window: greps the ENTIRE run output (~1300 lines / ~31 s); the defect prints
 # exactly 3 lines, once, at exit. Window strictly exceeds the defect.
-if grep -qE 'were leaked|resources still in use at exit|leaked [0-9]+ bytes' "$RUN_LOG"; then
+if grep -qE 'was leaked|were leaked|resources still in use at exit|leaked [0-9]+ bytes' "$RUN_LOG"; then
 	echo "run_tests.sh: shutdown leak diagnostics on stdout -- objects outlived the run." >&2
-	grep -E 'were leaked|resources still in use at exit|leaked [0-9]+ bytes' "$RUN_LOG" >&2
+	grep -E 'was leaked|were leaked|resources still in use at exit|leaked [0-9]+ bytes' "$RUN_LOG" >&2
 	echo "run_tests.sh: two causes print these same lines -- rule them out in this order:" >&2
 	echo "run_tests.sh:   1. a Node allocated at DECLARATION and only add_child()'d in _ready()" >&2
 	echo "run_tests.sh:      orphans every member when freed outside a SceneTree. Free them, or" >&2

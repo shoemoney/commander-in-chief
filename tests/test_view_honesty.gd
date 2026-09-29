@@ -34,6 +34,94 @@ func _view_src() -> String:
 	return FileAccess.get_file_as_string("res://src/main.gd")
 
 
+func test_title_demo_does_not_claim_gameplay_message_space() -> void:
+	var m := Main.new()
+	m.sim = SimWorld.new(3, 1, "campaign")
+	m._hud_icons.main = m
+	m._banners.append({"text": "GATE SECURED — 8.2s", "t": 0.7})
+	var checksum: int = m.sim.checksum()
+	m._menu.mode = GameMenu.Mode.TITLE
+	Runner.T.eq(m._band_rows("splash").size(), 0,
+		"the title's attract demo cannot put a checkpoint result above the game logo")
+	m.sim.pending_airstrike = 60
+	Runner.T.eq(m._band_rows("airstrike").size(), 0,
+		"demo danger does not claim a menu message row either")
+	m.sim.pending_airstrike = 0
+	Runner.T.eq(m.sim.checksum(), checksum, "presentation suppression does not alter the simulation")
+	Runner.T.eq(m._banners.size(), 1, "suppression does not delete queued events")
+	for mode in [GameMenu.Mode.HIDDEN, GameMenu.Mode.PAUSE]:
+		m._menu.mode = mode
+		Runner.T.eq(Main.band_row(m._band_rows("splash"), "top").get("text", ""),
+			"GATE SECURED — 8.2s", "real and paused gameplay retain the checkpoint message")
+	m.free()
+
+
+func _recovery_hint_view(mode := "campaign", seats := 1) -> Node:
+	var m := Main.new()
+	m.sim = SimWorld.new(7, seats, mode)
+	m._menu.mode = GameMenu.Mode.HIDDEN
+	m._hud_icons.main = m
+	m._hint_id = "revive"
+	m._hint_text = "FEED THE WAR CHEST TO REVIVE — [Space]"
+	m._hint_t = 1.0
+	m._hint_tier = Main.PresentationTier.PLAYER_STATE
+	m.sim.players[0]["alive"] = false
+	m.sim.players[0]["deaths"] = 1
+	return m
+
+
+func _recovery_band_text(m: Node) -> String:
+	return String(Main.band_row(m._band_rows("hint"), "hint").get("text", ""))
+
+
+func test_recovery_teaching_tracks_free_paid_and_completed_recovery() -> void:
+	var m := _recovery_hint_view()
+	m.sim.war_chest = 0
+	Runner.T.ok(_recovery_band_text(m).contains("NO COIN NEEDED"), "a broke campaign death teaches the free checkpoint rally")
+	m.sim.war_chest = 100
+	m._binds["revive"] = KEY_R
+	var paid := _recovery_band_text(m)
+	Runner.T.ok(paid.contains("%d¢" % m.sim.revive_cost(m.sim.players[0])) and paid.contains("[R]"), "same visible hint updates to the actual price and rebound control")
+	m.sim.players[0]["alive"] = true
+	Runner.T.eq(_recovery_band_text(m), "", "revive teaching disappears immediately after recovery")
+	Runner.T.ok(m._top_center_priority() != "hint", "a stale recovery hint cannot suppress the real objective")
+	m._hint("after_recovery", "NEXT LESSON")
+	m._step_hint_readable_time(m._top_center_priority())
+	Runner.T.eq(m._hint_id, "after_recovery", "resolved recovery releases queued teaching instead of freezing its timer")
+	m.sim.players[0]["alive"] = false
+	Runner.T.eq(_recovery_band_text(m), "NEXT LESSON", "a later death cannot resurrect the retired first-death hint")
+	m._hint("revive", m._recovery_hint_text(), true)
+	m.sim.players[0]["alive"] = true
+	m._start_next_hint()
+	Runner.T.ok(not m._seen.has("revive") and not m._hint_pending.has("revive"), "recovery completed before delivery does not consume first-time teaching")
+	Runner.T.eq(m._hint_t, 0.0, "obsolete queued advice cannot hold the teaching slot")
+	m.free()
+
+
+func test_recovery_teaching_never_promises_unavailable_reinforcements() -> void:
+	var m := _recovery_hint_view("endless")
+	m.sim.war_chest = 0
+	Runner.T.ok(_recovery_band_text(m).contains("LAST BREATH"), "solo endless broke timer is the end, not a free rally")
+	m.sim.mode = "campaign"
+	m.sim.deaths_since_gate = SimWorld.SECTOR_STANDUPS
+	m.sim.war_chest = 1000
+	Runner.T.ok(_recovery_band_text(m).contains("NO REINFORCEMENTS"), "money cannot bypass the exhausted sector budget")
+	m.sim.last_stand = true
+	Runner.T.eq(_recovery_band_text(m), "LAST STAND — NO REVIVES", "finale cannot advertise the coin reader")
+	m.sim.wiped = true
+	Runner.T.eq(_recovery_band_text(m), "", "no recovery teaching over the completed wipe")
+	m.free()
+
+
+func test_recovery_teaching_updates_when_coop_rescue_becomes_a_wipe() -> void:
+	var m := _recovery_hint_view("endless", 2)
+	m.sim.war_chest = 0
+	Runner.T.ok(_recovery_band_text(m).contains("NO COIN NEEDED"), "a standing partner keeps the free rescue available")
+	m.sim.players[1]["alive"] = false
+	Runner.T.ok(_recovery_band_text(m).contains("LAST BREATH"), "the same displayed message changes when the partner falls")
+	m.free()
+
+
 func _call_src(src: String, at: int) -> String:
 	## The exact text of the call that starts at `at`, paren-balanced. A source-grep
 	## over a WIDE WINDOW around a neighbouring call is how a half-applied effect
@@ -1091,8 +1179,10 @@ func test_death_feedback_is_concise_causal_and_last_stand_explicit() -> void:
 			and String(ms._defeat_title(true)).contains("DEFEAT"),
 			"the finale debrief explicitly identifies a Last Stand defeat")
 	var src := _view_src()
-	Runner.T.ok(src.contains('_loss_sting(ev, "DOWNED — %s" % death_cause)'),
+	Runner.T.ok(src.contains('"DOWNED — %s" % death_cause') and src.contains("_loss_sting(ev, down_bill)"),
 		"the fatal beat names its inferred cause at the body, before the debrief")
+	Runner.T.ok(src.contains('down_bill += " · " + down_summary'),
+		"...and the same line carries the global losses, instead of a second red plate on the same body")
 	Runner.T.ok(src.contains("_draw_result_panel(_defeat_title(sim.last_stand)"),
 		"the Last Stand-aware title is wired into the actual casualty card")
 	# Exactly one loadout receipt call in _ev_revive: complete event payload, one visual line.
@@ -2152,6 +2242,65 @@ func test_ready_up_tally_exists_for_split_votes() -> void:
 		"a split vote says both must hold")
 
 
+func test_solo_ready_hold_has_live_cancelable_feedback() -> void:
+	var m := Main.new()
+	m.sim = SimWorld.new(3, 1, "endless")
+	m.sim.wave = 1
+	m.sim.intermission_ticks = 180
+	var input := SimInput.new()
+	input.revive = true
+	m._last_inputs = [input]
+	# Drive the actual wave state machine, not a view-side progress clock.
+	for tick in range(1, SimWorld.READY_HOLD_TICKS):
+		m.sim._step_waves(m._last_inputs)
+		var checksum := m.sim.checksum()
+		var state: Dictionary = m._ready_tally_state()
+		Runner.T.ok(not state.is_empty(), "solo held input gets feedback before deployment")
+		Runner.T.eq(state.get("progress", -1.0), float(tick) / SimWorld.READY_HOLD_TICKS,
+			"the panel follows the simulation's actual hold counter")
+		Runner.T.eq(m.sim.checksum(), checksum, "reading ready feedback does not change gameplay")
+	var held: Dictionary = m._ready_tally_state()
+	Runner.T.ok(String(held.get("detail", "")).contains("RELEASE"),
+		"the solo panel explains how to keep shopping")
+	input.revive = false
+	m.sim._step_waves(m._last_inputs)
+	Runner.T.eq(m.sim.ready_hold, 0, "released hold resets the sim timer")
+	Runner.T.ok(m._ready_tally_state().is_empty(), "release immediately removes hold feedback")
+	input.revive = true
+	for tick in SimWorld.READY_HOLD_TICKS:
+		m.sim._step_waves(m._last_inputs)
+	Runner.T.eq(m.sim.intermission_ticks, 0, "a complete held input deploys normally")
+	Runner.T.ok(m._ready_tally_state().is_empty(), "no ready panel survives into combat")
+	m.free()
+
+
+func test_ready_feedback_respects_split_vote_and_rescue_priority() -> void:
+	var m := Main.new()
+	m.sim = SimWorld.new(3, 2, "endless")
+	m.sim.intermission_ticks = 180
+	var first := SimInput.new()
+	first.revive = true
+	var second := SimInput.new()
+	m._last_inputs = [first, second]
+	m.sim._step_waves(m._last_inputs)
+	var split: Dictionary = m._ready_tally_state()
+	Runner.T.ok(String(split.get("title", "")).contains("BOTH HOLD"), "one co-op vote still requests the other seat")
+	Runner.T.eq(split.get("progress", -1.0), 0.0, "a split vote cannot advance the bar")
+	second.revive = true
+	m.sim._step_waves(m._last_inputs)
+	Runner.T.ok(float(m._ready_tally_state().get("progress", 0.0)) > 0.0, "unanimous input advances feedback")
+	m.sim.players[1]["alive"] = false
+	m.sim._step_waves(m._last_inputs)
+	Runner.T.ok(m._ready_tally_state().is_empty(), "a downed partner reserves the input for rescue")
+	m.sim.players[1]["alive"] = true
+	m._last_inputs = [first]
+	Runner.T.ok(m._ready_tally_state().is_empty(), "incomplete input state cannot claim unanimous readiness")
+	m._last_inputs = [first, second]
+	m.sim.mode = "campaign"
+	Runner.T.ok(m._ready_tally_state().is_empty(), "campaign never shows an endless deployment panel")
+	m.free()
+
+
 func test_hulk_flame_dies_with_sim_cover() -> void:
 	var src := _view_src()
 	Runner.T.ok(src.contains("func _hulk_sim_cover"),
@@ -2336,6 +2485,45 @@ func test_arcade_ground_scorches_toward_the_foundry() -> void:
 	m.free()
 	Runner.T.ok(march > 0.9,
 		"ARCADE ground scorches toward the Foundry — 5 gates open must read as the finale, not wave 0, got %.2f" % march)
+	# Real Chapter Select does not append fake open gates. Check its actual
+	# cursor shift before streaming, then again after ordinary simulation steps.
+	for chapter in range(1, 7):
+		var jumped := Main.new()
+		jumped._bg_root = Node2D.new()
+		jumped.add_child(jumped._bg_root)
+		jumped.sim = SimWorld.new(7, 1, "arcade")
+		jumped.sim.jump_to_chapter(chapter)
+		var expected := float(chapter - 1) / 5.0
+		var checksum := jumped.sim.checksum()
+		Runner.T.ok(is_equal_approx(jumped._sector_march(), expected),
+			"chapter %d starts with its own environment before streaming" % chapter)
+		Runner.T.eq(jumped.sim.checksum(), checksum, "reading environment does not mutate the simulation")
+		jumped._sync_ground_palette()
+		Runner.T.ok(is_equal_approx(jumped._litter_march_prev, expected),
+			"fresh chapter does not retain the opening palette on visible rows")
+		for tick in 3:
+			jumped.sim.step(_idle())
+			Runner.T.ok(is_equal_approx(jumped._sector_march(), expected),
+				"chapter %d retains its environment after streaming tick %d" % [chapter, tick])
+		jumped.free()
+	var flow := Main.new()
+	flow._bg_root = Node2D.new()
+	flow.add_child(flow._bg_root)
+	flow.sim = SimWorld.new(7, 1, "campaign")
+	flow._sync_ground_palette()
+	flow.sim.gates.append({"open": true})
+	flow.sim.tick_count += 1
+	flow._sync_ground_palette()
+	Runner.T.eq(flow._litter_march_prev, 0.0, "positive control: continuous gate crossing keeps old ground below the seam")
+	Runner.T.ok(is_equal_approx(flow._bg_march, 0.2), "new ground is armed above the seam")
+	flow.sim = SimWorld.new(7, 1, "arcade")
+	flow.sim.jump_to_chapter(5)
+	flow._sync_ground_palette()
+	Runner.T.ok(is_equal_approx(flow._litter_march_prev, 0.8), "restarting deeper has no inherited terrain")
+	flow.sim = SimWorld.new(7, 1, "endless")
+	flow._sync_ground_palette()
+	Runner.T.eq(flow._bg_sim, flow.sim, "same-camera mode replacement invalidates the retained terrain owner")
+	flow.free()
 
 
 func test_the_ground_decal_band_loop_survives_a_band_boundary() -> void:
@@ -3017,7 +3205,8 @@ func test_ghillie_card_does_not_sell_a_grenade_flush() -> void:
 func test_last_stand_banner_is_plated() -> void:
 	## Foundry floor is orange-red; unplated LAST STAND ink washed out.
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
-	var at := src.find("LAST STAND — NO REVIVES")
+	# Match the persistent finale banner, not the shorter recovery teaching cue.
+	var at := src.find("LAST STAND — NO REVIVES, 2× KILL SCORE")
 	Runner.T.ok(at > 0, "the last-stand banner string still exists")
 	var window := src.substr(maxi(0, at - 280), 360)
 	Runner.T.ok(window.contains("_banner_plate"),
@@ -5021,3 +5210,191 @@ func _hits_any(got: Rect2, marks: Array[Rect2]) -> bool:
 		if got.grow(-0.5).intersects(m.grow(-0.5)):
 			return true
 	return false
+
+
+# ---------------------------------------------------------------------------
+# NO WORLD LABEL IS GRANTED PIXELS FLUSH AGAINST THE FRAME EDGE
+# ---------------------------------------------------------------------------
+# Sibling of the bottom-rail ratchet above, on the same arbiter and the same derived
+# producer set — that one pins labels off the HUD rail, this one pins them off the frame
+# BORDER. claim_label_slot's x-clamp was `clampf(rect.position.x, safe_left,
+# maxf(safe_left, safe_right - w))` with safe_left/safe_right defaulting to 0/640 and
+# NOT ONE of the four production call sites passing them, so a plate sitting at exactly
+# x = 0 was a legal grant. MEASURED on cf23387 over the sweep below: 212,773 of 496,984
+# grants (42.8%) flush against the left or right edge, 218,478 (44.0%) within 6px of one,
+# flush_y 0.
+#
+# The sweep is EXHAUSTIVE over the arbiter's input domain — every scraped producer's width
+# at both TEXT SIZE stops, x from off-frame-left to off-frame-right, y over the whole
+# frame, both claim kinds (persistent plate and droppable toast). There is no sampling
+# window to under-shoot and no demo_input driver involved.
+#
+# Arm B is the counter-factual and is asserted NON-ZERO. It re-runs every claim through
+# the SAME shipped function with safe_left/safe_right widened by exactly
+# LABEL_EDGE_MARGIN, which cancels the margin and reproduces HEAD's 0..640 clamp exactly
+# (the granted x is `clampf(want.x, lo, maxf(lo, hi - w))` on every one of the five return
+# paths, so this is the real behaviour, not a re-derivation). A ratchet whose
+# counter-factual is also clean pins nothing and reads green forever.
+func test_no_world_label_is_flush_against_the_frame_edge() -> void:
+	var producers := _world_label_producers()
+	Runner.T.ok(producers.size() >= 16,
+		"scraped the world-label / floattext / supply-receipt producers out of main.gd (%d)"
+			% producers.size())
+	var m: float = Main.LABEL_EDGE_MARGIN
+	Runner.T.ok(m > 0.0, "the frame margin is a real number of pixels (%.1f)" % m)
+	# The scrape deliberately over-collects (it also catches END-CARD row literals, which are
+	# not world-space at all) so the swept width spectrum BOUNDS the real one. Exactly one of
+	# those — the debrief's KNOCKDOWNS ledger row — measures 644px of plate at 200% TEXT SIZE,
+	# wider than the whole 640px frame, so no clamp can fit it and its claims are excluded
+	# from the flush count below. The WORLD-SPACE set has no such member, and that is the
+	# assertion that matters:
+	var was_scale: float = Art.text_scale
+	Art.text_scale = 2.0
+	var strict_over := 0
+	var strict_worst := ""
+	var strict := {}
+	var wre := RegEx.new()
+	wre.compile('_world_label(_centered)?\\(\\s*"([^"]*)"')
+	for wm in wre.search_all(_view_src()):
+		strict[wm.get_string(2)] = true
+	for b in Main.BUY_FLOAT:
+		strict[b] = true
+	for k in strict.keys():
+		var t := String(k).replace("%d", "8888").replace("%s", "WWWWWWWW").replace("%.1f", "88.8")
+		var pw2: float = Art.tw(t, Art.fs(8)) + 6.0
+		if pw2 > 640.0 - m * 2.0:
+			strict_over += 1
+			strict_worst = "%.0fpx  %s" % [pw2, t]
+	Runner.T.ok(strict.size() >= 10, "scraped the strictly WORLD-SPACE producers (%d)" % strict.size())
+	Runner.T.eq(strict_over, 0,
+		"every world-space label producer still fits inside the margined frame at 200%% TEXT SIZE (%d over%s)"
+			% [strict_over, "" if strict_worst == "" else " — " + strict_worst])
+	# --- the sweep ---
+	var claims := 0
+	var skipped := 0
+	var flush_x := 0
+	var flush_y := 0
+	var cf_flush_x := 0
+	var worst := ""
+	for scale in [1.0, 2.0]:
+		Art.text_scale = scale
+		var sz := Art.fs(8)
+		# The arbiter sees a rect, not a string: reduce the producers to the distinct WIDTHS
+		# they measure at this size, which is the whole of what varies.
+		var widths := {}
+		for t in producers:
+			widths[Art.tw(t, sz)] = true
+		# ONE reservation, mid-frame. The x-clamp is applied before any row dodging and is
+		# invariant across every return path, so a congested `taken` adds nothing to THIS
+		# question (saturating the frame is the rail sibling's job, and it costs ~20x).
+		var taken: Array[Rect2] = [Main.player_label_exclusion(Vector2(320.0, 300.0))]
+		for wv in widths.keys():
+			var w: float = wv
+			for xi in range(-40, 681, 10):
+				for yi in range(0, 361, 10):
+					var pw := Main._label_plate_rect(float(xi), float(yi), w, sz)
+					var fw := Main.floattext_claim_rect(Vector2(xi, yi), w, sz)
+					for k in 2:
+						var want: Rect2 = pw if k == 0 else fw
+						var drop := k == 1
+						if want.size.x > 640.0 - m * 2.0:
+							skipped += 1
+							continue   # wider than the margined frame: unplaceable by construction
+						claims += 1
+						var cf := Main.claim_label_slot(want, taken, 0.0, drop, 360.0, -m, 640.0 + m)
+						if cf.has_area() and (cf.position.x < m - 0.001 or cf.end.x > 640.0 - m + 0.001):
+							cf_flush_x += 1
+						var got := Main.claim_label_slot(want, taken, 0.0, drop)
+						if not got.has_area():
+							continue   # the blessed droppable-suppression sentinel
+						if got.position.x < m - 0.001 or got.end.x > 640.0 - m + 0.001:
+							flush_x += 1
+							if worst == "":
+								worst = "%s w%.0f @%d,%d scale %.1f -> %s" % [
+									"toast" if drop else "persistent", w, xi, yi, scale, str(got)]
+						if got.position.y < m - 0.001 or got.end.y > 360.0 - m + 0.001:
+							flush_y += 1
+							if worst == "":
+								worst = "%s(Y) w%.0f @%d,%d scale %.1f -> %s" % [
+									"toast" if drop else "persistent", w, xi, yi, scale, str(got)]
+	Art.text_scale = was_scale
+	Runner.T.ok(claims >= 400000,
+		"swept the arbiter's whole input domain against the frame border (%d claims, %d unplaceable)"
+			% [claims, skipped])
+	Runner.T.ok(cf_flush_x > 0,
+		("COUNTER-FACTUAL: with the safe band widened by the margin (i.e. HEAD's 0..640 clamp) "
+			+ "the same sweep still sees the defect (%d flush grants) — a clean counter-factual "
+			+ "means this ratchet pins nothing") % cf_flush_x)
+	Runner.T.eq(flush_x, 0,
+		"no world label is granted pixels flush against the left/right frame edge (%d%s)"
+			% [flush_x, "" if worst == "" else " — first: " + worst])
+	Runner.T.eq(flush_y, 0,
+		"no world label is granted pixels flush against the top/bottom frame edge (%d%s)"
+			% [flush_y, "" if worst == "" else " — first: " + worst])
+	# --- the WIRING. Geometry alone would pass with the margin measured against the wrong
+	# --- edge: on 21:9/32:9 the visible band is inset by pillarbox bars, and
+	# --- claim_label_slot's own docstring has promised since it shipped that "live call
+	# --- sites pass the safe band". They never did — 0 of 4. Same _call_src walk the rail
+	# --- sibling uses, so a fifth call site added tomorrow is covered the day it lands.
+	var src := _view_src()
+	var sites := 0
+	var unbanded := 0
+	var at := src.find("claim_label_slot(")
+	while at >= 0:
+		var call := _call_src(src, at)
+		if not src.substr(maxi(0, at - 12), 12).contains("func "):
+			sites += 1
+			if not (call.contains("_label_safe_l") and call.contains("_label_safe_r")):
+				unbanded += 1
+		at = src.find("claim_label_slot(", at + 1)
+	Runner.T.ok(sites >= 4, "found the production claim sites (%d)" % sites)
+	Runner.T.eq(unbanded, 0,
+		"every production claim passes the visible safe band as safe_left/safe_right (%d unbanded)"
+			% unbanded)
+	# ...and the band is actually RESOLVED each frame, not left at its 0/640 default — the
+	# arbiter-computed-and-never-seeded failure is this codebase's own documented one.
+	var draw_body := src.substr(src.find("func _draw() -> void:"))
+	draw_body = draw_body.substr(0, draw_body.find("\nfunc "))
+	Runner.T.ok(draw_body.length() > 4000, "scraped _draw()'s body (%d chars)" % draw_body.length())
+	Runner.T.ok(draw_body.contains("_label_safe_l = ") and draw_body.contains("_label_safe_r = "),
+		"_draw() resolves the label safe band for the frame")
+	Runner.T.ok(draw_body.contains("_safe_band_rect()"),
+		"_draw() resolves it from the REAL safe band (visible rect n OS safe area), not a literal")
+
+
+# ---------------------------------------------------------------------------
+# ONE BEAT, ONE RECEIPT
+# ---------------------------------------------------------------------------
+# The other half of the label-clump complaint: the knockdown beat printed TWO red
+# floattext lines from ONE event, at the SAME ev["x"]/ev["y"], on the SAME tick —
+# "DOWNED — ELITE" and "COMMENDATION LOST" — so the arbiter's stacking ladder was being
+# fed a pile it never needed to arbitrate. main.gd already contains the precedent and the
+# reasoning: _loss_summary exists because "seven simultaneous red receipts hid the revived
+# player... so the battlefield gets one concise bill". The knockdown beat never got that
+# treatment. Scraped per match-branch so the rule holds for every beat, not just this one.
+func test_no_event_beat_prints_more_than_one_loss_receipt() -> void:
+	var src := _view_src()
+	var at := src.find("func _consume_events() -> void:")
+	Runner.T.ok(at >= 0, "found _consume_events()")
+	var body := src.substr(at)
+	body = body.substr(0, body.find("\nfunc "))
+	Runner.T.ok(body.length() > 4000, "scraped _consume_events()'s body (%d chars)" % body.length())
+	# Branch labels of the event match are one indent inside the loop: `\n\t\t\t"name":`.
+	var re := RegEx.new()
+	re.compile('\\n\\t\\t\\t"([a-z_]+)":')
+	var marks := re.search_all(body)
+	Runner.T.ok(marks.size() >= 12, "found the event branches (%d)" % marks.size())
+	var worst := ""
+	var offenders := 0
+	for i in marks.size():
+		var start: int = marks[i].get_start()
+		var end: int = marks[i + 1].get_start() if i + 1 < marks.size() else body.length()
+		var chunk := body.substr(start, end - start)
+		var n := chunk.count("_loss_sting(")
+		if n > 1:
+			offenders += 1
+			if worst == "":
+				worst = '"%s" prints %d' % [marks[i].get_string(1), n]
+	Runner.T.eq(offenders, 0,
+		"no single event branch stacks more than one loss receipt on the same body (%d%s)"
+			% [offenders, "" if worst == "" else " — " + worst])
