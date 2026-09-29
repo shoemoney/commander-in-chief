@@ -52,8 +52,17 @@ func test_authored_troop_muzzles_follow_all_eight_aim_directions() -> void:
 		Runner.T.eq(Art.facing_rotation(style, 0.7), 0.7,
 			"non-troop %s keeps its existing rotation convention" % style)
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
-	Runner.T.ok(src.contains("draw_set_transform(pos.round(), Art.facing_rotation(style_key, angle)"),
-		"the actual shared sprite renderer applies the authored forward-axis correction")
+	# a3-13: this used to scrape ONE literal — the whole call, inline. Hoisting the
+	# rotation into a named local (which the key rim needs, to counter-rotate the
+	# sunward edge) broke the scrape while changing no behaviour. A single-expression
+	# scrape also passes on a COMMENT, which is the failure mode this file's own
+	# header warns about. So assert the WIRING instead: the correction is computed
+	# from the same two inputs, and that computed value is what reaches the
+	# transform. Rotation computed but not used now fails; so does a renamed local.
+	Runner.T.ok(src.contains("var spr_rot := Art.facing_rotation(style_key, angle)"),
+		"the shared sprite renderer computes the authored forward-axis correction")
+	Runner.T.ok(src.contains("draw_set_transform(pos.round(), spr_rot,"),
+		"and that correction is what it actually hands to the sprite transform")
 
 
 func test_character_motion_survives_redraw_stop_replacement_and_rewind() -> void:

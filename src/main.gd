@@ -7414,6 +7414,33 @@ const _LIGHT_RIM := {"rusher": true, "elite": true, "m_soldier2": true,
 	"enemy_smg": true, "enemy_assault": true, "enemy_shotgun": true, "enemy_lmg": true,
 	"enemy_sniper": true,
 	"m_pilot": true}   # sol-08: dropped m_insurgent3-5/m_contractor2 (retired with the enemy_* swap)
+# a3-13 THE KEY RIM — who wears a lit sunward edge. Units, vehicles and bosses
+# only: these are the bodies that have to read as SOLID, and they are also the
+# ones large enough for a 1px displacement to survive the downscale. Scenery
+# deliberately stays off it — the ground-dressing layer is already carrying the
+# frame's texture, and a warm edge on every pebble would re-noise the floor that
+# six anti-lattice ratchets exist to keep calm. Same membership as the warm
+# separator rim above, which is also a "this must read as a threat/object" set.
+const _KEY_RIM := {"rusher": true, "elite": true, "m_soldier2": true, "sapper": true,
+	"courier": true, "ghillie": true, "player1": true, "player2": true, "frogman": true,
+	"observer": true, "m_pilot": true, "m_bombsuit": true,
+	"enemy_smg": true, "enemy_assault": true, "enemy_shotgun": true,
+	"enemy_lmg": true, "enemy_sniper": true,
+	"tank_body": true, "m_technical": true, "m_radar_tank": true, "m_rocket_truck": true,
+	"gunship_body": true, "colossus_body": true, "m_heli_attack2": true, "m_heli_transport": true}
+# Sun bearing in SCREEN space: north-west, matching the key in
+# tools/blender_vehicles.py and the ground's north-lit-crown convention. The
+# negative Y is "up" — the art is authored muzzle-north, so screen-up is -Y.
+const _KEY_RIM_DIR := Vector2(-0.70710678, -0.70710678)   # 1/sqrt(2) — exactly unit
+# 1.3px of displacement. Below ~1px it aliases away at 640x360; above ~1.6 the
+# edge stops reading as a light wrap and starts reading as a drop shadow of the
+# wrong polarity. The dark contour is 1.1 (fleet) / 1.7 (units) / 2.2 (bosses)
+# and the key sits UNDER all of them, so it can never be mistaken for one.
+const KEY_RIM_PX := 1.3
+# Warm, near-white. Deliberately less saturated than the _LIGHT_RIM separator
+# (1.0, 0.9, 0.62) so the two read as different jobs: that one says "threat",
+# this one says "lit". Matches ROCK_TOP_LIGHT's family.
+const KEY_RIM_COL := Color(1.0, 0.96, 0.87, 0.85)
 # a1-07: craters read as blasted DEPRESSIONS via a soft dark pit under the decal
 # (they are holes, so they get no drop-shadow — this is a centered inner-shadow).
 const _CRATER_KEYS := {"crater": true, "crater_field": true}
@@ -7523,7 +7550,8 @@ func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2(cr, cr), Vector2(cr, cr) * 2.0),
 			false, Color(0.03, 0.02, 0.02, 0.5))
 	var tint := mod * Art.tint(style_key)
-	draw_set_transform(pos.round(), Art.facing_rotation(style_key, angle), Vector2(s * x_stretch, s * stretch))
+	var spr_rot := Art.facing_rotation(style_key, angle)
+	draw_set_transform(pos.round(), spr_rot, Vector2(s * x_stretch, s * stretch))
 	var origin := -t.get_size() / 2.0
 	if with_rim and Art.outlined(style_key):
 		# 1.4px screen-space dark rim so units/vehicles read on any ground.
@@ -7564,6 +7592,37 @@ func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
 		if not _tiny_decor_no_rim(style_key, maxf(t.get_size().x, t.get_size().y) * s):
 			for o in _OUTLINE_OFFSETS:
 				draw_texture(t, origin + o * d, oc)
+	# a3-13 THE KEY RIM — the lit EDGE, as opposed to the dark contour above.
+	# Every rim the game had until now is a figure-ground device: it separates a
+	# unit from whatever is behind it. None of them is LIGHT. The ground got a
+	# sky-light ramp and the rocks got a north-lit crescent and the bags got a
+	# lit crown, but a soldier had no lit side at all — which is why units read
+	# as flat cut-outs sitting ON the floor rather than standing IN it.
+	#
+	# This is the cheapest honest 2D key light there is: one more copy of the
+	# sprite, displaced a pixel and change toward the sun, so only its sunward
+	# edge escapes from behind the body. It is deliberately drawn in SCREEN
+	# space — the camera is overhead, the sun does not turn when a unit pivots,
+	# and the whole point is that the highlight stays on the same side of the
+	# frame while the sprite rotates underneath it. The existing rim offsets are
+	# in SPRITE space (they sweep as the unit turns), so the key offset has to
+	# undo the rotation explicitly, and the non-uniform pose fold with it.
+	# get_set_transform is T*R*S, so a screen offset v needs R(-rot) * v, then
+	# divided by the scale to land back in texture units.
+	#
+	# NOT nested under the OUTLINE gate. The infantry set (player1/2, ghillie,
+	# sapper, frogman, bombsuit) is deliberately ABSENT from Art.OUTLINE because it
+	# bakes its own thick ink keyline and the extra rim swallowed the 18px
+	# silhouette — so gating here meant the game got no key light on the one
+	# sprite that matters most. The key edge is a different job from the contour
+	# (light vs separation) and is authored to sit under it, so it stands alone.
+	if with_rim and _KEY_RIM.has(style_key):
+		var kscr := _KEY_RIM_DIR * (KEY_RIM_PX / s)
+		var kloc := kscr.rotated(-spr_rot)
+		kloc = Vector2(kloc.x / x_stretch, kloc.y / stretch)
+		draw_texture(t, origin + kloc, Color(KEY_RIM_COL.r, KEY_RIM_COL.g,
+			KEY_RIM_COL.b, KEY_RIM_COL.a * tint.a))
+	draw_texture(t, origin, tint)
 	draw_texture(t, origin, tint)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 

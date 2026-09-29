@@ -3570,3 +3570,74 @@ func _art_path_for(key: String) -> String:
 	var rest := src.substr(at + pat.length())
 	var e := rest.find("\"")
 	return "" if e < 0 else "res://assets/art/" + rest.substr(0, e)
+
+
+# --- a3-13: the key rim (the lit sunward edge) ---
+
+func test_a3_key_rim_is_populated_and_sane() -> void:
+	var c := _consts()
+	var key: Dictionary = c["_KEY_RIM"]
+	Runner.T.ok(key.size() >= 12, "the key-rim set is populated (%d)" % key.size())
+	# Every key-rim body must already be a rimmed sprite, or the lit edge would be
+	# drawn on art that never gets a contour and read as a rendering seam.
+	# Deliberately NOT required to be in Art.OUTLINE. The infantry set is absent
+	# from that table on purpose (it bakes its own keyline), and gating the key
+	# rim on OUTLINE is exactly the bug this test was written to catch: it left
+	# the player, frogman, ghillie, sapper and bombsuit with NO lit edge at all.
+	var art: Script = load("res://src/view/art.gd")
+	var not_outlined: Array = []
+	for k in key:
+		if not art.get("OUTLINE").has(k):
+			not_outlined.append(k)
+	Runner.T.ok(not_outlined.size() >= 4,
+		"the set still contains self-keylined infantry (%d of them) — the key rim must "
+		+ ("not be gated on Art.OUTLINE (%d)" % not_outlined.size()))
+	for k in ["player1", "player2", "frogman", "ghillie", "sapper", "m_bombsuit"]:
+		Runner.T.ok(not art.get("OUTLINE").has(k),
+			"'%s' is expected to be self-keylined, so its key rim proves the un-gating" % k)
+	# The units that must read as SOLID are the point of the change: every class of
+	# soldier, both vehicles, both bosses. Losing any of these silently puts the
+	# game back to flat cut-outs.
+	for k in ["player1", "player2", "enemy_smg", "enemy_assault", "enemy_sniper",
+			"tank_body", "gunship_body", "colossus_body"]:
+		Runner.T.ok(key.has(k), "'%s' wears the lit sunward edge" % k)
+
+
+func test_a3_key_rim_direction_is_screen_north_west_and_unrotated() -> void:
+	var c := _consts()
+	var dir: Vector2 = c["_KEY_RIM_DIR"]
+	# Screen-up is -Y (art is authored muzzle-north), so the sun is up-and-left.
+	Runner.T.ok(dir.x < 0.0 and dir.y < 0.0, "the key comes from screen north-west (%s)" % dir)
+	Runner.T.ok(is_equal_approx(dir.length(), 1.0), "the bearing is a unit vector")
+	# It must agree with the Blender key and the ground's north-lit-crown
+	# convention, or the vehicles and the units would be lit from two directions.
+	var rocks := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(rocks.contains("ROCK_TOP_LIGHT"), "the north-lit crown convention still exists")
+	# Sub-2px or over-1.6px both fail for opposite reasons: one aliases away, the
+	# other reads as a drop shadow of the wrong polarity.
+	var px: float = c["KEY_RIM_PX"]
+	Runner.T.ok(px >= 1.0 and px <= 1.6, "key rim is 1.0-1.6px (%.2f)" % px)
+
+
+func test_a3_key_rim_is_counter_rotated_not_sprite_space() -> void:
+	# THE bug this guards: the existing rim offsets are in SPRITE space, so a naive
+	# copy of that idiom puts the "lit" edge on whichever side the unit happens to
+	# be FACING — the highlight then sweeps around as the unit turns, which is not
+	# light, it is a decoration. The key edge has to undo the sprite rotation.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains("var spr_rot := Art.facing_rotation(style_key, angle)"),
+		"the sprite rotation is captured so the key edge can undo it")
+	Runner.T.ok(src.contains("kscr.rotated(-spr_rot)"),
+		"the key offset is counter-rotated by the sprite rotation — screen-anchored sun")
+	Runner.T.ok(src.contains("/ x_stretch") and src.contains("/ stretch"),
+		"and the non-uniform pose fold is undone too, or the key lands off-target on posed art")
+	# And it must actually be inside the rim branch, or it is dead code that a
+	# green suite happily carries — the failure mode this whole file was written for.
+	var i := src.find("kscr.rotated(-spr_rot)")
+	var gate := src.find("if with_rim and _KEY_RIM.has(style_key):")
+	Runner.T.ok(gate > 0 and i > gate, "the key draw is inside the _KEY_RIM gate, not orphaned")
+	# ...and the gate must NOT sit inside the Art.outlined branch, or every
+	# self-keylined infantry silently loses the light. Non-vacuity: OUTLINE really
+	# does exclude the player today, so a re-nesting would be a live regression.
+	Runner.T.ok(src.contains("if with_rim and _KEY_RIM.has(style_key):"),
+		"the key-rim gate is a sibling of the contour gate, not nested under it")
