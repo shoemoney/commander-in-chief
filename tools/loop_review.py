@@ -141,10 +141,18 @@ def ask(model: str, shots: list[str]) -> None:
         print(f"HTTP {e.code}: {e.read()[:900].decode(errors='replace')}")
         sys.exit(2)
     dt = time.time() - t0
-    try:
-        text = body["choices"][0]["message"]["content"]
-    except Exception:
-        print("unexpected shape:", json.dumps(body)[:900]); sys.exit(2)
+    msg = body["choices"][0]["message"]
+    # Reasoning models (mimo, command-a) burn thousands of tokens and return
+    # `content: null` with the answer in `reasoning` or in a content-part array.
+    # Reading only `content` silently produced two empty 47-byte verdict files
+    # that looked like refusals.
+    text = msg.get("content") or ""
+    if not text and msg.get("reasoning"):
+        text = msg["reasoning"]
+    if isinstance(text, list):   # some providers return [{type:text,text:...}]
+        text = " ".join(c.get("text", "") for c in text if isinstance(c, dict))
+    if not text:
+        print("EMPTY after all fallbacks:", json.dumps(msg)[:600]); sys.exit(2)
     used = body.get("usage", {})
     slug = model.replace("/", "_")
     out = Path(f"/tmp/loop-{slug}.md")

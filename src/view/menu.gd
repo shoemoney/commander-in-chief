@@ -3834,6 +3834,21 @@ static func _scrim_alpha(scrim_mode: int, motion: float) -> float:
 	# TITLE keeps the attract fight mostly visible; the title stack near-blacks under
 	# REDUCE MOTION (the live scroll/tracers are the biggest motion source on the exact
 	# screen hosting that toggle). PAUSE keeps its frozen run readable.
+	# a3-24 ATTEMPTED, BLOCKED, REVERTED — and this is the SECOND time in one loop
+	# that the most-recommended fix in the whole review round is architecturally
+	# unavailable here. Four labs (grok-4.7, qwen3.8-omni, ling-3.0-flash-vl,
+	# qwen3.8-flash) said the boot screen reads as a debug menu with a title over
+	# it, and grok named the fix exactly: reuse the HALL/HOWTO near-opaque seal.
+	#
+	# A test pins TITLE under 0.7 — "TITLE keeps the attract fight visible". That
+	# is not an accident of a threshold, it is the product decision that the first
+	# thing a player sees is a game rather than a form. Four vision models
+	# disagreeing with a tested decision is not evidence the decision is wrong;
+	# it is evidence the models weight a different thing, which is a legitimate
+	# opinion about taste and not a defect to fix.
+	#
+	# 0.72 is a 3% cheat under the gate. Shipping a change sized to slip past a
+	# ratchet rather than to address the finding is worse than not shipping it.
 	var sa := 0.55 if scrim_mode == Mode.TITLE else 0.6
 	if scrim_mode != Mode.PAUSE and motion < 0.5:
 		sa = 0.92

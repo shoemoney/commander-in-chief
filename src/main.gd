@@ -8143,7 +8143,18 @@ static func _boss_rim_base(march: float) -> Color:
 	# r2 (judge TO_TEN): the cool endpoint stays DARK (value ~0.48, near the warm rim's
 	# ~0.4) so the silhouette language remains "dark separator, hue-shifted" — the red
 	# floor is out-contrasted by HUE (blue vs red), not by flipping to a bright white edge.
-	return Color(0.4, 0.1, 0.06).lerp(Color(0.16, 0.32, 0.48), smoothstep(0.6, 1.0, march))
+	#
+	# a3-24: DARKER, because three vision models (qwen3.8-omni, deepseek-v4.1 and
+	# qwen3.8-flash, none of them talking to each other) all described the colossus
+	# as wearing "a blue selection-box outline" and "an RTS selection outline". The
+	# intent written directly above is "dark separator, hue-shifted" — but at 0.32
+	# green / 0.48 blue on a 2.2px rim around a 143px sprite, the value is high
+	# enough that the eye stops reading hue and reads GIZMO. Hue separation from
+	# the red foundry floor is still the job, and it only needs the blue to be
+	# THERE; it does not need it to be bright. Dropping it well below the warm end
+	# keeps the same argument (blue against red) at a value the eye accepts as
+	# shadow rather than as chrome.
+	return Color(0.4, 0.1, 0.06).lerp(Color(0.10, 0.17, 0.30), smoothstep(0.6, 1.0, march))
 
 
 static func _shadow_ellipse(pos: Vector2, r: float) -> Rect2:
