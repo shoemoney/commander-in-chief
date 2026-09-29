@@ -3721,6 +3721,12 @@ func _check_enemy_hits() -> void:
 		var ehp: int = e.get("hp", 1)
 		if ehp < int(_enemy_hp_prev.get(eidx, ehp)):
 			_enemy_flash[eidx] = 1.0
+			# a2-15: the non-lethal half of the same fix. Landing real damage on a
+			# multi-HP target is a hit the player watched succeed — and it had no
+			# weight either, only a flash and some sparks. `maxi` means a hit that
+			# also kills lands on the kill path's floor instead of stacking two
+			# freezes for one bullet.
+			_hitstop_frames = maxi(_hitstop_frames, 1)
 			if _motion >= 0.5:   # a2-11 r3: REDUCE MOTION suppresses the pop + sparks (not just the flinch)
 				_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "light", "rate": 0.16, "r": 13.0, "col": Color(1.0, 1.0, 0.95)})
 				# juice pass ("a hit that doesn't sell"): landing REAL damage on the only
@@ -4284,8 +4290,22 @@ func _ev_kill(ev: Dictionary) -> void:
 	if not _METAL_KINDS.has(kkind) and kkind != "colossus" and kkind != "broadcast" and _kill_yells < 2:
 		_kill_yells += 1
 		_sfx.play_death_yell(_to_screen(ev["x"], ev["y"]), -6.0)
+	# a2-15 A LANDED KILL LANDS. This was `if big:` — i.e. hitstop, camera punch
+	# and the kill-confirm buzz were all coin-gated at >=25 — so an ordinary
+	# rifleman kill produced a gib, a reticle hitmarker, a streak blip and a death
+	# yell, and NOTHING ELSE. The core thirty seconds of this game is holding the
+	# trigger at 8 rounds a second, and the world never once acknowledged a round
+	# arriving. One frame is 16.7ms: below conscious perception as a DURATION,
+	# unmistakable as WEIGHT. It is also nearly free, because the whole downstream
+	# feel stack is ALREADY built to ride a freeze and was simply never given one
+	# to ride — the impact envelopes hold at peak through it, the CRT scanline
+	# surge keys off it, the water clock stops and the input latch re-injects any
+	# tap that began and ended inside it. `maxi` so a multi-kill tick still costs
+	# ONE frame, and `big` keeps its 2 — this adds the floor, it takes nothing away.
+	_hitstop_frames = maxi(_hitstop_frames, 1)
+	_punch = maxf(_punch, 0.012)
 	if big:
-		_hitstop_frames = maxi(_hitstop_frames, 2)   # elites/bosses only
+		_hitstop_frames = maxi(_hitstop_frames, 2)   # coin-tiered kills still out-hit
 		_buzz(0.35, -1, true)   # kill confirm: sharp, no single shooter attributed
 		_punch = maxf(_punch, 0.03)
 	# The milestone pop advertises the sim's +25/50/100% bonus, so it reads the

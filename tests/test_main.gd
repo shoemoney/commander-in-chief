@@ -4051,3 +4051,96 @@ func test_verb_mastery_is_written_to_the_save() -> void:
 			"_gather_inputs persists mastery alongside the run-local _hud_icons.verb_used() call")
 	m2.free()
 	m.free()
+
+
+# ---------------------------------------------------------------------------
+# A landed hit has to STOP THE WORLD. It did not.
+#
+# Measured on HEAD: the kill path's impact block was `if big:`, and `big` is
+# `ev.get("coin", 0) >= 25` (main.gd:4262) — so hitstop, camera punch and the
+# kill-confirm buzz were reachable ONLY on a coin-tiered kill. An ordinary
+# rifleman kill emitted a gib, a reticle hitmarker, a streak blip and a death
+# yell, and nothing else. Same for the non-lethal half: _check_enemy_hits()
+# edge-detected a real HP drop and gave it a flash and some sparks, and no
+# weight. The core thirty seconds of this game is holding the trigger at 8
+# rounds a second, and the world never once acknowledged a round arriving.
+#
+# Why 1 frame is the right number and not a bigger one: the whole downstream
+# feel stack was ALREADY built to ride a freeze and was simply never given one
+# — the impact envelopes hold at peak through it, the CRT scanline surge keys
+# off it (main.gd:1526), the water clock stops, and the input latch re-injects
+# a grenade/roll tap that starts and ends inside it. 16.7ms is below conscious
+# perception as a DURATION and unmistakable as WEIGHT. `maxi` means a multi-kill
+# tick still costs exactly one frame, and the coin-tiered kill keeps its 2.
+#
+# This is a WIRING ratchet, not a value ratchet, on purpose: the failure being
+# fixed is a gate that swallowed the effect, so asserting a constant's value
+# would not notice it. It reads the shipped control flow and requires the
+# hitstop assignment to sit OUTSIDE the `if big:` block.
+#
+# Mutation table: move either assignment back inside `if big:` (fails 1/2);
+# delete the kill-path one (fails 1); delete the damaging-hit one (fails 2);
+# keep both assignments but delete the `_ev_kill` call to the consuming block
+# (fails 3 — the claim_label_slot trap).
+# ---------------------------------------------------------------------------
+func test_a_landed_hit_stops_the_world() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+
+	# 1. The KILL path: an unconditional hitstop must precede the `if big:` block.
+	var kstart := src.find("func _ev_kill(")
+	Runner.T.ok(kstart >= 0, "found _ev_kill")
+	if kstart >= 0:
+		var kend := src.find("\nfunc ", kstart + 1)
+		var kbody := src.substr(kstart, kend - kstart)
+		# Line-anchored, NOT a substring search for "if big:" — the rationale
+		# comment above the new code quotes that exact token in backticks, so a
+		# plain find() matches the PROSE and reports the gate as sitting above
+		# code it does not actually gate. That is the same shape of defect as a
+		# def-only signature: the check agrees with a description while measuring
+		# nothing. Only a line whose stripped form BEGINS with the token is code.
+		var klines := kbody.split("\n")
+		var big_line := -1
+		for i in klines.size():
+			if (klines[i] as String).strip_edges().begins_with("if big:"):
+				big_line = i
+				break
+		Runner.T.ok(big_line > 0,
+			"the coin-tier gate `if big:` is still a real statement in the kill path")
+		if big_line > 0:
+			var before := "\n".join(klines.slice(0, big_line))
+			Runner.T.ok(before.contains("_hitstop_frames = maxi(_hitstop_frames, 1)"),
+				"an ORDINARY kill arms hitstop outside the coin gate — gated here, the 8-rounds-a-"
+				+ "second core loop still gets zero weight and the fix is cosmetic")
+			Runner.T.ok(before.contains("_punch = maxf(_punch, 0.012)"),
+				"an ordinary kill also nudges the camera — a freeze with no punch reads as a stutter, "
+				+ "not an impact")
+			# ...and the tiered kill must still out-hit the floor, not equal it.
+			Runner.T.ok("\n".join(klines.slice(big_line)).contains(
+					"_hitstop_frames = maxi(_hitstop_frames, 2)"),
+				"a coin-tiered kill still escalates to 2 frames — the floor must not flatten the tier")
+	# 2. The NON-LETHAL hit: a real HP drop on a multi-HP target also has weight.
+	var cstart := src.find("func _check_enemy_hits(")
+	Runner.T.ok(cstart >= 0, "found _check_enemy_hits")
+	if cstart >= 0:
+		var cend := src.find("\nfunc ", cstart + 1)
+		var cbody := src.substr(cstart, cend - cstart)
+		var edge := cbody.find("if ehp < int(_enemy_hp_prev.get(eidx, ehp)):")
+		Runner.T.ok(edge > 0, "found the HP edge-detect")
+		if edge > 0:
+			# The assignment has to be INSIDE the edge-detect (that is the whole
+			# point — it is the landed hit) but must use maxi so a hit that also
+			# kills does not stack two freezes on one bullet.
+			Runner.T.ok(cbody.substr(edge).contains("_hitstop_frames = maxi(_hitstop_frames, 1)"),
+				"landing real damage on a multi-HP target arms hitstop too — this is the hit the "
+				+ "player watched succeed, and it had a flash and no weight")
+	# 3. The freeze must still be CONSUMED the way the rest of the stack expects:
+	#    a stray assignment that nothing decrements would wedge the game frozen,
+	#    which is the exact failure the _hs_latch re-injection guards against.
+	Runner.T.ok(src.contains("if _hitstop_frames > 0:") and src.contains("_hitstop_frames -= 1"),
+		"_hitstop_frames is still decremented — an arm with no consumer freezes the run forever")
+	# 4. The painter re-sort guard must survive: more freezes means this path runs
+	#    more often, and a dead enemy count during a freeze is a real bug
+	#    (tests/test_main.gd's own resize/hitstop ratchet).
+	Runner.T.ok(src.contains("if _hitstop_frames <= 0 or ecount_changed:"),
+		"the painter still re-sorts on a changed enemy count during hitstop — arming far more "
+		+ "freezes makes that guard load-bearing, so it may not be optimised away")
