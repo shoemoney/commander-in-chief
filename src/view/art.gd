@@ -637,9 +637,25 @@ const TINT := {
 	# sol-09: the pack enemies are RED camo — pull them toward warm VERMILION/brick (r>g>b), value-lifted
 	# and folded into the a1–a4 grade, but deliberately OFF the pure-red danger family (bullet orbs / elite
 	# aura / sniper laser / grenade telegraphs). Hostile-warm, never a saturated tracer-red.
-	"enemy_assault": Color(1.1, 1.0, 0.9), "enemy_smg": Color(1.12, 1.01, 0.9),
-	"enemy_shotgun": Color(1.08, 0.99, 0.9), "enemy_lmg": Color(1.3, 0.88, 0.72),
-	"enemy_sniper": Color(1.36, 0.9, 0.78),
+	# a3-17 ATTEMPTED AND REVERTED, and the reason is worth keeping.
+	# These four measured at luma 112 against ground 94 — an 18-luma gap in the
+	# same hue family, which a reviewer (correctly) called "unreadable maroon
+	# specks at ground value". The obvious fix is to push the bodies decisively
+	# below the ground value, and it renders: the bodies come up with visible
+	# internal structure. It was reverted because it fights a deliberate decision
+	# this repo already paid for. test_sol_enemy_red_team pins t.r > 1.0 and
+	# t.g > 0.6 with the stated intent "stays off the tracer/orb danger family" —
+	# the value-lift is the MEANS, and the danger red is BRIGHT saturated red, so
+	# darkening the bodies would have satisfied the intent by inverting it.
+	#
+	# The defect was never the enemy tint. It was that the FLOOR is the same warm
+	# brown the red-team camo is made of, so no value move on the enemy can buy
+	# separation without colliding with the danger family. The ground stops are
+	# desaturated instead (see _ground_stops) — the enemies keep their designed
+	# value-lift, and the floor moves away from them.
+	"enemy_assault": Color(1.10, 1.00, 0.90), "enemy_smg": Color(1.12, 1.01, 0.90),
+	"enemy_shotgun": Color(1.08, 0.99, 0.90), "enemy_lmg": Color(1.30, 0.88, 0.72),
+	"enemy_sniper": Color(1.36, 0.90, 0.78),
 	"frogman": Color(1.35, 1.6, 1.7), "frogman_speargun": Color(1.35, 1.6, 1.7), "observer": Color(1.6, 1.2, 1.0),   # frogman/sol-12: bright cool "wet threat"
 	"bunker": Color(1.0, 0.95, 0.82),
 	"tank_body": OLIVE_VEH, "tank_barrel": OLIVE_VEH,

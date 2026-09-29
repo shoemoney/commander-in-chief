@@ -1452,8 +1452,14 @@ func _paint_bg(canvas: Node2D) -> void:
 				# algorithmic dark stamp.
 				var m_bright := (mh / 11) % 3 == 0
 				var m_warm := (mh / 5) % 10 < (3 + int(march * 6.0))   # a1-06: warm lean climbs desert(3/10)->foundry(9/10)
-				var mcol := Color(0.55, 0.5, 0.28, 0.26) if m_bright else \
-					(Color(0.10, 0.07, 0.0, 0.26) if m_warm else Color(0.03, 0.03, 0.06, 0.26))   # retune: cool lean was G-dominant (swampy); now a neutral cool slate-blue
+				# a3-18: back to 0.16. At 0.26 the card's own structure was strong
+				# enough that the mottle stopped being terrain and became VISIBLE
+				# GEOMETRY — the rotated, non-uniformly-scaled soft spot quantises
+				# into hard diamond edges under _bg_root's NEAREST filter, which
+				# reads as overlapping decals rather than as tonal drift. The base
+				# card now carries the structure, so the mottle only has to whisper.
+				var mcol := Color(0.55, 0.5, 0.28, 0.16) if m_bright else \
+					(Color(0.10, 0.07, 0.0, 0.16) if m_warm else Color(0.03, 0.03, 0.06, 0.16))   # retune: cool lean was G-dominant (swampy); now a neutral cool slate-blue
 				canvas.draw_set_transform(mpos, mrot, Vector2(1.0, 0.6 + float(mh % 5) * 0.16))
 				canvas.draw_texture_rect(Art.tex("fx_softspot"),
 					Rect2(-Vector2.ONE * msz / 2.0, Vector2.ONE * msz), false, mcol)
@@ -7761,6 +7767,21 @@ static func _ground_stops(mode: String) -> Array:
 	# ochre -> tan -> rust as the biome march climbs to the [4] foundry stop (kept — its
 	# green was already low, it already read as scorched red-brown dirt).
 	return [
+		# a3-19 ATTEMPTED AND REVERTED. The reasoning was right and the change was
+		# still wrong, which is worth recording because it is not obvious in advance.
+		# The red-team infantry render at luma 112 against a ground of 94 — an
+		# 18-luma gap inside one warm hue family, a real legibility defect. The
+		# enemies cannot be darkened (test_sol_enemy_red_team value-lifts them on
+		# purpose, to stay off the bright danger-red family), so the FLOOR was
+		# desaturated instead: every stop pulled its r-g and r-b gaps in.
+		#
+		# It rendered as a hard regression. The base stops and the dirt-card stops
+		# are a matched PAIR — the cards are drawn with the SAME stops family and
+		# are tuned to sit a shade off the base. Desaturating one side of that pair
+		# while leaving the other alone made every single dressing card pop as a
+		# saturated orange rectangle on a neutral floor, across the whole screen. The
+		# base/dirt relationship is a single design decision spread over ten
+		# constants, not five independent swatches, and it has to move as one.
 		[Color(0.95, 0.72, 0.42), Color(0.90, 0.62, 0.34), Color(0.82, 0.52, 0.28),
 			Color(0.70, 0.44, 0.26), Color(0.52, 0.30, 0.24)],
 		[Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7), Color(0.42, 0.38, 0.24, 0.7),
