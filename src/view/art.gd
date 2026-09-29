@@ -637,22 +637,17 @@ const TINT := {
 	# sol-09: the pack enemies are RED camo — pull them toward warm VERMILION/brick (r>g>b), value-lifted
 	# and folded into the a1–a4 grade, but deliberately OFF the pure-red danger family (bullet orbs / elite
 	# aura / sniper laser / grenade telegraphs). Hostile-warm, never a saturated tracer-red.
-	# a3-17 ATTEMPTED AND REVERTED, and the reason is worth keeping.
-	# These four measured at luma 112 against ground 94 — an 18-luma gap in the
-	# same hue family, which a reviewer (correctly) called "unreadable maroon
-	# specks at ground value". The obvious fix is to push the bodies decisively
-	# below the ground value, and it renders: the bodies come up with visible
-	# internal structure. It was reverted because it fights a deliberate decision
-	# this repo already paid for. test_sol_enemy_red_team pins t.r > 1.0 and
-	# t.g > 0.6 with the stated intent "stays off the tracer/orb danger family" —
-	# the value-lift is the MEANS, and the danger red is BRIGHT saturated red, so
-	# darkening the bodies would have satisfied the intent by inverting it.
-	#
-	# The defect was never the enemy tint. It was that the FLOOR is the same warm
-	# brown the red-team camo is made of, so no value move on the enemy can buy
-	# separation without colliding with the danger family. The ground stops are
-	# desaturated instead (see _ground_stops) — the enemies keep their designed
-	# value-lift, and the floor moves away from them.
+	# a3-17 TWO ATTEMPTS AT ENEMY LEGIBILITY, BOTH REVERTED. The red-team bodies
+	# render at luma 112 against a ground of 94 — 18 apart inside one warm hue
+	# family — and a reviewer correctly called them "unreadable maroon specks at
+	# ground value". DARKENING them renders well (the bodies come up with real
+	# internal structure) but inverts a settled decision: test_sol_enemy_red_team
+	# value-lifts them above 1.0 precisely to stay off the bright saturated
+	# danger-red family. DESATURATING THE FLOOR is the better axis, since the
+	# defect is that the floor is the same warm brown the camo is made of — but
+	# measured, it traded 1.7 luma of value separation for 4.7 of hue, which is a
+	# wash on a constant set four test files derive contrast maths from. Both are
+	# reverted. The real lever is a contour, not a value: see _LIGHT_RIM in main.gd.
 	"enemy_assault": Color(1.10, 1.00, 0.90), "enemy_smg": Color(1.12, 1.01, 0.90),
 	"enemy_shotgun": Color(1.08, 0.99, 0.90), "enemy_lmg": Color(1.30, 0.88, 0.72),
 	"enemy_sniper": Color(1.36, 0.90, 0.78),
