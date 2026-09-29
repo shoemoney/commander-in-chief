@@ -1548,15 +1548,24 @@ func _process(_delta: float) -> void:
 		_screen_fx_mat.set_shader_parameter("focus", _concussion_focus_uv())
 		_screen_fx_mat.set_shader_parameter("spare", concussion_spare(conc, warp))
 	# CRT scanlines surge darker on a big hit and ease back as the freeze decays —
-	# reuses the already-drawn scan quad (zero added fillrate). Baseline 0.08 = the
-	# shader default, so at rest the look is unchanged. Null when the scan quad is
-	# skipped (canvas_items stretch / movie capture); _motion-gated for reduce-motion.
+	# reuses the already-drawn scan quad (zero added fillrate). Null when the scan
+	# quad is skipped (canvas_items stretch / movie capture); _motion-gated for
+	# reduce-motion.
+	#
+	# a3-16: the baseline was 0.08, and an adversarial pass read the result as "the
+	# ground has uniform horizontal banding edge-to-edge". MEASURED, and it was not
+	# the ground at all: even rows 104.58 luma, odd rows 96.10 — a strict 1-in-2
+	# alternation, 8.48 apart, which is exactly this shader's mod(FRAGCOORD.y, 2.0).
+	# The card underneath is isotropic to 0.998, so nothing in the terrain stripes.
+	# Halving the baseline keeps the arcade framing (and the hitstop surge still
+	# spikes visibly) while dropping the resting stripe below the level where the
+	# eye reads "display artifact" instead of "screen".
 	if _scan_mat != null:
 		var hs := clampf(float(_hitstop_frames) / 10.0, 0.0, 1.0) * _motion
 		# gfx-loop: each set_shader_parameter dirties the material (same precedent as
 		# the water pool's _sync_water) — skip the re-push once hs has converged.
 		if absf(hs - _scan_mat_hs_prev) > 0.001:
-			_scan_mat.set_shader_parameter("strength", 0.08 + hs * 0.12)
+			_scan_mat.set_shader_parameter("strength", SCANLINE_BASE + hs * SCANLINE_SURGE)
 			_scan_mat_hs_prev = hs
 	# a4-01/a4-15: the master grade eases into a calm "breather" during the endless shop
 	# intermission (safe to buy → a tonal breath), then eases back for the next wave. A slow
@@ -7766,6 +7775,11 @@ const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a":
 # (0.49 + mean(h%7)*0.012 - 1/3*0.012), so removing the per-cell tint hash
 # changes the grid, not the exposure — every alpha tuned against this ground
 # (mottle 0.16, feathers, scorch) keeps its contrast.
+# a3-16: resting CRT scanline strength, and how far it spikes on a hitstop.
+# 0.08 -> 0.04: see the _scan_mat comment in _physics_process for the measurement
+# that moved it (a 1-in-2 row alternation 8.48 luma apart, read as ground banding).
+const SCANLINE_BASE := 0.04
+const SCANLINE_SURGE := 0.12
 const GROUND_SHADE := 0.522
 # The pitch of the opaque sand BASE, in screen px — deliberately NOT 64 and not
 # any multiple of it. The base used to be painted as eight 64px rows of the

@@ -191,7 +191,18 @@ const TEX := {
 	# grass.png, now unused and removed — every ground-paint call site in
 	# main.gd was renamed from Art.tex("grass") to Art.tex("sand")).
 	"dirt": preload(KN + "dirt.png"),
-	"sand": preload(KN + "sand.png"),
+	# a3-16: the floor's base card is OURS, not Kenney's. Measured on the old
+	# card, it carried luma std 8.46/255 — the grain is invisible at this scale —
+	# so every value the eye could read as "this ground is lit" came from a
+	# multiply constant, which is how you get flat brown mud. The replacement is
+	# periodic value-noise fBm from tools/gen_ground.py: isotropic (gradient
+	# anisotropy 0.998, so no directional structure to stripe on the 96px band
+	# pitch), seamless by construction rather than by blending (wrap ratio 1.105
+	# against a 1.5 gate), and with the energy deliberately in the 8-32px clumps
+	# the eye actually reads as dirt. Kenney's card stays in assets/cc0/ for
+	# provenance and is still referenced by nothing that draws.
+	"sand": preload("res://assets/art/ground/sand_base.png"),
+	"sand_kenney_cc0": preload(KN + "sand.png"),
 	# bullet/enemy_bullet/grenade/smoke: Kenney keys RETIRED (files kept) — every
 	# live draw site moved on long ago: player rounds are procedural tracers +
 	# fx_bullettrail streaks, enemy fire is the red-streak orb, thrown frags wear
