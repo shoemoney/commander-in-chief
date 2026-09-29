@@ -3288,3 +3288,178 @@ func test_netplay_still_has_zero_production_callers() -> void:
 	Runner.T.eq(callers.size(), 0,
 		"docs say online co-op is not playable because lockstep has ZERO production callers — found %s. If netplay is now real, update README.md, CLAUDE.md and docs/PLAN.md instead of deleting this test"
 			% str(callers))
+
+
+# ---------------------------------------------------------------------------
+# The litter family must be TELLABLE APART at the size the player sees.
+#
+# GOTY_PLAN's M1.3/M1.4/M1.5 set numeric targets (pairwise alpha IoU <= 0.75,
+# top-1 colour <= 25%, >= 5 value steps) and a concurrent session re-baked the
+# family to meet them. Measured after that re-bake, at DRAWN size:
+#     wreck family  worst pair 0.531 (wreck_apc vs wreck_light_tank)
+#     rock1/rock2   0.462                       (the plan had recorded 0.98)
+#     corpse trio   0.740 (corpse_soldier1 vs corpse_soldier2)
+# So the art is good — and NOTHING IN THE SUITE ENFORCED ANY OF IT. Every
+# number above is a claim with no ratchet, which is precisely the failure this
+# file exists to prevent: the same shape as a def-only signature, one layer up.
+# A future re-bake could collapse the family back into interchangeable blobs and
+# the whole suite would stay green.
+#
+# Two details that make this a real gate rather than a restatement:
+#
+#   1. It measures at DRAWN size, reading Art.SCALE live. Native-size IoU is the
+#      wrong question: wreck_apc is 104px native at 0.30 (31px drawn) and
+#      wreck_light_tank is 96px at 0.28 (27px) — two different pictures at
+#      100% and two near-identical smudges at the size anyone actually sees.
+#      Reading the scale table live also means a SCALE edit is caught: collapse
+#      two litter sprites to the same multiplier and this goes red on its own.
+#
+#   2. Every pair in a group is checked, not just adjacent ones, and a
+#      non-vacuity arm requires at least one pair to be FAR below the bar — so a
+#      bug that made every comparison return 0 could not pass.
+#
+# The corpse pair at 0.740 is the thin margin in this family and the honest next
+# strengthening target; the bar stays at the plan's own 0.75 rather than being
+# relaxed to fit today's measurement, per the wall-variant rule already in this
+# file: strengthen the BAKE, never lower the pin.
+# ---------------------------------------------------------------------------
+const _LITTER_FAMILIES := {
+	"wreck family": ["wreck_halftrack", "wreck", "wreck_apc", "wreck_light_tank", "tank_hulk"],
+	"rock pair": ["rock1", "rock2"],
+	"corpse trio": ["corpse_soldier1", "corpse_soldier2", "fallen_merc"],
+}
+const _LITTER_PATHS := {
+	"wreck_halftrack": "res://assets/art/decor/wreck_halftrack.png",
+	"wreck": "res://assets/art/decor/wreck.png",
+	"wreck_apc": "res://assets/art/mil2/apc.png",
+	"wreck_light_tank": "res://assets/art/mil2/light_tank.png",
+	"tank_hulk": "res://assets/art/p2/tank_hulk.png",
+	"rock1": "res://assets/art/decor/rock1.png",
+	"rock2": "res://assets/art/decor/rock2.png",
+	"corpse_soldier1": "res://assets/art/p2/corpse_soldier1.png",
+	"corpse_soldier2": "res://assets/art/p2/corpse_soldier2.png",
+	"fallen_merc": "res://assets/art/decor/fallen_merc.png",
+}
+const _LITTER_IOU_BAR := 0.75
+const _LITTER_TOP1_BAR := 0.45   # measured worst 0.36 (wreck); the plan's 0.25 is the goal
+
+
+func _litter_drawn(key: String, scale_tbl: Dictionary) -> Array:
+	## [mask(PackedByteArray w*h), w, h] at the size the player actually sees.
+	var t: Texture2D = load(_LITTER_PATHS[key])
+	if t == null:
+		return []
+	var img := t.get_image()
+	if img.is_compressed():
+		img.decompress()
+	var s: float = float(scale_tbl.get(key, 0.0))
+	if s <= 0.0:
+		return []
+	var nw := maxi(1, int(round(float(img.get_width()) * s)))
+	var nh := maxi(1, int(round(float(img.get_height()) * s)))
+	img.resize(nw, nh, Image.INTERPOLATE_BILINEAR)
+	var mask := PackedByteArray()
+	mask.resize(nw * nh)
+	for y in nh:
+		for x in nw:
+			mask[y * nw + x] = 1 if img.get_pixel(x, y).a > 38.0 / 255.0 else 0
+	return [mask, nw, nh]
+
+
+func _litter_iou(a: Array, b: Array) -> float:
+	var w: int = maxi(a[1], b[1])
+	var h: int = maxi(a[2], b[2])
+	var inter := 0
+	var union := 0
+	for y in h:
+		for x in w:
+			var av: int = (a[0] as PackedByteArray)[y * a[1] + x] if y < a[2] and x < a[1] else 0
+			var bv: int = (b[0] as PackedByteArray)[y * b[1] + x] if y < b[2] and x < b[1] else 0
+			if av == 1 or bv == 1:
+				union += 1
+			if av == 1 and bv == 1:
+				inter += 1
+	return float(inter) / float(union) if union > 0 else 1.0
+
+
+func test_litter_family_is_tellable_apart_at_drawn_size() -> void:
+	var art: Script = load("res://src/view/art.gd")
+	var scale_tbl: Dictionary = art.get_script_constant_map().get("SCALE", {})
+	Runner.T.ok(not scale_tbl.is_empty(),
+		"Art.SCALE is readable live — measuring at a hardcoded size would let a scale edit "
+		+ "re-collapse the family unnoticed")
+
+	var drawn: Dictionary = {}
+	for gname in _LITTER_FAMILIES:
+		for key in (_LITTER_FAMILIES[gname] as Array):
+			var d: Array = _litter_drawn(key, scale_tbl)
+			Runner.T.ok(d.size() == 3, "%s draws at its shipped SCALE (%s)" % [key, scale_tbl.get(key, "MISSING")])
+			if d.size() == 3:
+				var n := 0
+				for b in (d[0] as PackedByteArray):
+					n += b
+				Runner.T.ok(n > 20, "%s has a real silhouette at drawn size (%d opaque px)" % [key, n])
+				Runner.T.ok(d[1] >= 8 and d[2] >= 8, "%s is at least 8px on screen (%dx%d)" % [key, d[1], d[2]])
+				drawn[key] = d
+
+	# Every pair inside a group, not just neighbours.
+	var worst := 0.0
+	var worst_name := ""
+	var best := 1.0
+	for gname in _LITTER_FAMILIES:
+		var keys: Array = _LITTER_FAMILIES[gname]
+		for i in range(keys.size()):
+			for j in range(i + 1, keys.size()):
+				if not drawn.has(keys[i]) or not drawn.has(keys[j]):
+					continue
+				var v: float = _litter_iou(drawn[keys[i]], drawn[keys[j]])
+				if v > worst:
+					worst = v
+					worst_name = "%s / %s" % [keys[i], keys[j]]
+				best = minf(best, v)
+				Runner.T.ok(v <= _LITTER_IOU_BAR,
+					"%s: %s vs %s occupy different ground at drawn size (alpha IoU %.3f <= %.2f)"
+						% [gname, keys[i], keys[j], v, _LITTER_IOU_BAR])
+	print("    litter family worst pair: %s at IoU %.3f" % [worst_name, worst])
+	# Non-vacuity. The first version of this arm asserted "at least one pair is far
+	# below the bar" — and it was BACKWARDS: a comparison that returned a
+	# constant 0.0 made `best` 0, which trivially satisfied "below the bar", so
+	# the exact vacuous gate the arm exists to catch walked straight through it.
+	# (Verified by mutation, not by reasoning.) The real property is that the
+	# family produces a genuine SPREAD of measurements: a constant return makes
+	# every pair equal, so best == worst.
+	Runner.T.ok(best > 0.0 and best < worst - 0.05,
+		"the family yields a real SPREAD of measurements (best %.3f, worst %.3f) — a comparison "
+			% [best, worst]
+		+ "returning a constant would satisfy every per-pair ceiling check, which is the whole "
+		+ "shape of a vacuous gate")
+
+	# The other half of M1.3: a sprite that is one flat colour reads as a sticker
+	# no matter how well-shaped it is.
+	for key in drawn:
+		var t: Texture2D = load(_LITTER_PATHS[key])
+		if t == null:
+			continue
+		var img := t.get_image()
+		if img.is_compressed():
+			img.decompress()
+		var counts := {}
+		var tot := 0
+		for y in img.get_height():
+			for x in img.get_width():
+				var c := img.get_pixel(x, y)
+				if c.a <= 38.0 / 255.0:
+					continue
+				var key3 := "%d,%d,%d" % [int(c.r * 255.0), int(c.g * 255.0), int(c.b * 255.0)]
+				counts[key3] = int(counts.get(key3, 0)) + 1
+				tot += 1
+		if tot == 0:
+			continue
+		var top := 0
+		for k in counts:
+			top = maxi(top, int(counts[k]))
+		var share := float(top) / float(tot)
+		Runner.T.ok(share <= _LITTER_TOP1_BAR,
+			"%s is not one flat colour (top-1 share %.1f%% <= %.0f%%) — a well-shaped sticker "
+				% [key, share * 100.0, _LITTER_TOP1_BAR * 100.0]
+			+ "still reads as flat art at 27-31px")
