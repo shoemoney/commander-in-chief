@@ -298,22 +298,24 @@ func test_ovf_alert_only_on_dropped_actionable() -> void:
 	var vtop := int(HudIcons.CHIP_PRIO["flawless"])   # top of the row-0 vanity band, read from the table
 	var cands: Array = [
 		{"id": "mutator", "prio": int(HudIcons.CHIP_PRIO["mutator"]), "w": 60.0},   # lethal-timer (actionable)
-		{"id": "best", "prio": int(HudIcons.CHIP_PRIO["best"]), "w": 40.0},         # vanity record
+		{"id": "record", "prio": int(HudIcons.CHIP_PRIO["record"]), "w": 40.0},     # vanity record
 		{"id": "deathless", "prio": int(HudIcons.CHIP_PRIO["deathless"]), "w": 40.0}, # vanity, below the line
 		{"id": "supplies", "prio": int(HudIcons.CHIP_PRIO["supplies"]), "w": 40.0}, # discoverability cue (below vanity)
 	]
-	# The exact list the reason statement names — SUPPLIES + BEST + DEATHLESS all shed while the
+	# The exact list the reason statement names — SUPPLIES + RECORD + DEATHLESS all shed while the
 	# actionable mutator is kept -> calm gold clip (no false alarm on a vanity-only cull).
+	# T2: this candidate set reads the "record" band, not the old "best" one — the dim "BEST n"
+	# score chip is CUT from row 0 (PAUSE owns it), so the vanity band it exercised moved with it.
 	Runner.T.ok(not HudIcons._ovf_alert(cands, {"mutator": true}, vtop),
-		"dropping only SUPPLIES / BEST / DEATHLESS does NOT alert")
+		"dropping only SUPPLIES / RECORD / DEATHLESS does NOT alert")
 	# The actionable mutator dropped -> red alert clip.
-	Runner.T.ok(HudIcons._ovf_alert(cands, {"best": true, "deathless": true}, vtop),
+	Runner.T.ok(HudIcons._ovf_alert(cands, {"record": true, "deathless": true}, vtop),
 		"a dropped objective/lethal readout alerts")
 	# flawless itself sits AT the boundary (strictly-above test): dropping it alone stays calm.
 	Runner.T.ok(not HudIcons._ovf_alert([{"id": "flawless", "prio": vtop, "w": 30.0}], {}, vtop),
 		"the vanity band top is below the alert boundary (strictly-above)")
 	# Nothing dropped -> no alert.
-	Runner.T.ok(not HudIcons._ovf_alert(cands, {"mutator": true, "best": true, "deathless": true, "supplies": true}, vtop),
+	Runner.T.ok(not HudIcons._ovf_alert(cands, {"mutator": true, "record": true, "deathless": true, "supplies": true}, vtop),
 		"a fully-kept row never alerts")
 	# Malformed candidates (missing id/prio, or a non-dict) are skipped, never crashed on.
 	Runner.T.ok(not HudIcons._ovf_alert([{"foo": 1}, "junk"], {}, vtop),
@@ -322,7 +324,7 @@ func test_ovf_alert_only_on_dropped_actionable() -> void:
 	# Buff row: a TIMED buff (above persistent) alerts; a persistent charge alone does not.
 	var bp := int(HudIcons.BUFF_PRIO_PERSIST)
 	var buffs: Array = [
-		{"id": 0, "prio": bp, "w": 20.0},                        # vest (persistent)
+		{"id": 0, "prio": bp, "w": 20.0},                        # a persistent charge (triple/claymores)
 		{"id": 1, "prio": HudIcons._buff_prio(120), "w": 30.0},  # a live 2s timer (actionable)
 	]
 	Runner.T.ok(HudIcons._ovf_alert(buffs, {}, bp), "a dropped timed buff alerts on the buff row")
@@ -673,18 +675,29 @@ func test_row0_footprint_bounds_and_no_overlap() -> void:
 	# Plan with a CB pip live so the corner is reserved (tightest usable edge).
 	var fit_full: float = HudIcons.RIGHT - HudIcons._corner_reserve(true, 1.0)
 	var budget := fit_full - opt_start - mandatory_sum
-	var sel := HudIcons._select_priority(h._opt_cands, budget)
-	var hidden := HudIcons._display_hidden(h._opt_cands, sel["keep"])
-	var reserve := (h._tw("+%d" % hidden) + HudIcons.OVF_PAD) if hidden > 0 else 0.0
+	# T2: this test used to RE-IMPLEMENT the production selection by hand — one `_select_priority`
+	# pass against the raw budget, plus a hand-rolled `_tw("+N") + OVF_PAD` reserve. That copy omits
+	# the fixpoint the real planner runs (`_ovf_fit` re-selects until the reserve matches the FINAL
+	# hidden count) and under-reserves the alert form, so it could keep a chip set that only fits
+	# WITHOUT its own "+N" — the very overlap this test exists to forbid. Narrowing the WAVE chip
+	# moved this approximation over the line. It now drives the REAL fixpointed planner, so the
+	# assertion is against the geometry production actually ships, not a stale copy of it.
+	var res := h._ovf_fit(h._opt_cands, budget, 0.0, 0)
+	var keep: Dictionary = res["keep"]
+	var hidden: int = res["hidden"]
+	var reserve: float = res["ovf_reserve"]
+	Runner.T.ok(hidden > 0, "this crowded row really does overflow (the +N assertion is meaningful)")
 	# Right edge of the kept optional content.
 	var kept_sum := 0.0
 	for c in h._opt_cands:
-		if sel["keep"].has(c["id"]):
+		if keep.has(c["id"]):
 			kept_sum += float(c["w"])
 	var content_end := opt_start + mandatory_sum + kept_sum
 	var ovf_left := fit_full - reserve
 	Runner.T.ok(content_end <= ovf_left + 0.01, "kept chips never run under the +N slot")
 	Runner.T.ok(ovf_left + reserve <= fit_full + 0.01, "the +N chip stays within the usable (CB-reserved) edge")
+	Runner.T.eq(reserve, h._ovf_slot_w(hidden),
+		"the reserved +N width is the production _ovf_slot_w of the FINAL hidden count")
 	Runner.T.ok(fit_full <= HudIcons.RIGHT, "the CB corner pulls the usable edge in")
 	h.main.free()
 	h.free()
@@ -696,9 +709,10 @@ func test_row0_footprint_bounds_and_no_overlap() -> void:
 func test_row0_campaign_measure_and_telegraph() -> void:
 	var h := HudIcons.new()
 	h.main = _RowMain.new()
-	h.main.best_score = 100   # a BEST/RECORD chip is a candidate
+	h.main.best_score = 100   # a RECORD badge is a candidate once the run beats it
+	h.main._record_fired = true
 	var sim := SimWorld.new(0, 1, "campaign")
-	sim.score = 50            # below best -> "best" chip
+	sim.score = 50            # below best -> the dim "best" mode, which T2 CUTS (see below)
 	sim.flawless_streak = 2   # mandatory flawless star (folded into mandatory_sum)
 	sim.stall_ticks = 100     # arms the PRESSURE / CLEAR THE GATE telegraph
 	h._measure = true
@@ -711,17 +725,31 @@ func test_row0_campaign_measure_and_telegraph() -> void:
 	for c in h._opt_cands:
 		ids.append(c["id"])
 		all_opt += float(c["w"])
-	Runner.T.ok("best" in ids, "the BEST/RECORD chip is enumerated in campaign")
+	Runner.T.ok("record" in ids, "the RECORD badge is enumerated in campaign")
 	Runner.T.ok("supplies" in ids, "the SUPPLIES cue is enumerated")
-	# The once-"mandatory" flawless star + SECTOR are priority candidates now (so an
-	# over-wide economy can demote them into +N instead of overrunning the telegraph),
-	# leaving no un-planned fixed footprint past the head.
+	# T2 (de-word row 0): the two chips that spent the widest band restating run-details are GONE
+	# from the campaign measure pass, and their CHIP_PRIO bands went with them — so a chip id can
+	# never come back without a band, and the band can never outlive the chip.
+	Runner.T.ok(not ("best" in ids), "the dim BEST-score chip no longer enumerates (PAUSE owns it)")
+	Runner.T.ok(not ("sector" in ids), "the SECTOR/distance progress chip no longer enumerates (PAUSE owns it)")
+	Runner.T.ok(not HudIcons.CHIP_PRIO.has("best"), "the cut BEST chip has no orphan CHIP_PRIO band")
+	Runner.T.ok(not HudIcons.CHIP_PRIO.has("sector"), "the cut SECTOR chip has no orphan CHIP_PRIO band")
+	# The once-"mandatory" flawless star is a priority candidate now (so an over-wide economy can
+	# demote it into +N instead of overrunning the telegraph), leaving no un-planned fixed
+	# footprint past the head.
 	Runner.T.ok("flawless" in ids, "the flawless star is a priority candidate (demotable)")
-	Runner.T.ok("sector" in ids, "the SECTOR progress chip is a priority candidate (demotable)")
 	var mandatory_sum := opt_end - opt_start - all_opt
 	Runner.T.ok(absf(mandatory_sum) < 0.01, "no un-planned fixed footprint remains past the head")
 	var spec := h._telegraph_spec(sim)
 	Runner.T.ok(float(spec["w"]) > 0.0, "the campaign telegraph reserves a right-side footprint")
+	# T2: the PRESSURE telegraph is the COMPACT presentation by default now (lightning + the
+	# COMPACT_BAR, no "STALL"/"PRESSURE" word), and its reserved width is exactly that form.
+	var pressure := h._telegraph_spec(sim)
+	Runner.T.ok(bool(pressure.get("compact", false)), "the pressure telegraph is compact by default")
+	Runner.T.eq(float(pressure["cw"]), float(pressure["w"]),
+		"the compact pressure slot IS the reserved slot (no wider full tier left to fall back to)")
+	Runner.T.eq(float(pressure["w"]), HudIcons.ICON + 3.0 + HudIcons.COMPACT_BAR + 4.0,
+		"the pressure telegraph reserves only the icon + COMPACT_BAR footprint")
 	h.main.free()
 	h.free()
 
@@ -1040,11 +1068,15 @@ func test_ovf_chip_stays_within_usable_edge() -> void:
 	h.free()
 
 
-# c1-06: buff-chip widths are the EXACT x-advance the drawing produces (vest / timed /
-# claymore-glyph), so the fit measure can never disagree with what actually lands.
+# c1-06: buff-chip widths are the EXACT x-advance the drawing produces (timed / claymore-glyph), so
+# the fit measure can never disagree with what actually lands.
+# T1: the vest case is GONE from this table. It used to assert `{"vest": true}` == ICON + 2, the
+# width of a bare icon-only buff chip — the exact placement that made the most survival-relevant
+# fact in a one-hit-death game the FIRST thing a crowded row shed. The vest is now a fixed slot in
+# the _vitals_chips pair, and the invariant it needs (its reserved width is its drawn width) is
+# pinned by test_vitals_cluster_slot_geometry instead.
 func test_chip_width_matches_stat_advance() -> void:
 	var h := HudIcons.new()
-	Runner.T.eq(h._chip_w({"vest": true}), HudIcons.ICON + 2.0, "vest chip width")
 	var w := h._chip_w({"icon": "wep_smoke", "txt": "5s", "col": Color.WHITE})
 	Runner.T.eq(w, HudIcons.ICON + 13.0 + h._tw("5s"), "timed-buff chip width == _stat advance")
 	var wg := h._chip_w({"icon": "wep_claymore", "txt": "x2", "col": Color.WHITE, "glyph": true})
@@ -1109,9 +1141,12 @@ func test_c1_16_pressure_prewarning_before_arm() -> void:
 	h.free()
 
 
-# c1-16 draw-level: the pre-warn and armed phases differ by BRIGHTNESS + LABEL, while the fill
-# is monotonic across the exact arm boundary (never jumps backward). Also pins the arm-point
-# marker and the exact WARN/ARM tick boundaries.
+# c1-16 draw-level: the pre-warn and armed phases differ by BRIGHTNESS, while the fill is monotonic
+# across the exact arm boundary (never jumps backward). Also pins the arm-point marker and the exact
+# WARN/ARM tick boundaries.
+# T2: the phase used to differ by LABEL too ("STALL" vs "PRESSURE"). Both words are gone with the
+# rest of row 0's de-wording, so the marker + the 0.5 dim are the WHOLE non-colour channel — which
+# makes the marker load-bearing, and this test now also asserts neither label can come back.
 func test_c1_16_telegraph_phase_draw() -> void:
 	var h := _ChipCaptureHud.new()
 	h.main = _RowMain.new()
@@ -1123,18 +1158,21 @@ func test_c1_16_telegraph_phase_draw() -> void:
 	h.boxes = []
 	h._draw_telegraph(sim, tele, 400.0, 6.0)
 	var warn_icon_a := _first_alpha(h.boxes, "icon", "hud_lightning")
-	var warn_label := _has_text(h.boxes, "STALL")
 	var warn_bar := _first_bar(h.boxes)
 	var warn_marker := _has_kind(h.boxes, "marker")
 	sim.stall_ticks = HudIcons.PRESSURE_ARM_TICKS + 1    # 31 — first armed tick
 	h.boxes = []
 	h._draw_telegraph(sim, tele, 400.0, 6.0)
 	var armed_icon_a := _first_alpha(h.boxes, "icon", "hud_lightning")
-	var armed_label := _has_text(h.boxes, "PRESSURE")
 	var armed_bar := _first_bar(h.boxes)
 	var armed_marker := _has_kind(h.boxes, "marker")
-	Runner.T.ok(warn_label, "pre-warn labels the chip STALL")
-	Runner.T.ok(armed_label, "the first armed tick labels the chip PRESSURE")
+	# T2 ratchet: the de-worded telegraph paints ZERO text — the phase is carried by the dim +
+	# the arm marker, never by a word again.
+	Runner.T.ok(not _has_text(h.boxes, "STALL"), "the telegraph no longer labels the pre-warn STALL")
+	Runner.T.ok(not _has_text(h.boxes, "PRESSURE"), "the telegraph no longer labels armed PRESSURE")
+	for b in h.boxes:
+		Runner.T.ok(b["k"] != "text", "the de-worded telegraph emits no text primitive (%s)" % b["id"])
+	# The surviving non-colour phase channel: the single 0.5 dim pre-warn vs full armed.
 	Runner.T.ok(warn_icon_a < armed_icon_a - 0.01, "pre-warn draws dimmer than armed")
 	Runner.T.ok(is_equal_approx(warn_icon_a, 0.5), "pre-warn icon alpha is the single 0.5 dim")
 	Runner.T.ok(is_equal_approx(armed_icon_a, 1.0), "armed icon alpha is full")
@@ -1144,11 +1182,12 @@ func test_c1_16_telegraph_phase_draw() -> void:
 	# Dimming is applied ONCE (via the bar alpha), so the pre-warn fill isn't double-dimmed to ~0.25.
 	Runner.T.ok(is_equal_approx(float(warn_bar["alpha"]), 0.5), "pre-warn bar alpha is a single 0.5 dim")
 	Runner.T.ok(is_equal_approx(float(armed_bar["alpha"]), 1.0), "armed bar alpha is full")
-	# Arm-point marker drawn in both phases, inside the gauge bar's horizontal extent.
+	# Arm-point marker drawn in both phases, inside the gauge bar's horizontal extent — the shape
+	# channel that replaced the removed label.
 	Runner.T.ok(warn_marker and armed_marker, "the arm-point marker is drawn in both phases")
 	var mk := _first_kind(h.boxes, "marker")
-	Runner.T.ok(mk["box"].position.x >= warn_bar["box"].position.x - 0.01
-		and mk["box"].end.x <= warn_bar["box"].end.x + 0.01, "the marker sits inside the gauge bar")
+	Runner.T.ok(mk["box"].position.x >= armed_bar["box"].position.x - 0.01
+		and mk["box"].end.x <= armed_bar["box"].end.x + 0.01, "the marker sits inside the gauge bar")
 	h.main.free()
 	h.free()
 
@@ -1363,7 +1402,13 @@ func test_row0_campaign_extreme_economy_with_telegraph() -> void:
 	sim.flawless_streak = 9       # flawless star (demotable, 60)
 	sim.stall_ticks = 100         # arms the telegraph (right-anchored)
 	# Wide head + a live telegraph leaves little room; SECTOR/flawless must demote.
-	var plan := _plan_and_assert_bounds(h, sim, 430.0, HudIcons.RIGHT, false, "campaign-eco")
+	# T2: the PRESSURE telegraph's de-worded slot is ~73px narrower than the old icon+word+46px-gauge
+	# form, so the old 430px head no longer starves this row. Re-derived: opt_start is placed so the
+	# usable edge leaves room for the telegraph and nothing else, which is what this test is FOR —
+	# an extreme head must demote progress/vanity chips into +N rather than overrun the telegraph.
+	var tele_slot: float = float(h._telegraph_spec(sim)["w"]) + 3.0
+	var plan := _plan_and_assert_bounds(h, sim, HudIcons.RIGHT - tele_slot - 30.0, HudIcons.RIGHT,
+		false, "campaign-eco")
 	Runner.T.ok(int(plan["hidden"]) > 0, "campaign row demotes progress/vanity chips into +N")
 	Runner.T.ok(float(plan["tele_w"]) > 0.0, "the telegraph footprint is reserved")
 	h.main.free()
@@ -1490,7 +1535,7 @@ func test_plan_chips_multidigit_overflow_counts_past_ten() -> void:
 func test_buff_chips_real_render_p1_p2_bounds_and_overlap() -> void:
 	# A vest + four timed buffs — more than the tight edge holds, so the tail overflows.
 	var buffs := {
-		"vest": true, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
+		"vest": true, "hurt_iframes": 0, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
 		"rend_ticks": 300, "smoke_ticks": 300, "claymores": 0,
 	}
 	var geoms: Array = []
@@ -1531,7 +1576,7 @@ func test_buff_chips_overflow_alerts_on_hidden_timer() -> void:
 	# Four timed buffs, no persistent charge — so every candidate is above BUFF_PRIO_PERSIST and any
 	# chip forced into the clip is an actionable countdown (alert), not a persistent charge.
 	var buffs := {
-		"vest": false, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
+		"vest": false, "hurt_iframes": 0, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
 		"rend_ticks": 300, "smoke_ticks": 300, "claymores": 0,
 	}
 	var h := _ChipCaptureHud.new()
@@ -1561,7 +1606,7 @@ func test_c3_01_buff_tail_reserves_exact_plus_n_not_worst_case() -> void:
 	# Two buffs: a high-priority timed pierce chip + a low-priority persistent Triple chip (icon +
 	# "x3", no trailing glyph). Triple is persistent (lowest priority), so it sheds first.
 	var buffs := {
-		"vest": false, "pierce_ticks": 300, "spread_ticks": 0, "triple": true,
+		"vest": false, "hurt_iframes": 0, "pierce_ticks": 300, "spread_ticks": 0, "triple": true,
 		"rend_ticks": 0, "smoke_ticks": 0, "claymores": 0,
 	}
 	# Measure the natural full-run right edge against a roomy edge.
@@ -1626,7 +1671,14 @@ func test_c3_01_onfoot_buff_status_tail_clips_into_ovf_when_starved() -> void:
 	h._measure = false
 	# Wide enough for the equipment run + the reserved status group, but not the whole buff stack —
 	# so the equipment stays, SPEED BOOST is pinned, and the surplus buffs overflow into a +N.
-	h._fit_full = 240.0
+	# T1: this edge was 240px when the fixed head was ~153px wide. The vitals pair adds a FIXED
+	# 38px in front of it, so 240 now starves the STATUS GROUP too and the SPEED-BOOST word folds
+	# into a "+1" — a real consequence of the wider head, not the defect this test guards. Re-derived
+	# so the same relationship holds: head + the FULL status group + the tail's worst-case +N all
+	# fit (so the word is preserved), while the tail's own budget still can't hold four timed buffs.
+	# 400 = head(181) + the full status group(160) + the tail's worst-case +N(26), rounded up with a
+	# little slack; the tail's own budget there is ~59px, one timed chip wide.
+	h._fit_full = 400.0
 	h.boxes = []
 	var end_px: float = h._onfoot_chips(p, 8.0, 20.0, 0, sim)
 	# Bounds + non-overlap on the real primitives (bg backings/markers are allowed to underlie text).
@@ -1909,7 +1961,8 @@ func test_c3_01_row0_pins_survival_over_vanity_under_starved_width() -> void:
 	sim.score = 50
 	var h := _ChipCaptureHud.new()
 	h.main = _RowMain.new()
-	h.main.best_score = 100       # BEST score chip (prio 35)
+	h.main.best_score = 100       # the RECORD badge candidate (T2: the dim BEST-score chip is cut)
+	h.main._record_fired = false  # below best -> no badge, so the row's band-35 slot is free
 	h.main.best_wave = 100        # BEST W-record chip (prio 30)
 	var opt_start := 8.0
 	var cw := _measure_cand_w(h, sim, opt_start, false)
@@ -1937,9 +1990,11 @@ func test_c3_01_row0_pins_survival_over_vanity_under_starved_width() -> void:
 			e_has_hostiles = true
 		if b["k"] == "ovf":
 			e_has_ovf = true
-		# No demoted vanity readout may reach the paint stage.
+		# No demoted vanity readout may reach the paint stage. T2: the assertion now guards the
+		# WAVE-record chip ("BEST W100") — the score BEST chip it used to name is cut from row 0
+		# entirely, so it can no longer paint even if the planner kept its (now removed) band.
 		Runner.T.ok(not String(b["id"]).begins_with("PAYDAY"), "the demoted mutator never paints")
-		Runner.T.ok(not String(b["id"]).begins_with("BEST"), "the demoted BEST record never paints")
+		Runner.T.ok(not String(b["id"]).begins_with("BEST"), "the demoted WAVE record never paints")
 	Runner.T.ok(e_has_hostiles, "the HOSTILES readout actually renders on the starved endless row")
 	Runner.T.ok(e_has_ovf, "the +N clip renders for the demoted vanity chips")
 	h.main.free()
@@ -1953,12 +2008,12 @@ func test_c3_01_row0_pins_survival_over_vanity_under_starved_width() -> void:
 	h2.main.best_score = 100
 	h2._fit_full = HudIcons.RIGHT
 	var full_w: float = float(h2._telegraph_spec(sim2)["w"])
-	# A head wide enough that the FULL telegraph label won't fit forces the COMPACT fallback — the
-	# critical readout is abbreviated, never tallied into +N.
+	# T2: the telegraph's de-worded footprint IS its compact form, so there is no wider tier to
+	# fall back to — the planner either reserves exactly this slot or drops the telegraph into +N.
 	var plan2: Dictionary = h2._plan_row0(sim2, 520.0, 6.0, false)
 	Runner.T.eq(plan2["tele"]["kind"], "pressure", "the PRESSURE telegraph is preserved, not dropped")
-	Runner.T.ok(plan2["tele"].get("compact", false), "the telegraph compacts before it would ever drop")
-	Runner.T.ok(float(plan2["tele_w"]) < full_w, "the compact telegraph slot is narrower than the full label")
+	Runner.T.ok(plan2["tele"].get("compact", false), "the telegraph carries the de-worded presentation")
+	Runner.T.eq(float(plan2["tele_w"]), full_w, "the reserved slot is the compact footprint itself")
 	h2._measure = false
 	h2._opt_keep = plan2["keep"]
 	h2._ovf = int(plan2["hidden"])
@@ -1972,25 +2027,34 @@ func test_c3_01_row0_pins_survival_over_vanity_under_starved_width() -> void:
 
 
 # c1-06 END-TO-END captured render of a NORMAL crowded CAMPAIGN row WITH the live PRESSURE
-# telegraph: SECTOR + BEST are kept, the wider SUPPLIES cue demotes into +N, the telegraph
-# renders in its right-anchored slot, and every real box is in bounds and non-overlapping.
+# telegraph: the two kept chips are FLAWLESS + RECORD, the wider SUPPLIES cue demotes into +N, the
+# telegraph renders in its right-anchored slot, and every real box is in bounds and non-overlapping.
+# T2: this row USED to be "SECTOR + BEST are kept" — both of those chips are cut from row 0 now, so
+# the pair that exercises the same budget/planner/demote path is the two chips that remain. The
+# invariants (kept-vs-demoted split, exact +1, telegraph co-layout, the TELE_OVF_GAP breathing band)
+# are unchanged; only the identities moved.
 func test_row0_normal_crowded_campaign_telegraph_captured_render() -> void:
 	var sim := SimWorld.new(0, 1, "campaign")
-	sim.score = 50            # BEST chip (text-only candidate)
 	sim.stall_ticks = 100     # arms the PRESSURE telegraph
-	# kill_streak 0 (no arc), flawless 0 (no star), flash 0 (no flashbang) -> the kept chips
-	# are text-only (SECTOR/BEST); the one demoted readout is the glyph-drawing SUPPLIES cue.
+	sim.flawless_streak = 2   # the FLAWLESS star chip (kept)
+	# kill_streak 0 (no arc), flash 0 (no flashbang) -> the kept chips are text chips; the one
+	# demoted readout is the glyph-drawing SUPPLIES cue, the widest candidate on this row.
 	var h := _ChipCaptureHud.new()
 	h.main = _RowMain.new()
 	h.main.best_score = 100
+	h.main._record_fired = true   # the run has beaten the best -> the RECORD badge enumerates
 	var opt_start := 8.0
-	var cw := _measure_cand_w(h, sim, opt_start, false)   # best, sector, supplies
+	var cw := _measure_cand_w(h, sim, opt_start, false)   # flawless, record, supplies
+	Runner.T.ok(cw.has("flawless") and cw.has("record") and cw.has("supplies"),
+		"the crowded campaign row enumerates FLAWLESS + RECORD + SUPPLIES")
+	Runner.T.ok(not cw.has("sector") and not cw.has("best"),
+		"the cut SECTOR / BEST chips contribute no width to this row at all")
 	var tele_slot: float = float(h._telegraph_spec(sim)["w"]) + 3.0
 	var reserve: float = h._tw("+1") + HudIcons.OVF_PAD
-	# Room for SECTOR + BEST + the telegraph + a +1 reserve, but NOT the wider SUPPLIES cue.
-	h._fit_full = opt_start + float(cw["sector"]) + float(cw["best"]) + tele_slot + reserve + 4.0
+	# Room for FLAWLESS + RECORD + the telegraph + a +1 reserve, but NOT the wider SUPPLIES cue.
+	h._fit_full = opt_start + float(cw["flawless"]) + float(cw["record"]) + tele_slot + reserve + 4.0
 	var plan: Dictionary = h._plan_row0(sim, opt_start, 6.0, false)
-	Runner.T.ok(plan["keep"].has("sector") and plan["keep"].has("best"), "SECTOR + BEST are kept")
+	Runner.T.ok(plan["keep"].has("flawless") and plan["keep"].has("record"), "FLAWLESS + RECORD are kept")
 	Runner.T.ok(not plan["keep"].has("supplies"), "the wider SUPPLIES cue demotes into +N")
 	Runner.T.eq(plan["tele"]["kind"], "pressure", "the telegraph still fits (not dropped)")
 	Runner.T.eq(int(plan["hidden"]), 1, "exactly the one demoted readout (SUPPLIES) is counted")
@@ -2009,6 +2073,14 @@ func test_row0_normal_crowded_campaign_telegraph_captured_render() -> void:
 		kinds[b["k"]] = true
 	Runner.T.ok(kinds.has("bg"), "the telegraph backing rect rendered")
 	Runner.T.ok(kinds.has("ovf"), "the +N chip rendered")
+	# T2: PRESSURE is the de-worded form — the lightning icon + the COMPACT_BAR and NO text, so
+	# the telegraph contributes zero glyph ink of its own. This is the ratchet against a future
+	# edit re-introducing the "STALL"/"PRESSURE" word the icon already says.
+	Runner.T.ok(not _has_text(h.boxes, "PRESSURE"),
+		"the de-worded telegraph draws no PRESSURE label")
+	Runner.T.ok(not _has_text(h.boxes, "STALL"), "the de-worded telegraph draws no STALL label")
+	Runner.T.ok(_has_kind(h.boxes, "icon") and _has_kind(h.boxes, "bar"),
+		"the de-worded telegraph still draws its lightning icon + progress bar")
 	# c1-06 (attempt-4 judge polish): the telegraph backing must not directly abut the +N chip —
 	# a breathing gap of TELE_OVF_GAP separates the telegraph's right edge from the +N's left edge.
 	var bg_right := -1.0
@@ -2024,24 +2096,32 @@ func test_row0_normal_crowded_campaign_telegraph_captured_render() -> void:
 	h.free()
 
 
-# c1-06: the critical PRESSURE/GATE telegraph is COMPACTED before it is ever dropped. At a
-# width where the full label won't fit, the planner falls back to the narrow compact slot
-# (kind preserved, `compact` flagged) rather than tallying it into +N — and the rendered
-# compact form stays within the usable edge.
+# c1-06 + T2: the critical PRESSURE telegraph is the COMPACT presentation ALWAYS (lightning icon +
+# COMPACT_BAR, no "STALL"/"PRESSURE" word), so there is no wider full tier left to fall back to.
+# The guarantee the test still owns is the one that matters: the telegraph is preserved and rendered
+# in its right-anchored slot, and only tallied into +N when even that cannot fit.
 func test_row0_telegraph_compacts_before_dropping() -> void:
 	var sim := SimWorld.new(0, 1, "campaign")
 	sim.stall_ticks = 100     # arms the PRESSURE telegraph
-	sim.score = 50
 	var h := _ChipCaptureHud.new()
 	h.main = _RowMain.new()
 	h.main.best_score = 100
 	h._fit_full = HudIcons.RIGHT
-	var full_w: float = float(h._telegraph_spec(sim)["w"])
-	# opt_start wide enough that the FULL label can't fit but the compact one can.
+	Runner.T.eq(float(h._telegraph_spec(sim)["w"]),
+		HudIcons.ICON + 3.0 + HudIcons.COMPACT_BAR + 4.0,
+		"the pressure telegraph reserves only its de-worded footprint to begin with")
+	# opt_start wide enough that even the compact telegraph can't fit -> it is DROPPED, not kept.
+	# The roomy case (the one that used to be this test) is covered by
+	# test_row0_normal_crowded_campaign_telegraph_captured_render.
+	var tight: Dictionary = h._plan_row0(sim, HudIcons.RIGHT - 8.0, 6.0, false)
+	Runner.T.eq(tight["tele"]["kind"], "", "a head that leaves no room drops the compact telegraph")
+	Runner.T.ok(bool(tight.get("tele_dropped", false)), "the dropped compact telegraph is flagged, not silent")
+	# Room for the compact telegraph: preserved, in-slot, no text.
 	var plan: Dictionary = h._plan_row0(sim, 520.0, 6.0, false)
 	Runner.T.eq(plan["tele"]["kind"], "pressure", "the telegraph is preserved, not dropped")
-	Runner.T.ok(plan["tele"].get("compact", false), "it falls back to the COMPACT presentation")
-	Runner.T.ok(float(plan["tele_w"]) < full_w, "the compact slot is narrower than the full label")
+	Runner.T.ok(plan["tele"].get("compact", false), "the telegraph carries the compact presentation")
+	Runner.T.eq(float(plan["tele_w"]), float(h._telegraph_spec(sim)["w"]),
+		"the reserved slot IS the compact footprint (no separate wider tier)")
 	# Render the compact telegraph; it must stay in its right-anchored slot within the edge.
 	h._measure = false
 	h._opt_keep = plan["keep"]
@@ -2115,7 +2195,7 @@ func test_buff_chips_no_overflow_draws_no_plus_chip() -> void:
 	h._fit_full = 632.0
 	h._measure = false
 	var buffs := {
-		"vest": true, "pierce_ticks": 300, "spread_ticks": 0, "triple": false,
+		"vest": true, "hurt_iframes": 0, "pierce_ticks": 300, "spread_ticks": 0, "triple": false,
 		"rend_ticks": 0, "smoke_ticks": 0, "claymores": 0,
 	}
 	h._buff_chips(buffs, 8.0, 20.0, 0)
@@ -2159,10 +2239,25 @@ func test_draw_telegraph_capture_stays_in_slot() -> void:
 		h._measure = false
 		var sim := SimWorld.new(0, 1, "campaign")
 		sim.stall_ticks = 200
+		if kind == "gate":
+			# T2: this loop used to force the GATE kind into the PRESSURE spec's width. That was
+			# harmless while the pressure spec reserved ~116px (the gate's draw-time clamp downgraded
+			# the label to a tier that fit), but the de-worded pressure spec reserves only ~40px —
+			# narrower than "GATE!" itself, so the clamp correctly drew NOTHING and the test went
+			# red on a working guard. Each kind now gets its OWN real spec, which is what the slot
+			# the planner reserves actually is.
+			sim.camera_top = 0
+			sim.gates.clear()
+			sim.gates.append({"open": false, "y": 0})
 		var spec := h._telegraph_spec(sim)
+		Runner.T.eq(spec["kind"], kind, "the %s sim really produces a %s telegraph spec" % [kind, kind])
 		# Emulate _plan_row0's right-anchoring: telegraph sits flush against the usable edge.
 		var tele_left: float = usable - float(spec["w"])
 		var forced := {"kind": kind, "w": float(spec["w"])}
+		if spec.has("compact"):
+			forced["compact"] = spec["compact"]
+		if spec.has("mid"):
+			forced["mid"] = spec["mid"]
 		var right_edge: float = h._draw_telegraph(sim, forced, tele_left, 6.0)
 		Runner.T.ok(h.boxes.size() > 0, "%s telegraph emits its backing rect + label" % kind)
 		for b in h.boxes:
@@ -2312,6 +2407,21 @@ class _ChipCaptureHud extends HudIcons:
 	# it so the real _draw_telegraph runs headless without a live draw context.
 	func _mini_bar(rect: Rect2, _frac: float, _fill: Color, _alpha := 1.0) -> void:
 		boxes.append({"k": "bar", "id": "mini", "box": rect, "frac": _frac, "alpha": _alpha})
+	# T1: the vitals shield socket + its live drain sweep, and the T2 shop-timer ring, all arrive
+	# through ONE seam (_emit_arc -> Art.arc, which stamps raw rects). Recorded as two "bar" kinds —
+	# a gauge TRACK and the FILL riding its own track are both backings by the run_tests contract —
+	# so `no_overlap` sees the legitimate enclosing pair and not a collision. `frac` < 0 marks the
+	# bare track (no live sweep); the box is the ring's full FOOTPRINT in both cases, which is what
+	# the layout sweep has to keep in bounds.
+	func _emit_arc(center: Vector2, radius: float, from: float, to: float, col: Color,
+			width: float) -> void:
+		var outer := radius + width / 2.0
+		var span := absf(to - from)
+		var full := span >= TAU - 0.001
+		boxes.append({"k": "bar", "id": "vitals_track" if full else "vitals_fill",
+			"box": Rect2(center - Vector2(outer, outer), Vector2(outer, outer) * 2.0),
+			"w": width, "col": col, "alpha": col.a, "span": span,
+			"frac": -1.0 if full else clampf(span / TAU, 0.0, 1.0)})
 	# The low-ammo magazine bar draws straight onto the CanvasItem too. Captured HERE (not only on
 	# the full-frame subclass) so every on-foot row test records it instead of spraying "Drawing is
 	# only allowed inside _draw()" — an uncaptured primitive is one the overlap sweep cannot see.
@@ -2454,7 +2564,7 @@ func test_pip_paints_label_and_advances() -> void:
 func test_status_chips_prefers_full_pips_buffs_yield_first() -> void:
 	var p := {
 		"boost_ticks": 200, "x": 0, "y": 0,   # SPEED BOOST active; wading forced on via the stub sim
-		"vest": true, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
+		"vest": true, "hurt_iframes": 0, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
 		"rend_ticks": 300, "smoke_ticks": 300, "claymores": 0,
 	}
 	for edge in [632.0, 460.0, 360.0]:   # roomy down to a tight-but-clean edge where buffs overflow
@@ -2503,7 +2613,7 @@ func test_status_chips_prefers_full_pips_buffs_yield_first() -> void:
 func test_status_chips_group_drops_to_compact_together_no_mix() -> void:
 	var p := {
 		"boost_ticks": 200, "x": 0, "y": 0,   # both statuses active
-		"vest": false, "pierce_ticks": 0, "spread_ticks": 0, "triple": false,
+		"vest": false, "hurt_iframes": 0, "pierce_ticks": 0, "spread_ticks": 0, "triple": false,
 		"rend_ticks": 0, "smoke_ticks": 0, "claymores": 0,
 	}
 	var h := _ChipCaptureHud.new()
@@ -2540,7 +2650,7 @@ func test_status_chips_group_drops_to_compact_together_no_mix() -> void:
 func test_status_chips_full_words_fit_at_narrowest_supported_width() -> void:
 	var p := {
 		"boost_ticks": 200, "x": 0, "y": 0,   # both statuses active
-		"vest": false, "pierce_ticks": 0, "spread_ticks": 0, "triple": false,
+		"vest": false, "hurt_iframes": 0, "pierce_ticks": 0, "spread_ticks": 0, "triple": false,
 		"rend_ticks": 0, "smoke_ticks": 0, "claymores": 0,
 	}
 	var edge: float = HudIcons.RIGHT - HudIcons._corner_reserve(true, 0.0)   # narrowest supported
@@ -2563,7 +2673,7 @@ func test_status_chips_full_words_fit_at_narrowest_supported_width() -> void:
 func test_status_chips_names_grass_concealment_hidden() -> void:
 	## Smoke already has a countdown chip. Grass/trench only crouched the sprite.
 	var p := {"boost_ticks": 0, "x": 0, "y": 0, "alive": true, "smoke_ticks": 0,
-		"vest": false, "pierce_ticks": 0, "spread_ticks": 0, "triple": false,
+		"vest": false, "hurt_iframes": 0, "pierce_ticks": 0, "spread_ticks": 0, "triple": false,
 		"rend_ticks": 0, "claymores": 0}
 	var h := _ChipCaptureHud.new()
 	h.main = _RowMain.new()
@@ -2599,7 +2709,7 @@ class _HiddenSim extends SimWorld:
 func test_status_chips_compact_group_fits_with_buff_overflow() -> void:
 	var p := {
 		"boost_ticks": 200, "x": 0, "y": 0,   # both statuses active
-		"vest": true, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
+		"vest": true, "hurt_iframes": 0, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
 		"rend_ticks": 300, "smoke_ticks": 300, "claymores": 0,
 	}
 	var h := _ChipCaptureHud.new()
@@ -2635,7 +2745,7 @@ func test_status_chips_compact_group_fits_with_buff_overflow() -> void:
 func test_status_chips_underfit_folds_into_clamped_overflow() -> void:
 	var p := {
 		"boost_ticks": 200, "x": 0, "y": 0,   # both statuses active
-		"vest": false, "pierce_ticks": 0, "spread_ticks": 0, "triple": false,
+		"vest": false, "hurt_iframes": 0, "pierce_ticks": 0, "spread_ticks": 0, "triple": false,
 		"rend_ticks": 0, "smoke_ticks": 0, "claymores": 0,
 	}
 	var h := _ChipCaptureHud.new()
@@ -2670,7 +2780,7 @@ func test_status_chips_underfit_folds_into_clamped_overflow() -> void:
 func test_onfoot_row_integration_narrowest_viewport() -> void:
 	var p := {
 		"boost_ticks": 200, "x": 0, "y": 0,
-		"vest": true, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
+		"vest": true, "hurt_iframes": 0, "pierce_ticks": 300, "spread_ticks": 300, "triple": false,
 		"rend_ticks": 300, "smoke_ticks": 300, "claymores": 0,
 	}
 	var edge: float = HudIcons.RIGHT - HudIcons._corner_reserve(true, 0.0)   # narrowest supported
@@ -2682,6 +2792,9 @@ func test_onfoot_row_integration_narrowest_viewport() -> void:
 	# The full fixed row head in _draw's order and advances: P# tag, ammo stat, magazine bar,
 	# grenade stat, roll glyph (ICON + 2, mirroring _draw's roll advance).
 	var px := h._text("P1", 8.0, ry + HudIcons.ICON - 3.0, Color(0.75, 0.95, 0.7)) + 7.0
+	# T1: the vitals pair LEADS the head, before ammo — "can I be killed right now" outranks "how
+	# many rounds do I have". Mirrored here so this test walks the real _onfoot_chips head order.
+	px = h._vitals_chips(p, px, ry)
 	px = h._stat("icon_ammo", "30", px, ry)
 	px = h._mag_bar(px, ry + 4.0, 30, SimWorld.MG_AMMO_MAX)   # magazine bar contributor
 	px = h._stat("icon_grenade", "03", px, ry)
@@ -3295,11 +3408,23 @@ func test_c1_15_strip_renders_at_reserved_y_with_faded_content() -> void:
 	Runner.T.eq(h.player_rows_top(sim), HudIcons.STRIP_TOP + HudIcons.ROW_H,
 		"1P player rows sit one ROW_H below the reserved strip")
 	var has_player_icon := false
+	var saw_vitals_pip := false
 	for b in h.boxes:
 		if b["k"] == "icon" and absf(b["box"].position.y - h.player_rows_top(sim)) < 0.5:
 			has_player_icon = true
-			Runner.T.ok(absf(float(b["alpha"]) - 1.0) < 0.01, "player-row icon '%s' stays opaque (not faded)" % b["id"])
+			# The invariant is "the player row does not ride the STRIP fade" — a player-row icon's
+			# alpha is never the strip's fade-driven value. T1's vitals vest pip is deliberately
+			# sub-1.0 (unlit: the non-colour channel that says "no armour"), so this can no longer
+			# be a blanket alpha==1.0 pin; it is the "not the strip's alpha" pin, plus an exact pin
+			# on the one icon that IS allowed to be dim.
+			Runner.T.ok(absf(float(b["alpha"]) - icon_a) > 0.01,
+				"player-row icon '%s' does not ride the strip fade" % b["id"])
+			if String(b["id"]) == "icon_vest":
+				saw_vitals_pip = true
+				Runner.T.ok(absf(float(b["alpha"]) - HudIcons.VITALS_OFF) < 0.01,
+					"the unheld vitals vest pip draws at the declared VITALS_OFF density")
 	Runner.T.ok(has_player_icon, "player-row icons render at player_rows_top, below the strip")
+	Runner.T.ok(saw_vitals_pip, "the T1 vitals vest pip is on the player row in this frame")
 	h.free()
 	main.free()
 	Art.colorblind = was_cb
@@ -4016,6 +4141,12 @@ func test_record_badge_renders_once_the_run_beats_the_standing_best() -> void:
 func test_record_chip_is_still_the_dim_best_target_before_the_crossing() -> void:
 	# The other half of the ordering fix: an ordinary run mid-flight must keep chasing a target,
 	# not wear a medal it hasn't earned.
+	#
+	# T2: the dim "BEST n" TARGET chip is CUT from row 0 — it is a standing run-detail, and the
+	# PAUSE screen carries the score's best permanently. So "an un-beaten run shows the target" is
+	# now expressed as "it shows NOTHING": no medal (still un-earned) and no target chip (cut). The
+	# invariant this test really encodes — the badge is unreachable before the crossing — survives
+	# intact, and the cut is now asserted rather than merely implied.
 	var sim := SimWorld.new(0, 1, "campaign")
 	sim.score = 40
 	var main := _RowMain.new()
@@ -4029,10 +4160,11 @@ func test_record_chip_is_still_the_dim_best_target_before_the_crossing() -> void
 	for b in boxes:
 		if b["k"] == "icon" and String(b["id"]) == "icon_medal":
 			medal += 1
-		elif b["k"] == "text" and String(b["id"]) == "BEST 999999":
+		elif b["k"] == "text" and String(b["id"]).begins_with("BEST"):
 			best_chip += 1
 	Runner.T.eq(medal, 0, "no medal before the record is actually beaten")
-	Runner.T.eq(best_chip, 1, "the dim BEST target chip is what an un-beaten run shows")
+	Runner.T.eq(best_chip, 0,
+		"the dim BEST target chip is CUT from row 0 (T2) — an un-beaten run shows neither a medal nor a target")
 	main.free()
 
 
@@ -4435,3 +4567,430 @@ func test_taught_verbs_leave_both_the_playfield_and_the_plate() -> void:
 			"veteran save: '%s' is no longer advertised on a quiet frame (both seams)" % a)
 	Runner.T.eq(vet[1] as Rect2, Rect2(),
 		"veteran save: verb_chip_rect() is empty, so bottom_rail_rects reserves no band for it")
+
+
+
+# ============================================================================================
+# T1 — the player VITALS cluster. The one readout this HUD never had in a one-hit-death game:
+#      how much stands between you and the floor right now. Every assertion below is against the
+#      REAL _vitals_chips draw through the capture seams, not against arithmetic.
+# ============================================================================================
+
+## A player dict modelling the sim's own per-player fields the cluster reads.
+func _vitals_player(vest: bool, iframes: int) -> Dictionary:
+	return {"vest": vest, "hurt_iframes": iframes}
+
+
+## Drive the real _vitals_chips and return its captured boxes (the hud is freed — the shutdown-leak
+## gate is at zero). `motion` 1.0 = normal, 0.0 = REDUCE MOTION.
+func _vitals_capture(vest: bool, iframes: int, motion := 1.0) -> Array:
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	h.main._motion = motion
+	h._measure = false
+	h._fit_full = HudIcons.RIGHT
+	h.boxes = []
+	h._vitals_chips(_vitals_player(vest, iframes), 40.0, 20.0)
+	var out: Array = h.boxes.duplicate(true)
+	h.main.free()
+	h.free()
+	return out
+
+
+func _vitals_of(boxes: Array, id: String) -> Array:
+	var out: Array = []
+	for b in boxes:
+		if String(b["id"]) == id:
+			out.append(b)
+	return out
+
+
+func _vitals_arcs(boxes: Array) -> Array:
+	return _vitals_of(boxes, "vitals_track") + _vitals_of(boxes, "vitals_fill")
+
+
+# The cluster's reserved width must EXACTLY equal the geometry it draws — the same "a width can
+# never disagree with the drawn footprint" invariant every other chip here carries, and the one the
+# fit planner's budget depends on. Also pins the two-slot / gap / trail shape and the ring proofs.
+func test_vitals_cluster_slot_geometry() -> void:
+	Runner.T.eq(HudIcons.vitals_w(),
+		HudIcons.ICON + HudIcons.VITALS_GAP + HudIcons.ICON + HudIcons.VITALS_TRAIL,
+		"the vitals reserve is exactly two ICON slots + the gap + the trailing pad")
+	var boxes: Array = _vitals_capture(true, 30)
+	Runner.T.ok(boxes.size() > 0, "the cluster draws something in every state (the socket is always present)")
+	var icons: Array = _vitals_of(boxes, "icon_vest")
+	Runner.T.eq(icons.size(), 1, "the vest pip draws the vest sprite exactly once")
+	Runner.T.eq(icons[0]["box"], Rect2(40.0, 20.0, HudIcons.ICON, HudIcons.ICON),
+		"the vest pip sits in the FIRST ICON slot at the row's y")
+	var arcs: Array = _vitals_arcs(boxes)
+	Runner.T.eq(arcs.size(), 2, "a live window draws the socket AND its sweep")
+	var socket: Array = _vitals_of(boxes, "vitals_track")
+	Runner.T.eq(socket.size(), 1, "the shield socket always draws (the sweep must read against a whole)")
+	Runner.T.eq(socket[0]["box"].position.x, 40.0 + HudIcons.ICON + HudIcons.VITALS_GAP,
+		"the shield socket sits in the SECOND ICON slot, after the gap")
+	# Both rings are INSCRIBED in their slot: 2*(r + w/2) == ICON, the same proof the streak ring
+	# carries, so neither can poke into the row above/below or the slot beside it.
+	Runner.T.ok(absf(2.0 * (HudIcons.VITALS_SOCKET_R + HudIcons.VITALS_SOCKET_W / 2.0) - HudIcons.ICON) < 0.01,
+		"the shield socket's outer stroke edge is exactly the ICON box")
+	Runner.T.ok(absf(2.0 * (HudIcons.VITALS_RING_R + HudIcons.VITALS_RING_W / 2.0) - HudIcons.ICON) < 0.01,
+		"the live sweep's outer stroke edge is exactly the ICON box too")
+	# The two slots must not collide: the gap clears the vest pip and the tray that frames it.
+	var socket_left: float = socket[0]["box"].position.x
+	Runner.T.ok(socket_left >= 40.0 + HudIcons.ICON - 0.01,
+		"the shield socket never reaches back over the vest pip's box")
+	Runner.T.ok(absf(socket_left - (40.0 + HudIcons.ICON) - HudIcons.VITALS_GAP) < 0.01,
+		"the inter-slot gap is the declared VITALS_GAP")
+
+
+# SHAPE DOUBLING (not colour): each pip's two states are told apart by geometry/ink, so a fully
+# desaturated or deuteranopic frame still reads "I have armour" from "I have none".
+func test_vitals_reads_without_colour() -> void:
+	# --- slot 1: the VEST. held = full-strength icon ON a dark tray; not held = the SAME sprite,
+	#     dim, with NO tray. Two independent channels, not one hue.
+	var held: Array = _vitals_capture(true, 0)
+	var unlit: Array = _vitals_capture(false, 0)
+	var held_icon: Dictionary = _vitals_of(held, "icon_vest")[0]
+	var unlit_icon: Dictionary = _vitals_of(unlit, "icon_vest")[0]
+	Runner.T.ok(float(held_icon["alpha"]) > float(unlit_icon["alpha"]) + 0.5,
+		"a held vest draws at full ink; an unheld one is dimmed to VITALS_OFF")
+	Runner.T.ok(absf(float(unlit_icon["alpha"]) - HudIcons.VITALS_OFF) < 0.01,
+		"the unheld vest draws at exactly the declared VITALS_OFF density")
+	Runner.T.eq(held_icon["box"], unlit_icon["box"],
+		"both vest states use the SAME sprite in the SAME box (the channel is ink, not identity)")
+	var trays: Array = _vitals_of(held, "bg")
+	Runner.T.eq(trays.size(), 1, "a held vest rides exactly one tray plate")
+	Runner.T.eq(_vitals_of(unlit, "bg").size(), 0,
+		"an unheld vest has NO tray — plate presence is a second, independent channel")
+	Runner.T.ok(trays[0]["box"].encloses(held_icon["box"]),
+		"the vest tray ENCLOSES the vest icon (a backing, not a neighbouring chip)")
+	# --- slot 2: the SHIELD. up = a thick PARTIAL sweep over the thin socket; down = the socket
+	#     alone. Stroke weight and sweep angle are pure geometry, not hue.
+	Runner.T.eq(_vitals_arcs(unlit).size(), 1, "a closed window draws the socket only — no sweep at all")
+	var socket_box: Rect2 = _vitals_of(unlit, "vitals_track")[0]["box"]
+	Runner.T.ok(absf(float(_vitals_of(unlit, "vitals_track")[0]["w"]) - HudIcons.VITALS_SOCKET_W) < 0.01,
+		"the closed shield is a THIN socket circle")
+	Runner.T.ok(HudIcons.VITALS_SOCKET_R > HudIcons.VITALS_RING_R,
+		"...on a slightly WIDER radius, so 'thin circle' and 'thick sweep' never coincide")
+	var shielded: Array = _vitals_capture(false, SimWorld.VEST_IFRAME_TICKS / 2)
+	var sweeps: Array = _vitals_of(shielded, "vitals_fill")
+	Runner.T.eq(sweeps.size(), 1, "a live window adds exactly one sweep")
+	Runner.T.ok(HudIcons.VITALS_RING_W > HudIcons.VITALS_SOCKET_W + 0.5,
+		"the live sweep is a THICKER stroke than the bare socket (weight, not colour, is the channel)")
+	Runner.T.ok(absf(float(sweeps[0]["w"]) - HudIcons.VITALS_RING_W) < 0.01,
+		"the drawn sweep really uses the declared VITALS_RING_W")
+	Runner.T.ok(absf(float(sweeps[0]["frac"]) - 0.5) < 0.02,
+		"a half-open window sweeps ~half the ring — the value is readable as a countdown")
+	Runner.T.eq(sweeps[0]["box"], socket_box,
+		"...and the sweep is framed on the SAME socket, so the two can never drift apart")
+	# The urgent tier: the final third of the window flips to the WARNING palette (Art.warn) so a
+	# colorblind player gets the same "about to lose protection" beat the streak ring gives. Sampled
+	# with REDUCE MOTION so _mblink is deterministically steady — under normal motion the urgency
+	# tint alternates with the blink phase and the sample would flake on the frame counter.
+	var was_cb: bool = Art.colorblind
+	Art.colorblind = false
+	var late: Color = _vitals_of(_vitals_capture(false, 10, 0.0), "vitals_fill")[0]["col"]
+	Art.colorblind = true
+	var late_cb: Color = _vitals_of(_vitals_capture(false, 10, 0.0), "vitals_fill")[0]["col"]
+	# The reference has to be resolved WHILE the palette is still on, or it re-reads the restored
+	# flag and compares the lifted draw against the UN-lifted literal.
+	var want_cb := Art.warn(Color(1.0, 0.3, 0.25))
+	Art.colorblind = was_cb
+	Runner.T.ok(late.r > 0.9 and late.g < 0.5,
+		"the final third of the window carries the WARN-RED tier, not the calm shield tint")
+	Runner.T.ok(late_cb.b > late.b + 0.01,
+		"under the colorblind palette that critical tint's blue is LIFTED (Art.warn, not a one-off hue)")
+	Runner.T.eq(late_cb, want_cb,
+		"...and the drawn critical tint IS the shared Art.warn output, so the palette cannot drift")
+	# ...and a wide-open window is NOT urgent (the tiers cannot invert). 67 ticks is the widest
+	# sample that still quarter-snaps to a PARTIAL sweep (>= 68 snaps up to a full circle, which is
+	# a different recorded shape), so this reads the calm tier on a real partial arc.
+	var early: Color = _vitals_of(_vitals_capture(false, 67, 0.0), "vitals_fill")[0]["col"]
+	Runner.T.ok(early.g > late.g, "a wide-open window is the CALM shield tier, not the urgent one")
+	Runner.T.ok(early.b > early.r, "...and the calm tier is a cool tint (Art.safe), not another red")
+
+
+# The window quarter-snaps under REDUCE MOTION, so it holds one of FOUR values instead of draining
+# per frame — and the urgency cue holds STEADY (no strobe). Both are the contract the streak ring
+# already carries; the vitals pair must not be the one readout that ignores it.
+func test_vitals_reduce_motion_is_steady() -> void:
+	var seen := {}
+	var checked := 0
+	for ticks in range(1, SimWorld.VEST_IFRAME_TICKS + 1, 3):
+		var f: Array = _vitals_of(_vitals_capture(false, ticks, 0.0), "vitals_fill")
+		if f.is_empty():
+			continue
+		checked += 1
+		var raw := float(ticks) / float(SimWorld.VEST_IFRAME_TICKS)
+		Runner.T.ok(absf(float(f[0]["frac"]) - ceilf(raw * 4.0) / 4.0) < 0.001,
+			"reduced motion quarter-snaps the drain at %d ticks (raw %.4f)" % [ticks, raw])
+		seen[float(f[0]["frac"])] = true
+	Runner.T.ok(checked >= 20, "the reduce-motion sweep was sampled across the whole window")
+	Runner.T.ok(seen.size() <= 4,
+		"reduce motion holds at most FOUR drain values across the window (steady, not per-frame: %d)" % seen.size())
+	# _mblink is the reduce-motion-safe urgency gate; steady-on there is what makes the critical tier
+	# legible without a flash.
+	var h := HudIcons.new()
+	h.main = _RowMain.new()
+	h.main._motion = 0.0
+	Runner.T.ok(h._mblink(10), "the urgency cue holds steady under reduce motion (no strobe)")
+	Runner.T.ok(h._mblink(10), "...and stays steady on a second sample (deterministically non-blinking)")
+	h.main.free()
+	h.free()
+
+
+# The cluster leads the fixed player-row head and is the LAST thing the row can lose: it is the
+# first entry of the same plan_chips prefix, so on a starved row the equipment sheds and the vitals
+# survive — and when even the vitals miss, they are COUNTED into the shared "+N" clip.
+func test_vitals_lead_the_player_row_and_never_shed_first() -> void:
+	var sim := SimWorld.new(0, 1, "endless")
+	var p: Dictionary = sim.players[0]
+	p["mg_ammo"] = SimWorld.MG_AMMO_MAX
+	p["grenade_ammo"] = SimWorld.GRENADE_AMMO_MAX
+	p["fire_cd"] = 0
+	p["grenade_cd"] = 0
+	p["roll_cd"] = 0
+	var h := _FrameCaptureHud.new()
+	h.main = _FrameMain.new()
+	h.main.sim = sim
+	h._measure = false
+	# Roomy: every head chip draws, the vitals FIRST, and the row is in bounds.
+	h._fit_full = HudIcons.RIGHT
+	h.boxes = []
+	var end_px: float = h._onfoot_chips(p, 8.0, 20.0, 0, sim)
+	Runner.T.ok(end_px <= h._fit_full + 0.01, "the roomy row ends within the usable edge")
+	var vest_x := -1.0
+	var socket_x := -1.0
+	var ammo_x := -1.0
+	for b in h.boxes:
+		if b["k"] == "icon" and String(b["id"]) == "icon_vest":
+			vest_x = b["box"].position.x
+		elif b["k"] == "bar" and String(b["id"]) == "vitals_track":
+			socket_x = b["box"].position.x
+		elif b["k"] == "icon" and String(b["id"]) == "icon_ammo":
+			ammo_x = b["box"].position.x
+	Runner.T.ok(vest_x >= 0.0 and socket_x > vest_x, "the vitals pair renders on the row")
+	Runner.T.ok(ammo_x > socket_x, "the vitals pair LEADS the fixed head (ahead of the ammo chip)")
+	_assert_render_bounds_nonoverlap(h.boxes, h._fit_full, "vitals-roomy")
+	h.main.free()
+	h.free()
+	# Starved to exactly ONE head unit: the vitals are that unit, and the three that follow them
+	# are what shed. (plan_chips reserves the +N only on real overflow, so the edge has to clear
+	# the vitals AND the clip for exactly one to survive.)
+	var h2 := _FrameCaptureHud.new()
+	h2.main = _FrameMain.new()
+	h2.main.sim = sim
+	h2._measure = false
+	h2._fit_full = 8.0 + HudIcons.vitals_w() + 26.0
+	h2.boxes = []
+	var end2: float = h2._onfoot_chips(p, 8.0, 20.0, 0, sim)
+	Runner.T.ok(end2 <= h2._fit_full + 0.01, "the starved row cursor stays within the usable edge")
+	var starved_ovf := false
+	var starved_vitals := false
+	for b in h2.boxes:
+		if b["k"] == "ovf":
+			starved_ovf = true
+		if b["k"] == "bar" and String(b["id"]) == "vitals_track":
+			starved_vitals = true
+	Runner.T.ok(starved_vitals, "the vitals pair is the LAST head unit the row gives up")
+	Runner.T.ok(starved_ovf, "everything the starved row dropped is counted in the shared +N clip")
+	h2.main.free()
+	h2.free()
+
+
+# The vest left the demotable buff tail for good. It used to lead that run as a bare icon-only chip
+# at BUFF_PRIO_PERSIST — the most survival-relevant fact in the game, first to be culled. Now the
+# tail never enumerates it at all, so it can never be counted into a "+N" there.
+func test_vest_is_no_longer_a_demotable_buff_chip() -> void:
+	var h := _ChipCaptureHud.new()
+	h.main = _RowMain.new()
+	h._measure = false
+	h._fit_full = HudIcons.RIGHT
+	var p := {"vest": true, "hurt_iframes": 0, "pierce_ticks": 0, "spread_ticks": 0,
+		"triple": false, "rend_ticks": 0, "smoke_ticks": 0, "claymores": 0}
+	h.boxes = []
+	var end_px: float = h._buff_chips(p, 8.0, 20.0, 0)
+	Runner.T.eq(end_px, 8.0, "a lone held vest produces NO buff chip and costs no width")
+	Runner.T.eq(h.boxes.size(), 0, "...and paints nothing")
+	Runner.T.eq(h._chip_w({"icon": "hud_star", "txt": "x3", "col": Color.WHITE}),
+		HudIcons.ICON + 13.0 + h._tw("x3"),
+		"_chip_w has no icon-only vest case left to special-case")
+	# ...but the player dict's real vest field is still read, by the vitals pair.
+	Runner.T.eq(_vitals_of(_vitals_capture(true, 0), "icon_vest").size(), 1,
+		"the vest is still SHOWN — it just moved to the uncullable vitals slot")
+	h.main.free()
+	h.free()
+
+
+# ============================================================================================
+# T2 — the +N title affordance the de-wording owes the player. Row 0 is now icon + numeral, so
+#      "+N" alone can no longer be decoded by eye; CHIP_TITLES is the full word behind it.
+# ============================================================================================
+
+func _id_at_priority(cands: Array, rank: int) -> String:
+	var ranked: Array = []
+	for c in cands:
+		if String(c["id"]) == "streak_hint":
+			continue
+		ranked.append(c)
+	ranked.sort_custom(func(a, b): return int(a["prio"]) > int(b["prio"]))
+	return String(ranked[rank]["id"]) if rank < ranked.size() else ""
+
+
+# Every chip id the row can hide must name itself in FULL WORDS, and the list must come back in
+# CHIP_PRIO order (most important first) — the exact "never a cryptic abbreviation" rule the status
+# pips enforce ("a plain word, never the cryptic 'SPD' abbreviation").
+func test_every_hidden_row0_chip_names_itself() -> void:
+	var h := HudIcons.new()
+	h.main = _RowMain.new()
+	h.main.best_wave = 1
+	h.main._record_fired = true
+	h.main.best_score = 100
+	var sim := SimWorld.new(0, 1, "endless")
+	sim.kill_streak = 12
+	sim.kill_streak_timer = 30
+	sim.wave = 4
+	sim.deaths_this_wave = 0
+	sim.wave_mod = 4
+	sim.flash_ticks = 120
+	h._measure = true
+	h._opt_cands = []
+	h._opt_keep = {}
+	h._row0_opt(sim, 8.0, 6.0, false)
+	Runner.T.ok(h._opt_cands.size() >= 6, "a crowded row enumerates a full stack of hideable chips")
+	var expected: Array = []
+	for c in h._opt_cands:
+		var id: String = c["id"]
+		if id == "streak_hint":
+			continue
+		Runner.T.ok(HudIcons.CHIP_TITLES.has(id), "hideable chip '%s' has a CHIP_TITLES name" % id)
+		var title: String = String(HudIcons.CHIP_TITLES.get(id, ""))
+		Runner.T.ok(title.length() >= 3, "'%s' is a full name, not a stub" % id)
+		Runner.T.ok(title == title.to_upper(),
+			"'%s' is spelled in full caps like every other HUD readout" % id)
+		Runner.T.ok(not title.contains("."),
+			"'%s' is a WORD, not an abbreviation (%s)" % [id, title])
+		expected.append(title)
+	# Hidden titles come back in PRIORITY order, so the list leads with what matters most.
+	var titles: PackedStringArray = HudIcons.hidden_titles(h._opt_cands, {}, 0)
+	Runner.T.eq(titles.size(), expected.size(), "every candidate resolves to a name")
+	for i in titles.size():
+		Runner.T.eq(String(titles[i]), String(HudIcons.CHIP_TITLES.get(_id_at_priority(h._opt_cands, i), "")),
+			"hidden title %d is the %dth-highest-priority chip" % [i, i])
+	# A dropped TELEGRAPH is a non-candidate, so no CHIP_TITLES entry can cover it — it names itself.
+	var with_tele: PackedStringArray = HudIcons.hidden_titles(h._opt_cands, {}, 1)
+	Runner.T.eq(String(with_tele[with_tele.size() - 1]), "PRESSURE / GATE",
+		"a dropped PRESSURE/GATE telegraph names itself, last in the list")
+	# The subordinate streak hint is never a readout in its own right (see _display_hidden).
+	Runner.T.ok(not ("STREAK HINT" in titles), "the subordinate streak hint is never its own 'more here'")
+	h.main.free()
+	h.free()
+
+
+# The accessible NAME published on the Control: empty when the row fits (no stale title), the count
+# plus the full-word list when it does. This is the "+N's what is hidden?" channel the de-wording
+# makes necessary, on the same dual-channel footing as the "+"->"!" shape swap.
+func test_overflow_accessible_name_lists_what_is_hidden() -> void:
+	var cands: Array = [
+		{"id": "hostiles", "prio": int(HudIcons.CHIP_PRIO["hostiles"]), "w": 100.0},
+		{"id": "wave", "prio": int(HudIcons.CHIP_PRIO["wave"]), "w": 30.0},
+		{"id": "streak", "prio": int(HudIcons.CHIP_PRIO["streak"]), "w": 60.0},
+	]
+	var h := HudIcons.new()
+	# Nothing hidden -> no title at all, so a settled row carries nothing stale.
+	h._set_overflow_name(0, cands, {"hostiles": true, "wave": true, "streak": true}, false)
+	Runner.T.eq(h.tooltip_text, "", "a fitting row publishes no overflow name")
+	# The kept set drives the list: only the DROPPED chips are named, highest priority first.
+	h._set_overflow_name(2, cands, {"hostiles": true}, false)
+	Runner.T.eq(h.tooltip_text,
+		(HudIcons.OVERFLOW_TITLE_PREFIX % 2) + String(HudIcons.CHIP_TITLES["wave"]) + ", "
+			+ String(HudIcons.CHIP_TITLES["streak"]),
+		"the name carries the count plus every hidden readout, highest priority first")
+	Runner.T.ok(h.tooltip_text.contains(String(HudIcons.CHIP_TITLES["wave"])),
+		"...naming the WAVE chip even though row 0 now draws only a flag icon + a numeral")
+	Runner.T.ok(not h.tooltip_text.contains(String(HudIcons.CHIP_TITLES["hostiles"])),
+		"...and NOT naming a chip that was kept")
+	# A dropped telegraph is folded in on the end.
+	h._set_overflow_name(3, cands, {"hostiles": true}, true)
+	Runner.T.ok(h.tooltip_text.ends_with("PRESSURE / GATE"),
+		"a dropped PRESSURE/GATE telegraph is named too (it is a non-candidate)")
+	h.free()
+
+
+# T2 evidence, kept as a ratchet rather than a one-off measurement: the corner plate's dynamic
+# width is now content-driven, and PLATE_MIN_W is the BINDING constraint on a quiet campaign row
+# (it is not, and no longer should be, the thing that sizes the panel). Measured on the real frame:
+#   endless mid-fight (wave chip)   399.0 px -> 356.0 px   (-43, the flag icon + numeral)
+#   endless, shop window open       396.0 px -> 316.0 px   (-80, the icon + radial timer)
+#   campaign, no telegraph          506.5 px -> 265.5 px  (-241, SECTOR + BEST cut outright)
+#   campaign, PRESSURE armed       630.0 px -> 630.0 px  (unchanged: the telegraph is
+#                                                     right-ANCHORED, so row_r is always the
+#                                                     usable edge and the plate always clamps)
+# The campaign figure is the one that matters: 265.5 is within 4px of PLATE_MIN_W (262.0), i.e.
+# the fitted width now equals the floor. Before T2 the same row fitted ~506px, so the floor was a
+# comfort margin 244px below reality; now it is the panel. The floor is NOT changed here — the
+# orchestrator owns that decision — this test just pins the measured relationship so the number
+# cannot silently drift.
+func test_plate_width_is_now_content_driven() -> void:
+	var sim := SimWorld.new(0, 1, "campaign")
+	sim.stall_ticks = 0            # no telegraph, so nothing is right-anchored
+	sim.war_chest = 240
+	sim.score = 1840
+	sim.flawless_streak = 0
+	sim.tokens = 0
+	var p: Dictionary = sim.players[0]
+	p["mg_ammo"] = 62
+	p["grenade_ammo"] = 5
+	p["boost_ticks"] = 0
+	p["vest"] = true
+	var main := _FrameMain.new()
+	main.sim = sim
+	main._motion = 1.0
+	main.best_score = 999999
+	main._grenade_dry = [0]
+	var h := _FrameCaptureHud.new()
+	h.main = main
+	h._verb_show = 0.0
+	h._ready()
+	_capture_draw(h)
+	# row_r is _plate_r - 4 - max(player rows), recovered from the same values _draw used.
+	var row_r: float = h._plate_r - 4.0
+	Runner.T.ok(absf(h._plate_r - 265.5) < 0.05,
+		"the quiet campaign plate measures 265.5px (was ~506.5px before the SECTOR/BEST cut)")
+	Runner.T.ok(h._plate_r >= HudIcons.PLATE_MIN_W, "...and still honours the PLATE_MIN_W floor")
+	Runner.T.ok(h._plate_r - HudIcons.PLATE_MIN_W < 8.0,
+		"...and the fitted width is now WITHIN 8px of that floor: the floor is the binding constraint")
+	Runner.T.ok(row_r > 0.0, "row 0 still has real content behind the plate (nothing was cut to fit)")
+	# The player row grew by the vitals pair; the plate is row-0 driven on this frame, so the
+	# vitals cost the panel nothing here.
+	Runner.T.ok(h._prow_r < h._plate_r,
+		"the player row (now carrying the vitals pair) is narrower than the panel on this frame")
+	h.free()
+	main.free()
+
+	# An armed PRESSURE telegraph is right-ANCHORED, so row_r is the usable edge and the plate
+	# clamps at RIGHT - PLATE_ORIGIN regardless of how narrow the de-worded telegraph got. Pin
+	# that so nobody "optimises" the de-wording expecting a plate-width win on this frame.
+	var sim2 := SimWorld.new(0, 1, "campaign")
+	sim2.stall_ticks = 100
+	sim2.war_chest = 240
+	sim2.score = 1840
+	sim2.tokens = 0
+	var p2: Dictionary = sim2.players[0]
+	p2["mg_ammo"] = 62
+	p2["grenade_ammo"] = 5
+	p2["boost_ticks"] = 0
+	p2["vest"] = true
+	var main2 := _FrameMain.new()
+	main2.sim = sim2
+	main2._motion = 1.0
+	main2.best_score = 999999
+	main2._grenade_dry = [0]
+	var h2 := _FrameCaptureHud.new()
+	h2.main = main2
+	h2._verb_show = 0.0
+	h2._ready()
+	_capture_draw(h2)
+	Runner.T.eq(h2._plate_r, HudIcons.RIGHT - HudIcons.PLATE_ORIGIN,
+		"a right-anchored PRESSURE telegraph still pins the plate to the usable edge (unchanged by T2)")
+	h2.free()
+	main2.free()

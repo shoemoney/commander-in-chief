@@ -266,29 +266,94 @@ HUMANS: dict[str, dict] = {
 }
 
 
-def _corpse(p: Pad, *, cloth, cloth_d, helm, helm_d, blood=True):
-    """A body sprawled face-down -- arms and legs splayed, not a tidy figure."""
-    cx, cy = 0.5, 0.52
+def _torso(p, cx, cy, rx, ry, base, hi, lo):
+    """The mass of a body on the ground, carrying the same north-lit ramp the
+    hulls do: dark contact skirt, mid body, lit crown. A body drawn in one flat
+    fill loses the torso/arm separation that is the only thing saying "human"
+    once the sprite is 19px across."""
+    p.ell(cx, cy + ry * 0.16, rx * 1.10, ry * 1.10, fill=lo)
+    p.ell(cx, cy, rx, ry, fill=base)
+    p.ell(cx - rx * 0.14, cy - ry * 0.30, rx * 0.72, ry * 0.56, fill=hi)
+
+
+def _head(p, cx, cy, helm, helm_d):
+    p.ell(cx, cy, 0.108, 0.102, fill=helm)
+    p.ell(cx - 0.014, cy - 0.016, 0.086, 0.080, fill=helm_d)
+    p.ell(cx - 0.020, cy - 0.030, 0.052, 0.048,
+          fill=tuple(min(255, int(c * 1.26)) for c in helm))
+
+
+def _corpse(p, *, cloth, cloth_d, helm, helm_d, blood=True, pose="splayed"):
+    """A body on the ground -- THREE POSES, not one pose in three palettes.
+
+    The three corpses were previously a single stamp recoloured (measured alpha
+    IoU 1.00 and 0.95), so a battlefield strewn with them read as one shape
+    repeated at three litter slots. They now differ in PLAN SILHOUETTE first and
+    palette second:
+
+      splayed  -- face-down, limbs thrown wide; the widest of the three
+      curled   -- on its side, knees up, arm folded across the chest; compact
+      together-- face-down, legs straight and parallel, arms tucked; a slab
+
+    Those three plans are near-orthogonal when bbox-normalised, which is what
+    actually separates them at 18-22px -- a different palette at the same
+    silhouette is invisible on a dark ground.
+    """
+    cx, cy = 0.5, 0.50
+    mid, lo = cloth, _mul(cloth, 0.56)
+    hi = _mul(cloth, 1.28)
+
     if blood:
-        p.ell(cx, cy + 0.05, 0.29, 0.24, fill=(62, 30, 26))
-    for a, ln in ((-0.9, 0.30), (-2.3, 0.28), (0.85, 0.31), (2.35, 0.27)):
-        p.line([(cx, cy), (cx + math.cos(a) * ln, cy + math.sin(a) * ln)],
-               cloth_d, 0.075)
-    p.ell(cx, cy + 0.02, 0.17, 0.20, fill=cloth)
-    p.d.chord([(cx - 0.17) * p.W, (cy - 0.18) * p.H,
-               (cx + 0.17) * p.W, (cy + 0.22) * p.H], 0, 180, fill=cloth_d)
-    p.ell(cx - 0.02, cy - 0.19, 0.105, 0.100, fill=helm)
-    p.ell(cx - 0.02, cy - 0.205, 0.085, 0.080, fill=helm_d)
+        # a separate, offset, DARKER pool: soaked ground, not part of the
+        # silhouette -- so it is kept clear of the body's own bbox on the slab
+        # pose, where a centred disc would erase the plan entirely
+        pool = {"splayed": (cx + 0.02, cy + 0.14, 0.30, 0.24),
+                "curled": (cx + 0.05, cy + 0.15, 0.23, 0.19),
+                "together": (cx + 0.09, cy + 0.17, 0.145, 0.135)}[pose]
+        p.ell(pool[0], pool[1], pool[2], pool[3], fill=(58, 27, 24))
+        p.ell(pool[0] - pool[2] * 0.42, pool[1] + pool[3] * 0.34,
+              pool[2] * 0.52, pool[3] * 0.40, fill=(80, 35, 31))
+
+    if pose == "splayed":
+        for a, ln in ((-0.70, 0.335), (-2.44, 0.315), (0.64, 0.345), (2.48, 0.305)):
+            p.line([(cx, cy), (cx + math.cos(a) * ln, cy + math.sin(a) * ln)],
+                   lo, 0.080)
+            p.line([(cx + math.cos(a) * ln * 0.55,
+                     cy + math.sin(a) * ln * 0.55),
+                    (cx + math.cos(a) * ln, cy + math.sin(a) * ln)],
+                   hi, 0.034)                       # lit upper edge per limb
+        _torso(p, cx, cy + 0.020, 0.170, 0.205, mid, hi, lo)
+        _head(p, cx - 0.020, cy - 0.205, helm, helm_d)
+    elif pose == "curled":
+        p.ell(cx + 0.030, cy + 0.075, 0.235, 0.200, fill=lo)
+        p.line([(cx - 0.020, cy + 0.105), (cx - 0.235, cy - 0.020)], lo, 0.086)
+        p.line([(cx - 0.235, cy - 0.020), (cx - 0.185, cy - 0.190)], lo, 0.082)
+        p.line([(cx + 0.045, cy + 0.020), (cx - 0.140, cy - 0.125)], hi, 0.078)
+        _torso(p, cx + 0.030, cy + 0.010, 0.185, 0.170, mid, hi, lo)
+        _head(p, cx - 0.160, cy - 0.205, helm, helm_d)
+    else:   # "together"
+        for sx in (-1, 1):
+            p.line([(cx + sx * 0.050, cy + 0.150), (cx + sx * 0.058, cy + 0.360)],
+                   lo, 0.084)
+            p.line([(cx + sx * 0.050, cy + 0.180), (cx + sx * 0.055, cy + 0.350)],
+                   hi, 0.030)
+            p.ell(cx + sx * 0.062, cy + 0.395, 0.052, 0.046,
+                  fill=_mul(cloth_d, 0.80))         # boots
+        _torso(p, cx, cy - 0.055, 0.150, 0.205, mid, hi, lo)
+        for sx in (-1, 1):                          # arms tucked hard in
+            p.line([(cx + sx * 0.118, cy - 0.115), (cx + sx * 0.052, cy + 0.070)],
+                   lo, 0.070)
+        _head(p, cx, cy - 0.245, helm, helm_d)
     p.keyline(0.020)
 
 
 CORPSES = {
     "p2/corpse_soldier1": dict(canvas=140, cloth=P.CLOTH, cloth_d=P.CLOTH_D,
-                               helm=P.HELM_E, helm_d=P.HELM_E_D),
+                               helm=P.HELM_E, helm_d=P.HELM_E_D, pose="splayed"),
     "p2/corpse_soldier2": dict(canvas=140, cloth=(88, 82, 62), cloth_d=(58, 54, 40),
-                               helm=P.HELM_C, helm_d=P.HELM_C_D),
+                               helm=P.HELM_C, helm_d=P.HELM_C_D, pose="curled"),
     "decor/fallen_merc": dict(canvas=180, cloth=(82, 88, 68), cloth_d=(54, 58, 44),
-                              helm=P.HELM_C, helm_d=P.HELM_C_D),
+                              helm=P.HELM_C, helm_d=P.HELM_C_D, pose="together"),
 }
 
 
@@ -298,9 +363,33 @@ CORPSES = {
 # half: they are geometry, and most land at 10-75px on screen where the outer
 # silhouette is the entire read.
 # =============================================================================
-def _tracks(p, cx, cy, hw, hh, col=(46, 48, 44)):
-    """Two dark track runs flanking a hull -- the tracked-vehicle tell."""
-    for sx in (-1, 1):
+def _mul(c, k):
+    """Scale an RGB triple, clamped. Every value ramp in this file is
+    multiply-by-factor off one base, which is the _bag() vocabulary."""
+    return tuple(max(0, min(255, int(v * k))) for v in c)
+
+
+def _hull(p, pts, base, lift=0.022, skirt=0.024, hi=1.30, lo=0.70):
+    """A RAISED, north-lit hull face -- the _bag() crown convention generalised
+    from an ellipse to an arbitrary hull polygon.
+
+    Draws a dark skirt that shows along the SOUTH edge, the mid body, a mid-light
+    band and a bright top face that show along the NORTH edge: four value steps
+    off one base colour. The wreck family used to be ONE flat fill plus three
+    dark ellipses, and at 18-32px on screen the ink keyline is sub-pixel, so the
+    whole hull collapsed to a single sticker value. `lift` is in unit coords --
+    keep it under ~0.03 or the top face slides off the hull on a short sprite.
+    """
+    p.poly([(x, y + skirt) for x, y in pts], _mul(base, lo))
+    p.poly(pts, base)
+    p.poly([(x, y - lift * 0.5) for x, y in pts], _mul(base, 1.0 + (hi - 1.0) * 0.58))
+    p.poly([(x, y - lift) for x, y in pts], _mul(base, hi))
+
+
+def _tracks(p, cx, cy, hw, hh, col=(46, 48, 44), sides=(-1, 1)):
+    """Dark track runs flanking a hull -- the tracked-vehicle tell. `sides` drops
+    one run for the half-tracked / broken-vehicle plans."""
+    for sx in sides:
         p.rrect_c(cx + sx * hw, cy, hw * 0.30, hh, 0.02, col)
         for i in range(7):
             y = cy - hh + (i + 0.5) * (2 * hh / 7)
@@ -315,18 +404,34 @@ def _wheels(p, cx, cy, hw, hh, n=3, col=(40, 42, 38)):
             p.rrect_c(cx + sx * hw, y, hw * 0.26, hh * 0.20, 0.02, col)
 
 
-def _burnt(p, cx, cy, hw, hh):
-    """Scorch + a blown-open hole: what makes a hull read as a WRECK.
+def _burnt(p, hx, hy, hrx, hry):
+    """The blown-open hole that makes a hull read as a WRECK, and -- the part that
+    was missing -- its lit torn lip.
 
-    Kept DELIBERATELY SMALL. An earlier version covered ~95% of the hull in
+    A hole is a value with nothing above it, not a step in the value range: the
+    old burn stamped three near-black ellipses and the sprite measured flatter
+    the more of it there was. A blown plate edge catches the same north light as
+    the hull crown, so the lip goes in as a THIN crescent on the hole's north
+    side -- the hole's own shape offset north, then the hole drawn over it. The
+    first pass drew the lip as a bright ellipse PARKED ON TOP of the hole, which
+    at these sizes is a white saucer balanced on the wreck.
+
+    The opening is an angular 7-gon, not a circle: a round hole reads as a
+    porthole. Still kept SMALL -- an earlier version covered ~95% of the hull in
     near-black, which made apc / light_tank / technical / wreck all collapse into
-    the same dark blob at their real 26-37px. The hull silhouette is what tells
-    them apart, so the burn is now a couple of scorch marks ON the hull rather
-    than a coat of paint over it.
+    the same dark blob at their real 26-37px.
     """
-    p.ell(cx + hw * 0.10, cy - hh * 0.08, hw * 0.44, hh * 0.36, fill=(22, 21, 20))
-    p.ell(cx - hw * 0.34, cy + hh * 0.34, hw * 0.24, hh * 0.19, fill=(30, 28, 26))
-    p.ell(cx + hw * 0.30, cy + hh * 0.42, hw * 0.18, hh * 0.14, fill=(34, 32, 30))
+    torn = [(hx - hrx * 1.00, hy - hry * 0.10), (hx - hrx * 0.60, hy - hry * 0.74),
+            (hx + hrx * 0.20, hy - hry * 0.92), (hx + hrx * 0.98, hy - hry * 0.30),
+            (hx + hrx * 0.72, hy + hry * 0.68), (hx - hrx * 0.12, hy + hry * 0.98),
+            (hx - hrx * 0.82, hy + hry * 0.50)]
+    p.ell(hx - hrx * 0.24, hy + hry * 0.34, hrx * 0.90, hry * 0.64, fill=(94, 86, 74))
+    p.poly([(x, y - hry * 0.32) for x, y in torn], (146, 138, 122))   # torn lip
+    p.poly(torn, (54, 50, 46))                                        # the opening
+    p.poly([(hx + (x - hx) * 0.68, hy + (y - hy) * 0.68) for x, y in torn],
+           (33, 31, 29))                                              # its depth
+    p.poly([(hx + (x - hx) * 0.32, hy + (y - hy) * 0.32) for x, y in torn],
+           (23, 22, 21))
 
 
 def o_technical(p):        # live militia pickup -- the MG is the hero feature
@@ -341,18 +446,69 @@ def o_technical(p):        # live militia pickup -- the MG is the hero feature
 
 
 def o_apc(p):
-    p.rrect_c(0.5, 0.50, 0.26, 0.42, 0.07, (62, 66, 58))
-    _tracks(p, 0.5, 0.50, 0.265, 0.40)
-    _burnt(p, 0.5, 0.50, 0.24, 0.38)
+    """The LOW, LONG, TURRETLESS one, and the family's most NON-CONVEX plan: a
+    wide armoured nose section that STEPS IN over the rear third to a narrow hull,
+    with the tracks running the front two-thirds. The bevelled nose is the sloped
+    glacis read from overhead; the step is what makes the normalised silhouette
+    nothing like the halftrack's L-shaped cargo, the light tank's barrel spout or
+    the hulk's single-track kidney. The step sits low in the plan on purpose --
+    put it at the midpoint and the thing reads as a mushroom, not a hull.
+    """
+    body = (94, 98, 88)
+    _tracks(p, 0.5, 0.355, 0.258, 0.265, col=(42, 44, 40))
+    hull = [(0.290, 0.090), (0.710, 0.090), (0.710, 0.600), (0.605, 0.665),
+            (0.605, 0.885), (0.395, 0.885), (0.395, 0.665), (0.290, 0.600)]
+    _hull(p, hull, body, lift=0.026, skirt=0.024)
+    # the glacis: the most light-catching face on the vehicle
+    p.poly([(0.295, 0.093), (0.705, 0.093), (0.705, 0.196), (0.295, 0.196)],
+           _mul(body, 1.24))
+    p.poly([(0.325, 0.104), (0.675, 0.104), (0.675, 0.172), (0.325, 0.172)],
+           _mul(body, 1.38))
+    for i in range(3):                       # road wheels reading through the skirt
+        p.ell(0.5, 0.265 + i * 0.120, 0.155, 0.038, fill=_mul(body, 0.82))
+    p.poly([(0.395, 0.672), (0.605, 0.672), (0.605, 0.716), (0.395, 0.716)],
+           _mul(body, 0.76))                 # the step's shaded riser
+    p.rrect_c(0.5, 0.800, 0.105, 0.060, 0.012, _mul(body, 0.86))   # rear hatch
+    _burnt(p, 0.375, 0.500, 0.098, 0.082)
     p.keyline(0.018)
 
 
 def o_light_tank(p):
-    p.rrect_c(0.5, 0.54, 0.24, 0.36, 0.06, (60, 64, 56))
-    _tracks(p, 0.5, 0.54, 0.245, 0.34)
-    p.ell(0.5, 0.50, 0.175, 0.170, fill=(46, 50, 44))          # turret, askew
-    p.rrect_c(0.60, 0.24, 0.040, 0.20, 0.01, (34, 36, 32))     # barrel, broken angle
-    _burnt(p, 0.5, 0.54, 0.20, 0.30)
+    """The one with a SPOUT. A compact hull, a small turret offset EAST of centre,
+    and a long thin barrel running most of the sprite's length to the north --
+    the only protrusion in the family, so this is the silhouette that separates
+    from all four siblings at a glance. A snapped barrel is also the reason a
+    tank is a wreck, so the value work goes into the mantlet and the deck.
+    """
+    body = (90, 94, 84)
+    _tracks(p, 0.5, 0.575, 0.272, 0.245, col=(40, 42, 38))
+    # the hull's south-east corner is blown away, so the plan is a bitten wedge
+    # rather than the rounded slab its three siblings were
+    hull = [(0.315, 0.290), (0.685, 0.290), (0.715, 0.375), (0.715, 0.640),
+            (0.600, 0.780), (0.500, 0.845), (0.355, 0.845), (0.285, 0.740),
+            (0.285, 0.375)]
+    _hull(p, hull, body, lift=0.022, skirt=0.020)
+    p.poly([(0.315, 0.290), (0.685, 0.290), (0.668, 0.360), (0.332, 0.360)],
+           _mul(body, 1.22))                          # lit engine deck
+    for i in range(4):                               # louvres
+        p.line([(0.36 + i * 0.028, 0.300), (0.36 + i * 0.028, 0.348)],
+               _mul(body, 0.80), 0.014)
+    # turret: a small CAST turret, so a hexagon -- four concentric ellipses
+    # read as a bullseye at 20px, which is the one thing a tank must not do
+    ring = _epoly(0.540, 0.520, 0.170, 0.160, 0.20, n=6)
+    p.poly([(x, y + 0.016) for x, y in ring], _mul(body, 0.70))
+    p.poly(ring, body)
+    p.poly([(x, y - 0.022) for x, y in ring], _mul(body, 1.26))
+    p.rrect_c(0.540, 0.505, 0.082, 0.062, 0.014, (30, 29, 27))   # open hatch
+    p.rrect_c(0.540, 0.498, 0.062, 0.030, 0.010, (54, 52, 48))
+    p.ell(0.525, 0.476, 0.044, 0.040, fill=(26, 26, 24))          # mantlet
+    # the spout: long, thin, kinked off the mantlet, lit down its west face
+    p.poly([(0.503, 0.460), (0.548, 0.460), (0.528, 0.030), (0.492, 0.030)],
+           (48, 48, 44))
+    p.poly([(0.503, 0.460), (0.520, 0.460), (0.506, 0.030), (0.492, 0.030)],
+           (112, 112, 106))
+    p.ell(0.510, 0.048, 0.040, 0.026, fill=(74, 74, 70))          # muzzle brake
+    _burnt(p, 0.380, 0.720, 0.090, 0.068)
     p.keyline(0.018)
 
 
@@ -419,25 +575,118 @@ def o_drone(p):
 
 
 def o_tank_hulk(p):
-    p.rrect_c(0.5, 0.52, 0.25, 0.38, 0.06, (54, 52, 48))
-    _tracks(p, 0.5, 0.52, 0.255, 0.36)
-    p.ell(0.5, 0.46, 0.180, 0.175, fill=(42, 40, 38))
-    p.rrect_c(0.5, 0.20, 0.042, 0.16, 0.01, (30, 30, 28))
-    _burnt(p, 0.5, 0.52, 0.21, 0.32)
+    """The BROKEN one, and the only lopsided member of the family. The hull sits
+    crooked, the whole east track run is gone (thrown clear, leaving bare road
+    wheels and an empty track bed), and the turret is a blown-off stub ring.
+    Every sibling is symmetric about its long axis, so dropping one flank and
+    rotating the body is a silhouette differentiator nothing else in the litter
+    can match -- and it is also the honest read for a parked hulk the sim burns
+    smoke off.
+    """
+    body = (82, 76, 70)
+    _tracks(p, 0.5, 0.560, 0.258, 0.310, col=(38, 36, 34), sides=(-1,))
+    p.ell(0.5 + 0.192, 0.560, 0.058, 0.288, fill=(30, 29, 27))   # empty track bed
+    p.ell(0.5 + 0.192, 0.300, 0.052, 0.030, fill=(96, 90, 80))   # its lit north lip
+    for i in range(4):                       # bare road wheels, standing in the bed
+        p.ell(0.5 + 0.196 - i * 0.008, 0.350 + i * 0.145, 0.050, 0.056,
+              fill=(64, 60, 56))
+        p.ell(0.5 + 0.196 - i * 0.008, 0.342 + i * 0.145, 0.030, 0.032,
+              fill=(112, 106, 96))
+    # the hull is rotated AND has its north-east quarter torn away, so the plan
+    # is a crooked wedge -- no sibling has anything but a rounded outline
+    hull = _epoly(0.462, 0.560, 0.232, 0.345, 0.145, n=7)
+    _hull(p, hull, body, lift=0.024, skirt=0.022)
+    for a, b in ((0.330, 0.760), (0.395, 0.330)):   # panel seams, so the hull
+        p.line([(a, b), (0.612, b + 0.055)], _mul(body, 0.68), 0.016)  # is not one field
+    p.rrect_c(0.560, 0.330, 0.075, 0.055, 0.012, _mul(body, 0.80))    # engine deck
+    ring = _epoly(0.462, 0.518, 0.132, 0.126, -0.25, n=6)
+    p.poly([(x, y + 0.014) for x, y in ring], _mul(body, 0.74))   # turret ring
+    p.poly(ring, _mul(body, 1.10))
+    p.poly([(x + (0.462 - x) * 0.26, y + (0.518 - y) * 0.26) for x, y in ring],
+           (34, 32, 30))                                          # blown off
+    for i in range(3):                       # the barrel, snapped to a stub
+        p.poly([(0.442 + i * 0.016, 0.485), (0.454 + i * 0.016, 0.485),
+                (0.457 + i * 0.016, 0.345 - i * 0.030),
+                (0.445 + i * 0.016, 0.345 - i * 0.030)], (52, 50, 46))
+    p.poly([(0.560, 0.360), (0.690, 0.430), (0.610, 0.640), (0.520, 0.560)],
+           (32, 30, 28))                     # the torn-open flank
+    p.poly([(0.560, 0.360), (0.690, 0.430), (0.662, 0.470), (0.552, 0.412)],
+           (144, 136, 120))                  # its lit peeled lip
+    _burnt(p, 0.575, 0.760, 0.105, 0.082)
     p.keyline(0.018)
 
 
 def o_wreck(p):
-    p.rrect_c(0.5, 0.52, 0.26, 0.34, 0.08, (52, 48, 44))
-    _burnt(p, 0.5, 0.52, 0.25, 0.32)
+    """The GENERIC burnt shell: nothing recognisable survives, and that is the
+    job -- it is the litter the other four read against. A torn-open top edge, a
+    jagged plan with a bitten west flank, and two peeled-back plate flaps give
+    it an outline no tracked hull can share.
+    """
+    body = (86, 80, 72)
+    hull = [(0.320, 0.270), (0.470, 0.190), (0.640, 0.235), (0.710, 0.385),
+            (0.775, 0.490), (0.725, 0.620), (0.765, 0.755), (0.605, 0.810),
+            (0.450, 0.780), (0.365, 0.850), (0.285, 0.720), (0.400, 0.640),
+            (0.250, 0.560), (0.330, 0.470), (0.235, 0.400), (0.285, 0.330)]
+    _hull(p, hull, body, lift=0.028, skirt=0.030)
+    p.poly([(0.235, 0.400), (0.205, 0.275), (0.335, 0.420)],
+           _mul(body, 1.26))                      # plate flap, bent up
+    p.poly([(0.765, 0.755), (0.795, 0.615), (0.660, 0.795)],
+           _mul(body, 0.72))                      # and its shadowed twin
+    _burnt(p, 0.505, 0.540, 0.132, 0.112)
+    p.poly([(0.320, 0.270), (0.470, 0.190), (0.640, 0.235), (0.665, 0.330),
+            (0.335, 0.368)], (32, 29, 27))        # the torn-open top
+    p.poly([(0.320, 0.270), (0.470, 0.190), (0.505, 0.215), (0.340, 0.305)],
+           (130, 121, 105))                       # its lit peeled lip
     p.keyline(0.020)
 
 
 def o_wreck_halftrack(p):
-    p.rrect_c(0.5, 0.50, 0.23, 0.38, 0.05, (52, 50, 46))
-    _tracks(p, 0.5, 0.62, 0.235, 0.24)
-    _wheels(p, 0.5, 0.26, 0.235, 0.12, 2)
-    _burnt(p, 0.5, 0.50, 0.20, 0.34)
+    """The hero hardpoint wreck and the largest litter sprite on screen, so it
+    carries the family's loudest read: a WIDE tracked nose under a big BOXY rear
+    cargo block. The cargo is a separate raised box with its own lit lid, that
+    hard value break is what keeps this one off the rounded blobs its four
+    siblings used to be -- and the cargo's blown-out WEST corner plus the flatbed
+    tail hanging off its EAST gives the plan a hard L/T notch nothing else in the
+    family shares.
+
+    The alpha bbox is deliberately held near the ~0.67 x 0.78 canvas fraction
+    the main.gd rock-cover pin was measured against: at call scale 1.1 it draws
+    ~53x61 over a 64x48 blocker, so growing the footprint would re-open the
+    art-vs-collision gap that pin closed.
+    """
+    body = (90, 84, 74)
+    _tracks(p, 0.5, 0.345, 0.245, 0.200, col=(40, 38, 36))
+    front = [(0.300, 0.165), (0.700, 0.165), (0.712, 0.300), (0.700, 0.535),
+             (0.300, 0.535), (0.288, 0.300)]
+    _hull(p, front, body, lift=0.024, skirt=0.022)
+    for i in range(3):                           # engine-deck ribs
+        p.line([(0.340, 0.215 + i * 0.070), (0.660, 0.215 + i * 0.070)],
+               _mul(body, 0.70), 0.018)
+    p.poly([(0.300, 0.165), (0.700, 0.165), (0.690, 0.232), (0.310, 0.232)],
+           _mul(body, 1.30))
+    p.poly([(0.300, 0.500), (0.700, 0.500), (0.700, 0.560), (0.300, 0.560)],
+           (30, 28, 26))                         # the seam between hull and box
+    # the boxy rear cargo, a clear value step LIGHTER than the nose, with its
+    # blown-out west corner cutting an L out of the plan
+    box = _mul(body, 1.22)
+    cargo = [(0.250, 0.560), (0.790, 0.560), (0.790, 0.905), (0.400, 0.905),
+             (0.400, 0.720), (0.250, 0.720)]
+    p.poly([(x, y + 0.020) for x, y in cargo], _mul(body, 0.60))
+    p.poly(cargo, box)
+    p.poly([(x, y - 0.030) for x, y in cargo], _mul(box, 1.22))
+    p.poly([(0.258, 0.582), (0.782, 0.582), (0.782, 0.638), (0.258, 0.638)],
+           _mul(box, 1.30))                     # lit crate-lid edge
+    for cxp in (0.480, 0.625, 0.750):            # plank seams
+        p.line([(cxp, 0.652), (cxp, 0.892)], _mul(box, 0.70), 0.018)
+    p.poly([(0.250, 0.720), (0.400, 0.720), (0.400, 0.905), (0.250, 0.905)],
+           (30, 28, 26))                         # the torn-out corner, in shadow
+    p.poly([(0.250, 0.720), (0.400, 0.720), (0.400, 0.762), (0.250, 0.762)],
+           _mul(box, 0.92))                      # and its lit inner lip
+    _burnt(p, 0.640, 0.790, 0.088, 0.064)       # punched through the lit lid
+    p.poly([(0.790, 0.700), (0.840, 0.726), (0.840, 0.868), (0.790, 0.842)],
+           _mul(body, 0.80))                     # flatbed tail, off the east
+    p.poly([(0.790, 0.700), (0.840, 0.726), (0.840, 0.762), (0.790, 0.744)],
+           _mul(body, 1.16))
     p.keyline(0.018)
 
 
@@ -486,11 +735,35 @@ def o_mg_stand(p):
 
 
 def o_mg_tripod(p):
-    for a in (0.9, 2.24, -1.57):
-        p.line([(0.5, 0.55), (0.5 + math.cos(a) * 0.34, 0.55 + math.sin(a) * 0.34)],
-               (58, 60, 54), 0.055)
-    p.rrect_c(0.5, 0.30, 0.042, 0.250, 0.01, (34, 36, 32))
-    p.ell(0.5, 0.55, 0.095, 0.095, fill=(46, 48, 44))
+    """A tripod-mounted gun, and the thinnest read in the litter: it lands ~11x16
+    on screen. (main.gd's _tiny_decor_no_rim tests the full 160px canvas, not the
+    alpha bbox, so at SCALE 0.12 it measures 19.2 and KEEPS its 1.1px draw rim
+    rather than dropping it -- either way the baked ink keyline is the only
+    structure here, so the sprite has to carry itself.)
+
+    The previous version was three near-black legs on a near-black hub: a black
+    cross. Lighter legs with a lit outer face and bright feet, a BRIGHT top-face
+    hub, a mid-value receiver and a bright ammo box give five value steps, and
+    the wider splay keeps the three legs separable at 11px instead of merging
+    into one stub.
+    """
+    leg, leg_hi = (94, 96, 86), (146, 148, 136)
+    for a in (0.86, 2.28, -1.57):
+        ex, ey = 0.5 + math.cos(a) * 0.40, 0.585 + math.sin(a) * 0.335
+        ox, oy = -math.sin(a) * 0.013, math.cos(a) * 0.013
+        p.line([(0.5, 0.585), (ex, ey)], leg, 0.062)
+        p.line([(0.5 + math.cos(a) * 0.12, 0.585 + math.sin(a) * 0.12),
+                (ex + ox, ey + oy)], leg_hi, 0.026)      # lit outer face
+        p.ell(ex, ey, 0.042, 0.040, fill=leg_hi)          # foot
+    p.ell(0.5, 0.585, 0.138, 0.122, fill=(70, 72, 64))   # pintle collar
+    p.ell(0.5, 0.566, 0.110, 0.096, fill=(114, 116, 106))
+    p.ell(0.5, 0.548, 0.062, 0.054, fill=(156, 158, 148))
+    p.rrect_c(0.5, 0.290, 0.054, 0.235, 0.01, (56, 56, 50))   # barrel shroud
+    p.poly([(0.500, 0.070), (0.530, 0.110), (0.518, 0.400), (0.500, 0.400)],
+           (124, 126, 118))                                # lit barrel edge
+    p.rrect_c(0.5, 0.470, 0.138, 0.092, 0.02, (86, 88, 80))   # receiver
+    p.rrect_c(0.5, 0.444, 0.118, 0.046, 0.015, (132, 134, 124))
+    p.rrect_c(0.5, 0.578, 0.152, 0.062, 0.015, (162, 158, 122))  # ammo box
     p.keyline(0.020)
 
 
@@ -732,6 +1005,50 @@ def o_rock(p, big: bool):
     p.keyline(0.024)
 
 
+def o_rock_slab(p):
+    """rock2 is NOT rock1 at a wider radius. That pairing measured 0.98 alpha
+    IoU -- one polygon, two sizes -- so a boulder field drew as a repeated
+    stamp. rock1 keeps its domed 7-gon; this is a FLAT TILTED SLAB with two
+    smaller angular chunks piled on its north-west end: a low, skewed, wedge
+    plan against rock1's symmetric dome, and a different bbox aspect to boot.
+
+    The slab keeps a lit north face and a hard dark lee, so it still reads as
+    RAISED cover under main.gd's ROCK_TOP_LIGHT overhead-light convention rather
+    than as a ground decal -- the brief's "convex-ish" requirement.
+    """
+    base = (112, 104, 90)
+    slab = [(0.140, 0.400), (0.300, 0.160), (0.660, 0.140), (0.880, 0.340),
+            (0.855, 0.605), (0.560, 0.760), (0.215, 0.720)]
+    p.poly([(x, y + 0.055) for x, y in slab], _mul(base, 0.46))     # lee shadow
+    p.poly(slab, base)
+    p.poly([(0.190, 0.395), (0.315, 0.205), (0.640, 0.190), (0.660, 0.370),
+            (0.300, 0.470)], _mul(base, 1.20))                      # lit top plane
+    # the top plane is split into three facets rather than left as one flat
+    # field -- a single quad this size is 36% of the sprite in one colour, which
+    # is the exact defect the wreck family was rebuilt for
+    p.poly([(0.330, 0.300), (0.560, 0.195), (0.620, 0.330), (0.395, 0.420)],
+           _mul(base, 1.34))
+    p.poly([(0.300, 0.470), (0.660, 0.370), (0.640, 0.560), (0.330, 0.640)],
+           _mul(base, 0.92))
+    p.poly([(0.300, 0.225), (0.560, 0.205), (0.585, 0.310), (0.330, 0.335)],
+           _mul(base, 1.46))                                       # north crown
+    # angular chunks piled on the slab's north-west end
+    for cx0, cy0, r0, k in ((0.305, 0.300, 0.150, 1.04), (0.470, 0.238, 0.112, 0.78)):
+        pts = [(cx0 + math.cos(i * 2 * math.pi / 5 + 0.4) * r0,
+                cy0 + math.sin(i * 2 * math.pi / 5 + 0.4) * r0 * 0.86)
+               for i in range(5)]
+        p.poly([(x, y + 0.030) for x, y in pts], _mul(_mul(base, 0.54), k))
+        p.poly(pts, _mul(base, k))
+        p.poly([(cx0 + (x - cx0) * 0.56, cy0 - r0 * 0.26 + (y - cy0) * 0.56)
+                for x, y in pts], _mul(_mul(base, 1.34), k))
+    for fx, fy, gx, gy, k in ((0.400, 0.320, 0.520, 0.640, 0.54),
+                              (0.660, 0.350, 0.735, 0.610, 0.62),
+                              (0.245, 0.430, 0.330, 0.690, 0.48),
+                              (0.520, 0.290, 0.575, 0.470, 0.70)):
+        p.line([(fx, fy), (gx, gy)], _mul(base, k), 0.019)        # fractures
+    p.keyline(0.024)
+
+
 def o_tank_trap(p):
     for a in (0.52, 1.57 + 0.52, -0.52):
         p.line([(0.5 - math.cos(a) * 0.44, 0.5 - math.sin(a) * 0.44),
@@ -966,7 +1283,7 @@ OBJECTS = {
     "decor/barrier": (220, o_barrier),
     "decor/crate_stack": (220, o_crate_stack),
     "decor/rock1": (220, lambda p: o_rock(p, False)),
-    "decor/rock2": (260, lambda p: o_rock(p, True)),
+    "decor/rock2": (260, o_rock_slab),
     "decor/tank_trap": (200, o_tank_trap),
     "decor/barbedwire": (220, o_barbedwire),
     "decor/landmine": (160, o_landmine),

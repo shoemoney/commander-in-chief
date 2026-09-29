@@ -89,21 +89,50 @@ const CHIP_PRIO := {
 	# outranks the wave/sector progress cursor and every vanity chip. Endless never emits it
 	# (standups_left returns -1 there — its brake is the compounding revive price).
 	"reinforcements": 88,
-	"wave": 85, "sector": 82,
+	# "sector" (82) and "best" (35) are GONE from the table and from _row0_opt. Both are
+	# run-details a player does not read mid-fight, and both already have a permanent home on the
+	# PAUSE screen (menu.gd draws "SECTOR n/N · Nm" and "BEST — SCORE n" there), so row 0 was
+	# spending ~150px of its widest band restating them. The RECORD badge that shares the old
+	# "best" band stays — that one is an event, not a standing number.
+	"wave": 85,
 	# lethal timers — active field effects / threat modifiers on a clock
 	# mutator2 = the wave-15+ STACKED mutator; one band under the primary so a
 	# tight row sheds the second chip first, never the wave's headline modifier.
 	"flashbang": 80, "mutator": 70, "mutator2": 69,
 	# vanity — records / streaks the player enjoys but never has to ACT on
 	"flawless": 60, "deathless": 55, "streak": 50,
-	"record": 35, "best": 35, "wave_record": 30,
+	"record": 35, "wave_record": 30,
 	# utility discoverability cue
 	"supplies": 20,
 }
 const CHIP_UNBANDED := -1  # c2-01: fallback band for an id NOT in CHIP_PRIO — below every real band
-                       # so it sorts LAST and drops FIRST (a missing band can't silently promote a
-                       # chip into/above vanity). Paired with a push_error in _fits2 and pinned by
-                       # test_every_row0_chip_is_banded.
+                        # so it sorts LAST and drops FIRST (a missing band can't silently promote a
+                        # chip into/above vanity). Paired with a push_error in _fits2 and pinned by
+                        # test_every_row0_chip_is_banded.
+# The FULL-WORD name of every row-0 readout the +N clip can hide — the affordance the de-wording
+# (T2) owes the player. The row is now mostly icon + numeral, so "+N" alone answers "how many are
+# hiding" but never "which" — and an icon has no abbreviation to fall back on, which is exactly the
+# rule the status pips enforce ("a plain word, never the cryptic 'SPD' abbreviation"). This table is
+# that word, ONE auditable entry per chip id, and `hidden_titles` feeds it into the Control's
+# `tooltip_text` — the accessible NAME for the +N affordance, on the same dual-channel footing as the
+# "+"->"!" shape swap the clip already uses. Pinned by test_every_hidden_row0_chip_names_itself.
+const CHIP_TITLES := {
+	"shop": "SUPPLY SHOP",
+	"hostiles": "HOSTILES",
+	"hostiles_immune": "GRENADES ONLY",
+	"reinforcements": "REINFORCEMENTS LEFT",
+	"wave": "WAVE",
+	"flashbang": "FLASHBANG",
+	"mutator": "WAVE MODIFIER",
+	"mutator2": "SECOND WAVE MODIFIER",
+	"flawless": "FLAWLESS STREAK",
+	"deathless": "CLEAN WAVE",
+	"streak": "KILL STREAK",
+	"record": "NEW RECORD",
+	"wave_record": "WAVE RECORD",
+	"supplies": "SUPPLY WHEEL",
+}
+const OVERFLOW_TITLE_PREFIX := "+%d HIDDEN: "
 const TELE_OVF_GAP := 3.0  # c1-06 (attempt-4 judge polish): breathing gap between the right-
                        # anchored PRESSURE/GATE telegraph backing and the +N chip when both land
                        # at the far right, so their borders never directly abut. Folded into the
@@ -1056,18 +1085,27 @@ func _draw() -> void:
 		row_r = maxf(row_r, _draw_telegraph(sim, tele, tele_left, y))
 
 	# c1-06 / c4-03: +N overflow affordance — when the fit pass suppressed optional readouts
-	# (RECORD/BEST/DEATHLESS/mutator/SUPPLIES/streak…), a right-anchored "+N" chip says "N more
+	# (RECORD/DEATHLESS/mutator/SUPPLIES/streak…), a right-anchored "+N" chip says "N more
 	# here" instead of dropping them silently. It tints red ("!N") when an actionable objective/
 	# lethal readout was culled, gold otherwise (boundary = CHIP_PRIO["flawless"], the vanity-band
 	# top), computed from THIS frame's kept set. Anchored at [_fit_full - ovf_w, _fit_full] so the
 	# border stays within the usable edge (head is _fmt_stat-bounded, candidates stop left of here).
+	#
+	# T2: row 0 is now icon + numeral, so "+N" alone can no longer be decoded by eye. The chip's
+	# ACCESSIBLE NAME is published on the Control's tooltip_text ("+2 HIDDEN: SUPPLY SHOP, WAVE
+	# RECORD") from CHIP_TITLES — a real, named, tested channel that costs the chip no pixels and
+	# does not shift when it changes. The on-screen channel stays the c4-03 dual one: the "+"->"!"
+	# shape swap plus the two-tone palette. A dropped PRESSURE/GATE telegraph is named explicitly
+	# (it is a non-candidate, so no CHIP_TITLES entry can cover it).
+	var tele_dropped: bool = bool(plan.get("tele_dropped", false))
 	if _ovf > 0:
 		var ovf_w := _ovf_slot_w(_ovf)
 		# A dropped PRESSURE/GATE telegraph is a non-candidate actionable readout folded into +N, so it
 		# alerts too (OR-ed in) — not just a culled candidate chip.
 		var actionable_culled := _ovf_alert(_opt_cands, keep, int(CHIP_PRIO["flawless"])) \
-			or bool(plan.get("tele_dropped", false))
+			or tele_dropped
 		row_r = maxf(row_r, _ovf_chip(_fit_full - ovf_w, y, _ovf, actionable_culled))
+	_set_overflow_name(_ovf, _opt_cands, keep, tele_dropped)
 	# Scavenged-metal panel backing the whole readout — emitted onto the z:-1
 	# plate item now that this frame's row width is known, so new chips and
 	# rollover digits never overhang the backing for a frame. c2-09: the plate is
@@ -1428,17 +1466,67 @@ func _telegraph_spec(sim: SimWorld) -> Dictionary:
 				"mw": _tw(GATE_LABEL_MID) + 4.0, "cw": _tw(GATE_LABEL_COMPACT) + 4.0}
 	if sim.stall_ticks <= PRESSURE_WARN_TICKS:
 		return {"kind": "", "w": 0.0}
-	var pw := ICON + 3.0 + _tw("PRESSURE") + 4.0
-	# Compact pressure = lightning icon + a tiny stall-progress bar (drops the "PRESSURE" word
-	# and the wide 50px gauge, KEEPS the how-close-to-forced read), so the fallback still says
-	# "advance, and here's the pressure" instead of an awkward text abbreviation.
-	return {"kind": "pressure", "w": pw + 50.0, "cw": ICON + 3.0 + COMPACT_BAR + 4.0}
+	# T2 (de-word row 0): PRESSURE is now drawn as the lightning icon + the tiny COMPACT_BAR and
+	# NOTHING else. The old full tier spent ICON + 13 + tw("PRESSURE") + a 46px gauge + the word
+	# "STALL"/"PRESSURE" to say what the ICON ALREADY says — and "PRESSURE" duplicates the
+	# lightning bolt drawn immediately to its left, which is the whole point of the de-wording.
+	# The compact form was the starvation fallback; it is now the ONLY pressure presentation, so
+	# there is nothing left to fall back to and `cw == w` (the planner's mid/compact steps become
+	# no-ops for this kind and drop straight to the defined +N tally if even it cannot fit).
+	# The two phases stay distinguishable WITHOUT a word: the pre-warn is drawn at the single 0.5
+	# dim (body_a) and the armed gauge at full, and the arm-point marker still shows where the
+	# pre-arm zone ends — the same dual channel the gate's three labels used to provide.
+	# Losing "STALL"/"PRESSURE" orphans no translation key: neither string ever went through
+	# TranslationServer.translate, so the .po files are untouched.
+	var cw := ICON + 3.0 + COMPACT_BAR + 4.0
+	return {"kind": "pressure", "w": cw, "cw": cw, "compact": true}
 
 
 # c1-06: scrim seam for the telegraph's dark backing rect — default draws; a capture
 # subclass records it, so the telegraph's rendered box is testable headless.
 func _emit_bg_rect(r: Rect2, col: Color) -> void:
 	draw_rect(r, col)
+
+
+## T2: the endless buy-window chip, de-worded — gunshop icon + a RADIAL countdown framed on that
+## icon + the seconds numeral. Replaces "SHOP OPEN 4s" (~89px) with ~28px, and drops the word that
+## duplicated the icon immediately to its left.
+##
+## The ring is the codebase's own drain idiom (the same Art.arc sweep the bash / grenade / roll /
+## cannon cooldowns use, anchored on the fuel dial exactly as the cannon ring is), and it says the
+## thing the word "OPEN" could not: how much window is LEFT. The dim full-circle track under it is
+## the streak ring's rule — remaining time reads against a whole instead of a floating partial arc.
+##
+## Reduce motion: the sweep quarter-snaps instead of draining per-frame, and the closing-soon tier
+## goes through _mblink (steady under reduce motion), so the perishable chip never strobes.
+## Extracted from _row0_opt so a headless capture drives the real draw, and so the ring can't be
+## described one way here and measured another way in the row-0 width reserve.
+func _shop_timer_chip(x: float, y: float, sim: SimWorld, secs: String, col: Color,
+		warned: bool) -> float:
+	var frac := 1.0
+	var total: int = sim._intermission_len()
+	if total > 0:
+		frac = clampf(float(sim.intermission_ticks) / float(total), 0.0, 1.0)
+	if main._motion < 0.5:
+		frac = ceilf(frac * 4.0) / 4.0
+	var c := Vector2(x + ICON / 2.0, y + ICON / 2.0)
+	if not _measure:
+		# Dim full-circle track, so the sweep reads against a whole.
+		_emit_arc(c, VITALS_SOCKET_R, 0.0, TAU, VITALS_SOCKET_COL, VITALS_SOCKET_W)
+		var rcol := col
+		if frac <= VITALS_EXPIRY:
+			rcol = Art.warn(Color(1.0, 0.3, 0.25)) if _mblink(10) else col
+		_emit_arc(c, VITALS_RING_R, -PI / 2.0, -PI / 2.0 + TAU * frac, rcol, VITALS_RING_W)
+		# The icon is drawn AFTER the ring so the bolt stays legible on top of its own track; it
+		# carries the warn tier's tint so the whole chip (ring + icon + numeral) escalates together.
+		_emit_icon("hud_gunshop", Rect2(x, y, ICON, ICON), col)
+	# One _stat-equivalent advance (ICON + 13 + text + 10 == ICON + 13 + text here, since
+	# _stat's advance IS ICON + STAT_ICON_GAP + text + STAT_TRAIL_GAP). The warned branch routes
+	# through _text's contrast backing, exactly as the old _warn_stat did.
+	if warned:
+		return _text(secs, x + ICON + STAT_ICON_GAP, y + ROW_TEXT_BASELINE, Art.warn(col), true) \
+			+ STAT_TRAIL_GAP
+	return _text(secs, x + ICON + STAT_ICON_GAP, y + ROW_TEXT_BASELINE, col) + STAT_TRAIL_GAP
 
 
 # c1-16: seam for the pressure gauge's arm-point marker (same capture pattern) so the marker's
@@ -1457,11 +1545,14 @@ func _draw_telegraph(sim: SimWorld, tele: Dictionary, tele_left: float, y: float
 	# c1-16: TWO PHASES, same reserved footprint so nothing reflows across the boundary. The chip
 	# appears PAST PRESSURE_WARN_TICKS (first visible tick = WARN+1) and ARMS past PRESSURE_ARM_TICKS
 	# (first armed tick = ARM+1); the exact boundaries are pinned by a draw-level test.
-	#  - PRE-WARN (WARN < stall <= ARM): a DIM gauge labelled "STALL", whose left PRE-ARM zone (up
-	#    to the arm-point marker) fills toward the arm line — the mechanic announces itself BEFORE
-	#    it engages instead of hard-popping into existence.
-	#  - ARMED (stall > ARM): the FULL-strength gauge labelled "PRESSURE", red past 70%, the fill
-	#    now advancing PAST the marker toward the forced advance.
+	#  - PRE-WARN (WARN < stall <= ARM): the SAME gauge drawn at the single 0.5 body_a dim, whose
+	#    left PRE-ARM zone (up to the arm-point marker) fills toward the arm line — the mechanic
+	#    announces itself BEFORE it engages instead of hard-popping into existence.
+	#  - ARMED (stall > ARM): the same gauge at FULL strength, red past 70%, the fill now advancing
+	#    PAST the marker toward the forced advance.
+	# T2: the two phases used to differ by LABEL as well as brightness ("STALL" vs "PRESSURE"); both
+	# words are gone with the rest of row 0's de-wording, so brightness + the marker are the whole
+	# non-colour channel. That is why the marker below is load-bearing, not decoration.
 	# The fill is monotonic across the boundary: pre-warn fills [0, arm_frac] reaching the marker
 	# exactly as it arms (arm_frac == stall/480 at the arm tick), then armed continues from there —
 	# it never jumps backward (which would misread as "pressure decreasing"). Dimming is applied
@@ -1505,38 +1596,23 @@ func _draw_telegraph(sim: SimWorld, tele: Dictionary, tele_left: float, y: float
 		# Return the BACKING RECT's true right edge (inner_x - 2 + tw + 4), not the text's, so
 		# the dynamic plate encloses the whole chip instead of underhanging its scrim by 2px.
 		return inner_x + _tw(gtxt) + 2.0
-	if compact:
-		# Compact pressure: lightning icon + a tiny stall-progress bar (drops the word and the
-		# wide 50px gauge, KEEPS the progress read + urgency color) — the most perishable campaign
-		# readout keeps its "how close" indicator in a starved slot instead of an awkward wordless
-		# "!". Same pre-warn/armed dimming + continuous fill target as the full form.
-		var cw := ICON + 3.0 + COMPACT_BAR + 4.0
-		_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, cw, 12.0), Color(0.1, 0.11, 0.09, 0.85 * body_a))
-		_emit_icon("hud_lightning", Rect2(inner_x, y, ICON, ICON), Color(1, 1, 1, body_a))
-		_mini_bar(Rect2(inner_x + ICON + 3.0, y + 2, COMPACT_BAR, 9), pf, barcol, body_a)
-		return inner_x - 2.0 + cw
-	# "STALL" (pre-warn) is narrower than "PRESSURE", so it fits inside the PRESSURE-reserved slot;
-	# the bar stays at the fixed inner_x + pw position across the phase swap (pw is PRESSURE-based).
-	var plabel := "PRESSURE" if armed else "STALL"
-	var pw := ICON + 3.0 + _tw("PRESSURE") + 4.0
-	_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, pw + 50.0, 12.0), Color(0.1, 0.11, 0.09, 0.85 * body_a))
-	# Inlined _stat so the icon + label share the phase alpha (the shared _stat draws its icon at
-	# full white, which would stay bright while the rest dims during the pre-warning phase).
+	# T2 (de-word row 0): PRESSURE draws as the lightning icon + the COMPACT_BAR and nothing else.
+	# The old full tier carried a 46px gauge AND the word "STALL"/"PRESSURE" — and the word
+	# duplicated the lightning bolt sitting immediately left of it. The arm-point MARKER survives
+	# (it is the shape channel that replaces the label: it shows where the pre-arm zone ends, and
+	# once armed that the fill has crossed the arming line), placed on the SAME inset well the
+	# fill uses so it aligns exactly with where the fill reaches arm_frac. The pre-warn/armed
+	# distinction is carried by the single 0.5 body_a dim + the marker, not by a word.
+	var cw := ICON + 3.0 + COMPACT_BAR + 4.0
+	_emit_bg_rect(Rect2(inner_x - 2.0, y + 1.0, cw, 12.0), Color(0.1, 0.11, 0.09, 0.85 * body_a))
 	_emit_icon("hud_lightning", Rect2(inner_x, y, ICON, ICON), Color(1, 1, 1, body_a))
-	_text(plabel, inner_x + ICON + 3.0, y + ICON - 3.0, Color(1.0, 0.55, 0.3, body_a))
-	var bar := Rect2(inner_x + pw, y + 2, 46, 9)
+	var bar := Rect2(inner_x + ICON + 3.0, y + 2, COMPACT_BAR, 9)
 	_mini_bar(bar, pf, barcol, body_a)
-	# Arm-point marker: a fixed bright tick where the gauge ARMS, so the pre-arm fill has a visible
-	# reference it climbs toward (and, once armed, shows the fill has crossed the arming line). It
-	# is placed on the SAME inset well the fill uses (MINI_BAR_INSET_X/Y), so the marker aligns
-	# exactly with where the fill reaches arm_frac — not the outer rect's edge. Brighter than the
-	# fill so it stays legible against it, and drawn slightly TALLER than the well so it reads as a
-	# tick, not part of the fill.
 	var wx := bar.position.x + bar.size.x * MINI_BAR_INSET_X
 	var ww := bar.size.x * (1.0 - 2.0 * MINI_BAR_INSET_X)
 	_emit_marker(Rect2(wx + ww * arm_frac, bar.position.y, 1.5, bar.size.y),
 		Color(1.0, 0.95, 0.7, 0.95 * body_a))
-	return inner_x + pw + 48.0
+	return inner_x - 2.0 + cw
 
 
 ## c1-06: plan the full row-0 chip layout for THIS frame and return the decisions the real pass +
@@ -1710,7 +1786,12 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 		# (ICON), a 1px gap, the text, and the 8px trailing gap.
 		if _fits2("flawless", ICON + 1.0 + _tw(fltxt) + 8.0):
 			if not _measure:
-				draw_texture_rect(Art.tex("hud_star"), Rect2(x, y, ICON, ICON), false, Color(1.0, 0.9, 0.4))
+				# Through the _emit_icon seam, not a raw draw_texture_rect — the same rule the
+				# RECORD badge below follows and the same reason: an uncaptured primitive is one a
+				# headless frame test cannot see (it measures as ABSENT and the engine logs
+				# "Drawing is only allowed inside _draw()"), which is how a chip that IS reachable
+				# reads as one that isn't.
+				_emit_icon("hud_star", Rect2(x, y, ICON, ICON), Color(1.0, 0.9, 0.4))
 			x = _text(fltxt, x + ICON + 1.0, y + ICON - 3.0, Color(1.0, 0.9, 0.45)) + 8.0
 	# Live BEST target: the record to beat, right next to the current score.
 	# Crossing it mid-run used to be silent until the K.I.A. debrief -- flip
@@ -1731,11 +1812,12 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 					_emit_icon("icon_medal", Rect2(x, y, ICON, ICON), rcol)
 				x = _text("RECORD", x + ICON + 1.0, y + ICON - 3.0, rcol) + 8.0
 		"best":
-			# Live BEST target: the record to chase — a DIM reference chip, sunk below
-			# the live chest/score/ammo tier so vanity no longer competes with stats.
-			var btxt := "BEST %d" % main.best_score
-			if _fits2("best", _tw(btxt) + 8.0):
-				x = _text(btxt, x, y + ICON - 3.0, Color(0.7, 0.66, 0.5)) + 8.0
+			# T2: the "best" arm is DEAD. "BEST 143095" is a standing run-detail, not a live
+			# readout — the PAUSE screen carries it permanently (menu.gd's "BEST — SCORE n"), and
+			# row 0 was spending up to ~63px restating it beside the score it duplicates. The
+			# "badge" arm above STAYS: that is an EVENT (the crossing), not a number. The band was
+			# removed from CHIP_PRIO with it, so this arm can never be revived without a band.
+			pass
 	if sim.mode == "endless":
 		if sim.intermission_ticks > 0:
 			# Closing-soon urgency, same idiom as low ammo: amber under 2s, then
@@ -1755,13 +1837,25 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			# Ceil: floor division read "SHOP OPEN 0s" for the entire final live second.
 			# Highest priority (95): the timed buy window is the most perishable readout on
 			# the row, so it demotes into +N only if literally nothing else fits.
-			var shoptxt := "SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60]
-			if _fits2("shop", ICON + 13.0 + _tw(shoptxt)):
-				x = _warn_stat("hud_gunshop", shoptxt, x, y, shop_col) if shop_warn else _stat("hud_gunshop", shoptxt, x, y, shop_col)
+			#
+			# T2 (de-word): "SHOP OPEN 4s" is now the gunshop icon, a RADIAL countdown framed on
+			# that icon, and the seconds numeral — the word "SHOP" duplicated the icon sitting
+			# immediately left of it, and "OPEN" was the least useful half (the ring says
+			# "closing", which is the part you act on). The ring is the same Art.arc drain the
+			# bash / grenade / roll / cannon cooldowns already use, anchored on the fuel dial
+			# exactly as the cannon ring is. ~28px instead of ~89px.
+			var shoptxt := "%ds" % [(sim.intermission_ticks + 59) / 60]
+			var shop_w := ICON + 13.0 + _tw(shoptxt)
+			if _fits2("shop", shop_w):
+				x = _shop_timer_chip(x, y, sim, shoptxt, shop_col, shop_warn)
 		else:
 			# WAVE identity chip (prio 85): demotable, but sits above vanity so it
 			# survives a crowded row. _stat advance minus the 2px tuck == its footprint.
-			var wvtxt := "WAVE %d" % sim.wave
+			#
+			# T2 (de-word): "WAVE 12" is now the flag icon + "12" — the word duplicated the flag
+			# drawn immediately left of it, and the number is the only part that changes. ~44px
+			# instead of ~82px, on the chip every endless run shows.
+			var wvtxt := "%d" % sim.wave
 			if _fits2("wave", ICON + 13.0 + _tw(wvtxt) - 2.0):
 				x = _stat("hud_flag", wvtxt, x, y) - 2.0
 			# Live wave-clear dashboard FIRST: when the row overflows, the
@@ -1813,7 +1907,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				var icon_w: float = (ICON + 3.0) if has_icon else 0.0
 				if _fits2("hostiles_immune", icon_w + _tw(itxt) + 6.0):
 					if not _measure and has_icon:
-						draw_texture_rect(Art.tex("icon_grenade"), Rect2(x, y, ICON, ICON), false, icol)
+						_emit_icon("icon_grenade", Rect2(x, y, ICON, ICON), icol)
 					x = _text(itxt, x + icon_w, y + ICON - 3.0, icol) + 6.0
 			# Live WAVE record chip — endless is the mode players grind, but the wave
 			# count (the number they chase) only got record feedback in the K.I.A.
@@ -1858,15 +1952,17 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				# glyphs take the chip tint.
 				var micon: String = micons[mid]
 				if not _measure:
-					draw_texture_rect(Art.tex(micon), Rect2(x, y, ICON, ICON), false,
+					_emit_icon(micon, Rect2(x, y, ICON, ICON),
 						Color.WHITE if micon == "icon_coin" else mcol)
 				x = _text(mchip, x + ICON + 3.0, y + ICON - 3.0, mcol) + 8.0
 	else:
-		# SECTOR n/N: campaign progress toward the Foundry finale (N =
-		# SimWorld.FINAL_GATE_INDEX -- 6 zones as of authored-campaign-and-
-		# modes, was a hardcoded 5). Demotable (prio 82): above vanity/records
-		# but below the live SHOP/HOSTILES combat readouts, so an extreme-
-		# economy row sheds the progress chip into +N before dropping a live stat.
+		# T2: the SECTOR n/N + distance chip is GONE from row 0, along with its "sector" CHIP_PRIO
+		# band. It bundled three run-details — which sector, how far you have pushed, and (in Boss
+		# Rush) how many gunships — into one wide, band-82 candidate that a crowded row had to spend
+		# real estate to demote. All three already have a permanent home on the PAUSE screen, which
+		# is where a player goes to read "how is this run going" rather than mid-fight at 640x360.
+		# The progress RAIL in the world (main.gd's you-dot) is what still answers "where am I" live.
+		#
 		# REINFORCEMENTS n — the sector's remaining stand-ups. Campaign/arcade/boss_rush used
 		# to have NO fail state at all short of the Colossus (rally_is_free() tested only
 		# `mode == "endless"`, so the broke timer respawned you forever: 67 knockdowns over
@@ -1886,26 +1982,6 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				# LAST BREATH, reached before the last body rather than on it.
 				var rcol := Color(0.95, 0.82, 0.5) if rleft > 2 else Art.safe(Color(1.0, 0.42, 0.36))
 				x = _text(rtxt, x, y + ICON - 3.0, rcol) + 8.0
-		var opened := 0
-		for g in sim.gates:
-			if g["open"]:
-				opened += 1
-		var sectxt: String
-		if sim.mode == "boss_rush":
-			# Boss Rush: gunships downed, not a sector count -- see the debrief.
-			sectxt = "GUNSHIPS %d/%d" % [mini(opened, SimWorld.BOSS_RUSH_COUNT), SimWorld.BOSS_RUSH_COUNT]
-		else:
-			# Which sector you are FIGHTING, not how many gates you happened to open: an Arcade
-			# chapter jump primes _gate_counter without opening a gate, so the raw `opened + 1`
-			# cursor reported SECTOR 1/6 for an entire chapter-6 run — while the progress rail on
-			# the same frame correctly drew the you-dot near the top. Same cursor pair the sim's
-			# own _sector_index / price scale take (max of the two, sim_world.gd), and in a
-			# continuous campaign the two are always equal, so no shipped campaign string moves.
-			var sector: int = maxi(opened, sim._gate_counter - 1) + 1
-			sectxt = "SECTOR %d/%d  %dm" % [mini(sector, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX,
-				-Fixed.to_int(sim.camera_top) / 10]
-		if _fits2("sector", _tw(sectxt) + 10.0):
-			x = _text(sectxt, x, y + ICON - 3.0) + 10.0
 	# Discoverability: the supply wheel exists (hold to open).
 	# c2-16: suppressed for the WHOLE run whenever the endless shop strip is eligible (shop_row) — the
 	# strip and the wheel cue are two views of the same buy surface, so showing both (even the cue over
@@ -2646,14 +2722,16 @@ func _fuel_gauge(t: Dictionary, x: float, y: float) -> float:
 	return _text("F", lx + bar.size.x + FUEL_BAR_GAP, y + ROW_TEXT_BASELINE, f_col) + FUEL_END_PAD
 
 
-## Vest + timed-buff + claymore chip run, shared by the on-foot AND in-tank player
-## rows — the sim decrements the buff timers unconditionally while riding, so the
-## tank row must show (and expiry-warn) the same chips instead of dropping them.
+## Timed-buff + claymore chip run, shared by the on-foot AND in-tank player rows — the sim
+## decrements the buff timers unconditionally while riding, so the tank row must show (and
+## expiry-warn) the same chips instead of dropping them.
 ## c2-01: buff-chip priority. A timed buff is "lethal-timer" class — the nearer it is to
 ## lapsing the higher it ranks, so on a crowded row the buff you must re-up or spend NOW
-## survives while a persistent charge (vest / triple / claymores) sheds into +N first. Every
+## survives while a persistent charge (triple / claymores) sheds into +N first. Every
 ## live timer outranks every persistent chip; ties break on draw order in _select_priority.
-const BUFF_PRIO_PERSIST := 1     # persistent charges (vest / triple / claymores) — never urgent
+## T1: the VEST left this run (it is the first _vitals_chips slot now) — see the note in
+## _buff_chip_specs.
+const BUFF_PRIO_PERSIST := 1     # persistent charges (triple / claymores) — never urgent
 const BUFF_TICK_CAP := 3600      # 60s: the longest buff window we rank within, so the timer band
                                  # stays a small, documented [2 .. CAP+1] range (not 100k-level).
 static func _buff_prio(ticks: int) -> int:
@@ -2662,18 +2740,10 @@ static func _buff_prio(ticks: int) -> int:
 	return BUFF_PRIO_PERSIST + 1 + (BUFF_TICK_CAP - clampi(ticks, 0, BUFF_TICK_CAP))
 
 
-func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
-	# c1-06 + c2-01: build the chip run, keep the highest-PRIORITY chips that fit the usable
-	# edge (never global RIGHT / under the CB/RM pips), and surface the dropped ones as a "+N"
-	# clip chip rather than drawing them invisibly. Priority — not draw position — decides what
-	# survives, so an expiring timed buff outranks a persistent charge that merely drew earlier;
-	# draw order stays fixed so kept chips don't jitter as timers tick. Vest is icon-only;
-	# claymore trails an interact glyph.
+func _buff_chip_specs(p: Dictionary) -> Array:
 	var chips: Array = []
-	if p["vest"]:
-		chips.append({"vest": true, "prio": BUFF_PRIO_PERSIST})
 	# Piercing Rounds / Trench Gun buffs: weapon-icon + countdown, matching
-	# the ammo/grenade/vest stat grammar one row up (icon, not bare text).
+	# the ammo/grenade stat grammar one row up (icon, not bare text).
 	if p["pierce_ticks"] > 0:
 		# item_bullet, NOT wep_rifle — Rend's chip is wep_rifle below, and the
 		# icon is the non-color channel (pierce+rend both active = twin rifles
@@ -2693,6 +2763,28 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 	# glyph rides along so "how do I plant this" never dead-ends here.
 	if p["claymores"] > 0:
 		chips.append({"icon": "wep_claymore", "txt": "x%d" % p["claymores"], "col": Art.safe(Color(0.75, 0.9, 0.6)), "glyph": true, "prio": BUFF_PRIO_PERSIST})
+	return chips
+
+
+## THE buff chip list, as ONE builder both the draw and its worst-case overflow reserve read —
+## so the "+N" slot _status_chips reserves off the tail's edge can never be sized off a stale
+## duplicate of this list (the drift this file keeps paying for).
+##
+## T1: the VEST is deliberately NOT here any more. It used to lead this run as a bare icon-only
+## chip at the LOWEST priority (BUFF_PRIO_PERSIST) — the single most survival-relevant fact in a
+## one-hit-death game, and the first thing a crowded row shed into "+N". It is now the first slot
+## of the fixed _vitals_chips pair, where it can never be culled and gains the two non-colour
+## channels a bare icon had none of. A claymore chip still trails its interact glyph.
+
+
+func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
+	# c1-06 + c2-01: build the chip run, keep the highest-PRIORITY chips that fit the usable
+	# edge (never global RIGHT / under the CB/RM pips), and surface the dropped ones as a "+N"
+	# clip chip rather than drawing them invisibly. Priority — not draw position — decides what
+	# survives, so an expiring timed buff outranks a persistent charge that merely drew earlier;
+	# draw order stays fixed so kept chips don't jitter as timers tick. Claymore trails an
+	# interact glyph.
+	var chips: Array = _buff_chip_specs(p)
 	# Pre-measure each chip via _chip_w (the EXACT x-advance its drawing produces, so the fit
 	# measure can never disagree with what lands), then run the shared priority planner used by
 	# row 0: keep the top-priority set that fits, reserving the worst-case +N slot only on real
@@ -2712,38 +2804,38 @@ func _buff_chips(p: Dictionary, px: float, ry: float, pi := 0) -> float:
 		if not keep.has(i):
 			continue
 		var c: Dictionary = chips[i]
-		if c.has("vest"):
-			_emit_icon("icon_vest", Rect2(px, ry, ICON, ICON))
-			# c2-01: advance by the vest's reserved width EXACTLY (icon + the standard 2px inter-chip
-			# gap) == _chip_w({vest}), so the planner budget matches the real layout and a following
-			# buff chip is placed clear of the icon instead of overlapping it.
-			px += ICON + 2.0
-		else:
-			px = _stat(c["icon"], c["txt"], px, ry, c["col"])
-			if c.has("glyph"):
-				# Left-anchored + true advance: the frozen `+4.0 / += 12.0` pair centred a
-				# 10.5px cap on px+4, so even the SINGLE-LETTER default already painted 1.25px
-				# back over the chip it trails, and the next chip started inside the cap.
-				_emit_act_glyph_at("interact", px + GLYPH_GAP, ry + ICON / 2.0, 10.0,
-					Color.WHITE, pi == 1)
-				px += _act_glyph_adv("interact", 10.0, 1 if pi == 1 else 0)
+		px = _stat(c["icon"], c["txt"], px, ry, c["col"])
+		if c.has("glyph"):
+			# Left-anchored + true advance: the frozen `+4.0 / += 12.0` pair centred a
+			# 10.5px cap on px+4, so even the SINGLE-LETTER default already painted 1.25px
+			# back over the chip it trails, and the next chip started inside the cap.
+			_emit_act_glyph_at("interact", px + GLYPH_GAP, ry + ICON / 2.0, 10.0,
+				Color.WHITE, pi == 1)
+			px += _act_glyph_adv("interact", 10.0, 1 if pi == 1 else 0)
 	if hidden > 0:
 		# c4-03: same shared "+N" chip as row 0, clamped within the usable edge. Red ("!N") when the
 		# dropped chip is a TIMED buff (prio above BUFF_PRIO_PERSIST — an expiring countdown to re-up
-		# NOW), gold when only a persistent charge (vest / triple / claymores) sheds.
+		# NOW), gold when only a persistent charge (triple / claymores) sheds.
 		var ow := _ovf_slot_w(hidden)
 		var actionable_culled := _ovf_alert(cands, keep, BUFF_PRIO_PERSIST)
-		px = _ovf_chip(minf(px, _fit_full - ow), ry, hidden, actionable_culled)
+		# MONOTONIC placement. `px` is the right edge of the last chip actually drawn, so a clamp
+		# that slid the clip BACKWARDS (the `minf` this replaces) painted the "N more here"
+		# affordance straight over live content — the roll glyph, on any row starved enough that the
+		# tail's budget fell below the clip's own width. When the usable edge leaves no room to the
+		# right, the clip goes FLUSH AFTER the cursor instead: an affordance that overhangs a
+		# starved row is a smaller lie than one painted through a live chip, and the reserve in
+		# _status_chips now keeps that case from arising in the first place.
+		var anchor := _fit_full - ow
+		px = _ovf_chip(px if anchor < px else anchor, ry, hidden, actionable_culled)
 	return px
 
 
-## c1-06: the EXACT x-advance a buff chip's drawing produces — vest is icon+2, a timed
-## chip mirrors _stat's advance (icon + 3 + text + 10 == icon + 13 + text), a claymore
-## adds its trailing interact glyph. Shared by the fit measure so a width can never
-## disagree with the drawn footprint.
+## c1-06: the EXACT x-advance a buff chip's drawing produces — a timed chip mirrors _stat's
+## advance (icon + 3 + text + 10 == icon + 13 + text), a claymore adds its trailing interact
+## glyph. Shared by the fit measure so a width can never disagree with the drawn footprint.
+## T1: the vest's icon+2 case is GONE — the vest is a fixed _vitals_chips slot measured by
+## `vitals_w()`, so it can no longer be shed by this planner at all.
 func _chip_w(c: Dictionary, dev := 0) -> float:
-	if c.has("vest"):
-		return ICON + 2.0
 	# The trailing interact keycap costs its REAL advance (gap + live cap width), not a
 	# frozen 12.0 sized off a square — the planner budget and the drawn footprint have to
 	# agree for a wide rebind too, and they are measured for the SAME seat that draws.
@@ -3097,17 +3189,102 @@ func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> 
 	return px
 
 
-## c2-01: the on-foot player row — the FIXED equipment (ammo+magazine, grenade, roll) THEN the
-## timed-buff / status tail. The equipment is the row's top-priority readout: the ammo and grenade
-## counts the player must act on, so it is guarded against the usable edge (`_fit_full`, the
-## CB/RM-reserved boundary) with the SAME prefix planner + shared "+N" clip the buff/status tail
-## uses. On a sub-design-width viewport the leading equipment chips that fit draw and the rest
-## (plus the tail, which can't fit either) surface as ONE right-edge +N instead of a silent
-## off-panel truncation — ammo can never be pushed off the panel uncounted. A no-op at every
-## supported width (the two-digit equipment run is ~95px, far inside the ~614px panel), so normal
-## play is byte-identical; the guard is purely the narrow-viewport safety net the judge asked for,
-## pinned by test_onfoot_equipment_clips_when_starved. Extracted from _draw so that test can drive
-## the exact path with a tight `_fit_full`, mirroring the _buff_chips capture test.
+# --- T1: the player VITALS cluster ---------------------------------------------------------
+# The one readout this HUD never had, in a game where every lethal touch is one hit: how much is
+# between you and the floor RIGHT NOW. The sim carries exactly three per-player facts that answer
+# it, and every one of them was either invisible or demotable:
+#   p["vest"]         — the Flak Vest absorbs exactly ONE hit (SimWorld._hurt_player), then is gone.
+#   p["hurt_iframes"] — the invulnerability window: VEST_IFRAME_TICKS (90t = 1.5s) mercy on every
+#                       respawn, and the same window again the instant a vest eats a hit. A whole
+#                       1.5s of "you cannot be touched" that NOTHING on screen stated.
+#   alive             — already owned by the branch itself: a downed player gets _dead_chips
+#                       (skull + K.I.A. / RALLYING / REVIVE), so a "life" pip on the ALIVE row
+#                       could only ever read "full" — a pip that cannot vary is not a pip. Hence
+#                       TWO pips, not three, and the cluster is on-foot only: in a tank the HULL is
+#                       the armour and _fuel_gauge / BAIL OUT already own the row.
+#
+# SHAPE-DOUBLING — the rule the +N clip follows (its "+"->"!" swap) and the one the status pips
+# enforce in words ("a plain word, never the cryptic 'SPD' abbreviation"). Neither pip leans on hue:
+#   VEST   : held   = full-strength icon ON a dark tray plate;  not held = the SAME icon at
+#                      VITALS_OFF alpha with NO plate. Two independent channels (plate presence AND
+#                      ink density), so "I have armour" survives a fully desaturated frame, and the
+#                      strip-on-vest loss the 1986 death rule performs is VISIBLE the frame it happens.
+#   SHIELD : up     = a thick PARTIAL sweep over the socket;    down   = the thin dim socket circle
+#                      alone. A partial-vs-complete arc is a pure geometry channel, and the ring is
+#                      the right idiom here precisely because the value is a TIMER — a pip cannot
+#                      say "1.2s of protection left", and this file already spends the same draining
+#                      ring on the bash / grenade / roll / cannon cooldowns.
+# Urgent tier: the window's final third goes Art.warn (the streak ring's expiry-timing cue, held
+# STEADY by _mblink under reduce motion) and the fraction quarter-snaps instead of draining per-frame
+# there too, so nothing strobes. Hues route through Art.safe / Art.warn so the two pips keep the
+# colorblind palette the rest of the row does.
+const VITALS_GAP := 4.0     # between the vest pip's plate edge and the shield socket (2px clear of it)
+const VITALS_TRAIL := 8.0   # trailing gap after the shield socket before the first equipment chip
+const VITALS_OFF := 0.3     # ink density of an UNLIT pip (the roll glyph / mag-segment unlit idiom)
+const VITALS_TRAY := Color(0.1, 0.11, 0.09, 0.85)          # the same dark tray _pip / +N clip use
+const VITALS_LIT := Color(0.75, 0.9, 0.6)                 # a held vest — Art.safe() remaps to CB cyan
+const VITALS_SOCKET_R := 6.0   # the shield socket's radius. r + w/2 == ICON/2, so the socket is
+const VITALS_SOCKET_W := 1.0   # inscribed in its 13px slot EXACTLY — same proof the streak ring has.
+const VITALS_SOCKET_COL := Color(0.72, 0.76, 0.72, 0.42)
+const VITALS_RING_R := 5.5     # the live sweep. Reuses the streak ring's radius/stroke verbatim so
+const VITALS_RING_W := 2.0     # the two readouts share one visual weight (2*R + W == ICON).
+const VITALS_EXPIRY := 0.34    # final third of the window = "about to lose protection" (streak's cue)
+
+
+## The cluster's FIXED x-advance — two ICON slots, the gap, and the trailing pad. Constant in every
+## state (vest or not, shielded or not) so the 1.5s window appearing and expiring NEVER reflows the
+## row, and so the fit planner can reserve it exactly like any other fixed unit.
+static func vitals_w() -> float:
+	return ICON + VITALS_GAP + ICON + VITALS_TRAIL
+
+
+## T1: paint the two-slot vitals cluster and return its right edge. Measure pass (row 0 never calls
+## this, but the contract is uniform) advances only. Every draw routes through a seam so a headless
+## capture subclass records the real commands instead of the engine logging "Drawing is only
+## allowed inside _draw()" — the exact trap _mag_bar and _mini_bar already have overrides for.
+func _vitals_chips(p: Dictionary, x: float, ry: float) -> float:
+	var held: bool = bool(p["vest"])
+	var iframes: int = int(p["hurt_iframes"])
+	if not _measure:
+		# --- slot 1: the FLAK VEST (one-hit armour). Present in EVERY state so the moment the
+		# 1986 death rule strips it is a change the player can see, not an absence.
+		if held:
+			_emit_bg_rect(Rect2(x - 1.0, ry - 1.0, ICON + 2.0, ICON + 2.0), VITALS_TRAY)
+			_emit_icon("icon_vest", Rect2(x, ry, ICON, ICON), Art.safe(VITALS_LIT))
+		else:
+			_emit_icon("icon_vest", Rect2(x, ry, ICON, ICON),
+				Color(0.72, 0.76, 0.72, VITALS_OFF))
+		# --- slot 2: the INVULNERABILITY WINDOW, as a draining socket. The socket always draws so
+		# the sweep reads against a whole instead of a floating partial arc (the streak ring's rule).
+		var c := Vector2(x + VITALS_GAP + ICON + ICON / 2.0, ry + ICON / 2.0)
+		_emit_arc(c, VITALS_SOCKET_R, 0.0, TAU, VITALS_SOCKET_COL, VITALS_SOCKET_W)
+		if iframes > 0:
+			var frac := clampf(float(iframes) / float(SimWorld.VEST_IFRAME_TICKS), 0.0, 1.0)
+			if main._motion < 0.5:
+				frac = ceilf(frac * 4.0) / 4.0   # REDUCE MOTION: quarter-snap, no per-frame drain
+			var col := Art.safe(Color(0.6, 0.9, 1.0))
+			if frac <= VITALS_EXPIRY:
+				col = Art.warn(Color(1.0, 0.3, 0.25)) if _mblink(10) else col
+			_emit_arc(c, VITALS_RING_R, -PI / 2.0, -PI / 2.0 + TAU * frac, col, VITALS_RING_W)
+	return x + vitals_w()
+
+
+## Draw seam for the vitals socket/sweep (and any future ring). Art.arc stamps raw rects, so a
+## headless capture subclass MUST override this or the vitals spray "Drawing is only allowed
+## inside _draw()" and abort the test method mid-run. The live call is Art.arc, unchanged.
+func _emit_arc(center: Vector2, radius: float, from: float, to: float, col: Color, width: float) -> void:
+	Art.arc(self, center, radius, from, to, 24, col, width)
+
+
+## c2-01: the on-foot player row — the VITALS pair, then the FIXED equipment (ammo+magazine,
+## grenade, roll), THEN the timed-buff / status tail. Vitals lead because "can I be killed right now"
+## outranks "how many rounds do I have"; the whole run is a fixed prefix through the SAME
+## plan_chips planner + shared "+N" clip the buff/status tail uses, so a vitals pair that misses the
+## usable edge is COUNTED, never silently clipped. On a sub-design-width viewport the leading units
+## that fit draw and the rest surface as ONE right-edge +N. A no-op at every supported width (the
+## full head is ~133px, far inside the ~614px panel), so normal play keeps every chip; the guard is
+## purely the narrow-viewport safety net, pinned by test_onfoot_equipment_clips_when_starved.
+## Extracted from _draw so that test can drive the exact path with a tight `_fit_full`.
 func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> float:
 	# Low-ammo escalation: amber under 20, blinking red when dry — see _mg_ammo_stat, shared with
 	# the coax gunner's tank row (same pool, same trigger, so the same tiers).
@@ -3127,18 +3304,23 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 		gcol = Art.warn(Color(1.0, 0.3, 0.25))
 		gwarn = true
 	var roll_ready: bool = p["roll_cd"] == 0
-	# c2-01: prefix-fit the three fixed equipment units (ammo+mag, grenade, roll) against the usable
-	# edge, reserving the worst-case +N slot ONLY on real overflow — the SAME plan_chips planner the
-	# under-fit status row uses. `MAG_ADV` mirrors _mag_bar's advance (segments + trailing gap); a
-	# timed/ammo _stat advance is ICON + 13 + text; roll is a glyph + 2px gap.
+	# c2-01: prefix-fit the four fixed head units (vitals pair, ammo+mag, grenade, roll) against the
+	# usable edge, reserving the worst-case +N slot ONLY on real overflow — the SAME plan_chips
+	# planner the under-fit status row uses. `MAG_ADV` mirrors _mag_bar's advance (segments +
+	# trailing gap); a timed/ammo _stat advance is ICON + 13 + text; roll is a glyph's real advance;
+	# the vitals pair is vitals_w(). The vitals lead the list, and plan_chips keeps a strict PREFIX,
+	# so they are the LAST thing this row can lose.
+	var vitals_wdt := vitals_w()
 	var ammo_w := ICON + 13.0 + _tw("%02d" % ammo) + MAG_ADV
 	var gren_w := ICON + 13.0 + _tw("%02d" % p["grenade_ammo"])
 	# The roll chip's slot is the keycap's REAL advance, not ICON + 2.0 — that budget is
 	# 11.9px short of a "Space"-bound roll and the glyph overran the chip after it.
 	var roll_adv := _act_glyph_adv("roll", 11.0, 1 if i == 1 else 0)
-	var eq_plan := plan_chips([ammo_w, gren_w, roll_adv], px, _fit_full, _ovf_slot_w(3))
+	var eq_plan := plan_chips([vitals_wdt, ammo_w, gren_w, roll_adv], px, _fit_full, _ovf_slot_w(4))
 	var eq_shown: int = eq_plan["shown"]
 	if eq_shown >= 1:
+		px = _vitals_chips(p, px, ry)
+	if eq_shown >= 2:
 		var ammo_x := px
 		px = _mg_ammo_stat(p, px, ry)
 		# Empty-clip bash on cooldown: a draining ring on the dry ammo icon so "melee not ready"
@@ -3151,7 +3333,7 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 				-PI / 2, -PI / 2 + TAU * bfrac, 16, Color(0.9, 0.6, 0.3, 0.8), 1.5)
 		# Segmented magazine bar next to the numeral — clip fill at a glance.
 		px = _mag_bar(px, ry + 4.0, ammo, SimWorld.MG_AMMO_MAX)
-	if eq_shown >= 2:
+	if eq_shown >= 3:
 		var gren_x := px
 		px = _warn_stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol) if gwarn else _stat("icon_grenade", "%02d" % p["grenade_ammo"], px, ry, gcol)
 		# Throw on cooldown: a draining ring on the grenade pip so a throw-while-recharging reads
@@ -3162,7 +3344,7 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 				0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 			Art.arc(self, Vector2(gren_x + ICON / 2.0, ry + ICON / 2.0), ICON * 0.55,
 				-PI / 2, -PI / 2 + TAU * gfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
-	if eq_shown >= 3:
+	if eq_shown >= 4:
 		# Dodge availability: the roll's long cooldown was only shown as a faint arc at the player's
 		# feet — a mashing player couldn't tell recharging from unbound. Bright glyph when ready,
 		# dimmed + draining ring while recharging (same grammar as the grenade/bash rings above).
@@ -3229,7 +3411,13 @@ func _status_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	# row start.
 	var want_full: bool = edge - px >= full_total - 0.01
 	var saved := _fit_full
-	_fit_full = maxf(px, edge - (full_total if want_full else short_total))
+	# The reserve must cover the TAIL's own "+N" as well as the status group. It used to cover
+	# only the group, so on a starved row the tail was handed a budget SMALLER than its own clip
+	# and the clip had nowhere to go — the defect the T1 vitals pair first made reachable by
+	# widening the head. Reserve the worst case the tail can actually reach (every live chip
+	# hidden, read off the SAME _buff_chip_specs list the draw enumerates, so the two can't drift).
+	var tail_ovf := _ovf_slot_w(_buff_chip_specs(p).size())
+	_fit_full = maxf(px + tail_ovf, edge - (full_total if want_full else short_total))
 	px = _buff_chips(p, px, ry, i)
 	_fit_full = saved
 	# Lay the statuses out as ONE GROUP — all full words ("SPEED BOOST"/"WADING"), or (only when
@@ -3384,6 +3572,43 @@ func _act_glyph_adv(act: String, size: float, dev: int) -> float:
 ## planner budget and the drawn chip agree exactly.
 func _ovf_slot_w(n: int) -> float:
 	return maxf(_tw("+%d" % n), _tw("!%d" % n)) + OVF_PAD
+
+
+## T2: the FULL-WORD names of the readouts the "+N" clip is hiding, in CHIP_PRIO order (highest
+## priority first) so the list leads with the thing most worth knowing. `extra_hidden` counts
+## non-candidate suppressed readouts — there is exactly one today, a dropped PRESSURE/GATE
+## telegraph, which is not a `_fits2` chip and so has no CHIP_TITLES entry. Pure + static so a
+## headless test pins the whole mapping without a draw context.
+static func hidden_titles(cands: Array, keep: Dictionary, extra_hidden := 0) -> PackedStringArray:
+	var out := PackedStringArray()
+	var ranked: Array = []
+	for c in cands:
+		if c is Dictionary and c.has("id") and c.has("prio"):
+			ranked.append(c)
+	ranked.sort_custom(func(a, b): return int(a["prio"]) > int(b["prio"]))
+	for c in ranked:
+		var id = c["id"]
+		if keep.has(id):
+			continue
+		# The subordinate streak hint is never a readout in its own right (see _display_hidden).
+		if id is String and id == "streak_hint":
+			continue
+		out.append(String(CHIP_TITLES.get(id, String(id).to_upper())))
+	if extra_hidden > 0:
+		out.append("PRESSURE / GATE")
+	return out
+
+
+## T2: publish the "+N" clip's accessible NAME on the Control. Empty string when nothing is hidden,
+## so a settled row carries no stale title. Guarded on the VALUE so the tooltip only invalidates
+## when the hidden set actually changes (this runs every _draw).
+func _set_overflow_name(n: int, cands: Array, keep: Dictionary, tele_dropped := false) -> void:
+	var want := ""
+	if n > 0:
+		var extra := 1 if tele_dropped else 0
+		want = (OVERFLOW_TITLE_PREFIX % n) + ", ".join(hidden_titles(cands, keep, extra))
+	if tooltip_text != want:
+		tooltip_text = want
 
 
 ## c1-06: the ONE "+N more here" chip, shared by row 0 and the player buff/direct-draw rows so all
