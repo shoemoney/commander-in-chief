@@ -1459,10 +1459,23 @@ func _paint_bg(canvas: Node2D) -> void:
 	# separately is what makes composited ground read as layers). Two region
 	# draws off one 2-column gradient: column 0 lifts the top of the frame,
 	# column 1 shades the floor, and BOTH are fully transparent at mid-frame.
-	# Identity transform (the reset below is not needed — it is already identity
-	# here, and this card is deliberately screen-anchored: the sun stays put, the
-	# ground moves under it, and a static smooth ramp has no temporal content to
-	# shimmer even while _bg_root judders with the camera).
+	# a2-19 THE RESET IS REQUIRED, and its absence is why this whole pass shipped
+	# invisible for three iterations. The comment here used to claim "the reset
+	# below is not needed — it is already identity here". It was NOT identity:
+	# the macro-mottle loop above ends on
+	#     canvas.draw_set_transform(mpos, mrot, Vector2(1.0, 0.6 + ...))
+	# and never resets it, so these two cards were drawn through a ROTATION, a
+	# NON-UNIFORM SCALE, and an ORIGIN up to 768px away — they landed off-frame
+	# entirely. Proved, not inferred: with the sky card forced to opaque green
+	# and the floor to opaque magenta, a full 14-shot render produced 136
+	# green-dominant pixels and 0 magenta, with the frame mean unchanged. The
+	# ground's measured vertical luma profile was -1.5% top to bottom where this
+	# ramp designs a 26% spread. Every "the ground looks flat" judgement in this
+	# loop was correct AND the fix for it had never once been on screen.
+	# Resetting here is also the honest description: a screen-anchored light
+	# card wants identity, because the sun stays put while the ground moves
+	# under it.
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var glt := _ground_light()
 	canvas.draw_texture_rect_region(glt, GROUND_LIGHT_RECT, Rect2i(0, 0, 1, GROUND_LIGHT_TEX_H))
 	canvas.draw_texture_rect_region(glt, GROUND_LIGHT_RECT, Rect2i(1, 0, 1, GROUND_LIGHT_TEX_H))
