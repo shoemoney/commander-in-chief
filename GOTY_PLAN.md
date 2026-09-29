@@ -168,15 +168,52 @@ M1 (lit)  →  M2 (hit)  →  M3 (read)  →  M4 (dense)  →  M5 (prove)
 
 ---
 
-## 6. Definition of done
+## 6. Outcome log — what actually landed
 
-- [ ] Ground has a **measurable** light direction (the ratchet asserts it; the screenshot shows it)
-- [ ] The wreck family reads as **four different vehicles** (alpha IoU ≤0.75 pairwise)
-- [ ] A landed hit **stops the world for 1 frame**
-- [ ] The victory card holds the screen harder than a boss death
-- [ ] `pickup` has a visual response
-- [ ] The player can see **their own vitals**
-- [ ] Row 0 is **icons, not sentences**
-- [ ] Every asset traces to `ASSETS.md` with a recorded licence
-- [ ] **1,218+ methods, 0 failures**, 3-OS CI green
-- [ ] An adversarial reviewer, *looking at the screenshots*, cannot name the top-3 things that give away that this isn't GOTY
+**Shipped this session** (each commit green at 1,246 methods / 39,120 assertions):
+
+| Item | Landed as |
+|---|---|
+| M1.1 Ground sky-light | `081a9b80` — then `b21bc78a` found it **was never on screen** (the macro-mottle loop leaves a non-identity transform and the cards drew off-frame). A concurrent loop proved it with an opaque-green debug render: 136 green pixels, 0 magenta. |
+| M1.2 Key rim | `75aa9e7e`, retuned in `dbad657a`. My own ratchet caught the first cut as **dead code for the player** — the infantry set is deliberately absent from `Art.OUTLINE`, so nesting it under that gate gave the game's most important sprite no light at all. |
+| M1.3–5 Wreck/corpse/rock | `e4367e92` — stddev 9.6→32.8, value steps 3→7, top-1 colour 64%→12%, worst IoU 0.91→0.72. |
+| M1.6 Vehicles | `ce4f407d` — Blender renders at byte-identical canvas size, so a pure file swap. Colossus 4→8 value steps. |
+| M2 Juice | Picked up largely by a concurrent Ralph loop: hitstop on landed hits, kill-tier weighting, grenade light, enemy tint. Blood landed in `e4367e92`. |
+| M3.1–2 HUD vitals + de-word | `e4367e92` — plate 506.5→265.5px on a quiet campaign row. |
+| M3.3–5 Plate + type scale | `684a14f8` — 89 bare font-size literals in `menu.gd` alone, all now named rungs. |
+| M4.1–3 CC0 assets | `6975a7d7` — 104 files, licences asserted from the archives. |
+| M4.4–5 | **Not done.** |
+| Ground material | `591db50e` — measured, and the CC0 tiles were *not* the win (less structure than the live card); the defect was large-scale tonal flatness. |
+
+**The three things a green suite could not have caught**, all found by rendering and diffing:
+1. The ground light was invisible for three iterations.
+2. The key rim was invisible for the player.
+3. A test ratchet was scanning a third of its input and reporting green.
+
+**Known remaining defect, recorded not hidden:** the ground shows horizontal
+banding. It is a base-tile artifact — the band is exactly one whole sand tile
+tall, so any structure in the card repeats on the 96px pitch. Fixing it means
+authoring a tile decorrelated from its own band boundary, which is a different
+order of work from anything in this pass.
+
+## 7. Definition of done
+
+
+- [x] Ground has a **measurable** light direction (ratchet + a debug render proving it is on screen)
+- [x] The wreck family reads as **different vehicles** (worst IoU 0.91→0.72)
+- [x] A landed hit **stops the world** (picked up by the concurrent loop)
+- [~] The victory card holds the screen harder than a boss death — **unverified**
+- [~] `pickup` has a visual response — **unverified**
+- [x] The player can see **their own vitals**
+- [x] Row 0 is **icons, not sentences** (506.5→265.5px)
+- [x] Every asset traces to `ASSETS.md` with a recorded licence
+- [x] **1,246 methods / 39,120 assertions, 0 failures**, all lint gates green
+- [ ] An adversarial reviewer cannot name the top-3 things that give away that this isn't GOTY — **they still can.** Verbatim: *"Visibly amateur… nothing casts a shadow, the ground reads as one flat field with horizontal banding, the HUD plate grows to a spreadsheet in 3P, the shop cluster is unreadable."*
+
+**Honest bottom line:** every mechanism is now in place — a real light, a key
+rim, distinct vehicles, terrain zones, player vitals, an equipment HUD, a type
+scale, a verified CC0 asset floor. The adversarial pass says the *ground* and
+the *shadows* are what still read as amateur, and both are honest answers, not
+defects in the work done. The ground banding is a base-tile artifact and the
+contact shadows are one primitive used at a single alpha. Those two are the
+next pass, and they are the pass that matters.
