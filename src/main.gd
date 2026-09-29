@@ -7444,11 +7444,14 @@ const _KEY_RIM_DIR := Vector2(-0.70710678, -0.70710678)   # 1/sqrt(2) — exactl
 # edge stops reading as a light wrap and starts reading as a drop shadow of the
 # wrong polarity. The dark contour is 1.1 (fleet) / 1.7 (units) / 2.2 (bosses)
 # and the key sits UNDER all of them, so it can never be mistaken for one.
-const KEY_RIM_PX := 1.3
+const KEY_RIM_PX := 1.15
 # Warm, near-white. Deliberately less saturated than the _LIGHT_RIM separator
 # (1.0, 0.9, 0.62) so the two read as different jobs: that one says "threat",
 # this one says "lit". Matches ROCK_TOP_LIGHT's family.
-const KEY_RIM_COL := Color(1.0, 0.96, 0.87, 0.85)
+const KEY_RIM_COL := Color(1.0, 0.95, 0.84, 0.5)   # a3-15: halved. At 0.85 every material wore the same
+	# opaque cream band and the edge read as a MIS-REGISTERED OUTLINE rather than as
+	# light — the sharpest criticism of this whole pass. A real wrap falls off; this
+	# one now fades into the sprite instead of sitting on top of it as a keyline.
 # a1-07: craters read as blasted DEPRESSIONS via a soft dark pit under the decal
 # (they are holes, so they get no drop-shadow — this is a centered inner-shadow).
 const _CRATER_KEYS := {"crater": true, "crater_field": true}
@@ -8101,7 +8104,7 @@ static func _shadow_ellipse(pos: Vector2, r: float) -> Rect2:
 	return Rect2(pos + Vector2(0, r * 0.32) - sz * 0.5, sz)
 
 
-func _ground_shadow(pos: Vector2, r: float, a := 0.32, tint := Color(0.0, 0.03, 0.0)) -> void:
+func _ground_shadow(pos: Vector2, r: float, a := 0.46, tint := Color(0.0, 0.03, 0.0)) -> void:
 	# Soft flattened drop-shadow so units/vehicles sit ON the ground instead of
 	# floating over it — a soft-dark card (fx_shadow) with baked falloff.
 	# Weight-graded (7v): heavy armor passes ~0.42 so a tank visually outweighs
@@ -13581,7 +13584,7 @@ func _draw_scorch() -> void:
 			# sticker at 14-18px and a pool is never round.
 			var bp: int = s.get("seed", 0)
 			var br: float = s.get("r", 10.0)
-			var ba: float = 0.4 * (1.0 - float(s["t"]))
+			var ba: float = 0.62 * (1.0 - float(s["t"]))
 			for k in 3:
 				var ba2: float = float(bp % 360) * 0.01745 + float(k) * 2.09
 				var boff: Vector2 = Vector2.from_angle(ba2) * br * (0.22 + float((bp >> (k * 2)) & 3) * 0.09)
