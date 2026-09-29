@@ -5,11 +5,59 @@ extends Control
 ## fuel/skull states render as baked the earlier art icons (assets/art/icons/).
 
 const ICON := 13.0
-const FONT_SIZE := 10
+
+# ===========================================================================================
+# THE TYPE SCALE (c4-20) — the ONE place a font size is chosen in the view.
+#
+# The face is PixelOperator8 (see Art.font): a bitmap font, 800 units/em, so its em is
+# exactly 8px at the project's 640x360 design size. project.godot runs stretch mode
+# "viewport" with scale_mode "integer", so a glyph rendered at size S lands at S x N on a
+# real screen, N being the integer upscale (1, 2, 3 on 640/1280/1920 wide). A bitmap face
+# resamples UNEVENLY unless S x N lands on a whole number of source texels, i.e. unless S
+# is a whole multiple of 8 — because gcd(N, 8) == 1 for every N >= 2, S = 8k is the ONLY
+# family that is clean at 1x, 2x AND 3x simultaneously. That is why the sizes annotated
+# "30 (3.746x) uneven-quantized stems" / "22 (2.746x)" / "18 (2.254x)" in menu.gsd were
+# bad and 32 / 24 / 16 are the shipped display sizes: 8, 16, 24, 32.
+#
+# TWO TIERS, because the em grid is not honorable everywhere and pretending otherwise is how
+# this file ended up drawing 12 undeclared sizes in the first place:
+#
+#   DISPLAY TIER (TYPE_MICRO / TYPE_LABEL / TYPE_HEAD / TYPE_TITLE) — whole multiples of the
+#   8px em. Everything with room to breathe: the title wordmark, hub/section headers, the
+#   options title, the HUD's own micro labels. Scales cleanly at every integer upscale.
+#
+#   READOUT TIER (TYPE_BODY) — the dense in-game HUD. It is 10px: 1.25x the em, so it is
+#   formally OFF-GRID, and that is a deliberate, load-bearing exception rather than an
+#   oversight. A HUD row is ROW_H = 16px tall; TYPE_LABEL (16px) needs ascent 14 +
+#   descent 2 + the 1px drop-shadow Art.text always paints = 17px of ink, which does not
+#   fit a 16px row, and TYPE_HEAD/TYPE_TITLE are 3-4x too tall for a three-row corner
+#   plate. So the readout tier has exactly ONE size, not a ramp — the HUD signals hierarchy
+#   through ICON size, colour and the +N affordance, never through a fifth text size. The
+#   proof that 16 really does not fit is test_hud::test_type_scale_readout_tier_cannot_reach_the_em_grid.
+#   Any future HUD text larger than TYPE_BODY must be a DISPLAY-tier constant, never a literal.
+#
+# WEIGHT: the face has no weight axis, so the scale buys hierarchy the only way a bitmap
+# face can — size and colour. Art.text's `outline` argument is the one bold-ish channel
+# that already existed (a hard black rim for the mid-fight alert band); it is deliberately
+# NOT used for hierarchy, because a black rim is a legibility crutch, not a weight.
+# ===========================================================================================
+const TYPE_MICRO := 8     # 1.000x em — the em floor. Verb-legend labels, keycap captions.
+const TYPE_BODY := 10     # readout tier, the ONLY in-fight size (1.25x em — see the exception above)
+const TYPE_LABEL := 16    # 2.000x em — a labelled plate/heading that has vertical room
+const TYPE_HEAD := 24     # 3.000x em — a section header
+const TYPE_TITLE := 32    # 4.000x em — the title wordmark
+## The em grid, as a SET, so a test can assert every DISPLAY-tier constant is on it and that
+## no new off-grid literal creeps back in. Pure data; nothing draws from it.
+const TYPE_EM_GRID := [8, 16, 24, 32]
+
+const FONT_SIZE := TYPE_BODY   # historical name for the readout size — value UNCHANGED (10).
+                        # Read by test_hud/test_assets/test_localization; kept as an alias so
+                        # every one of those call sites measures the SAME rung of the scale.
+const BOSS_LABEL_SIZE := TYPE_BODY   # the size BOTH phase labels draw at (value UNCHANGED: 10)
+
 const RIGHT := 632.0  # safe right margin (design width 640); chips past it drop
 const ROW_H := 16.0   # one HUD row — a player row AND the shop-preview strip are this tall
 const HEAD_H := 26.0  # row-0 header block (coin/score/tokens + gap) above the player rows
-const BOSS_LABEL_SIZE := 10                              # the size BOTH phase labels draw at
 const LABEL_PLATE_RISE := float(BOSS_LABEL_SIZE) + 1.0   # 11: px label_plate_rect rises above its baseline
 const MIN_HUD_CHANNEL := 6.0   # clear pixels any two STACKED pieces of chrome must keep between them.
                        # 3 true px between two dark slabs overlapping 225px horizontally still reads
@@ -46,8 +94,76 @@ const CORNER_RESERVE_FALLBACK := 18.0  # c4-16: the fixed reserve used only for 
                        # (headless/test) path; the live path measures the real pip footprint instead
 const PLATE_EPS := 0.01      # c2-18: sub-pixel guard — suppress a zero/negative-height plate body region
 const PLATE_SEAM_MIN := 0.5  # c2-18: min header overhang (px) before the seam shadow is worth drawing
+
+# ------------------------------------------------------------------------------------------
+# c4-20: THE BEVELLED PLATE FRAME — the hardware the repo already OWNS and the HUD never drew.
+#
+# The plate used to be a flat ui_panel rect at 65% alpha behind a 1px hairline, which read as
+# "a dark box drawn over the top-left". The fix is not a darker box or a brighter hairline: it
+# is assets/art/ui/plate_metal_{l,c,r}.png, three 190x230 frames that tile as ONE 570px
+# plate — `_l` carries a warm rust LEFT bezel, `_r` the matching RIGHT bezel, `_c` the
+# neutral middle whose top row is a bright highlight rail and whose bottom row is a dark
+# shadow rail. They are hollow between those rails, which is exactly what a frame is, so
+# they are composited OVER the existing dark backing rather than replacing it: the backing is
+# what every text-contrast number in the test suite is measured against, and swapping it out
+# would invalidate all of them for no visual gain.
+#
+# Geometry is measured off the PNGs, not eyeballed, and pinned by
+# test_hud::test_plate_metal_frame_windows_are_solid_pixels (which reads the imported
+# textures and asserts each window below is fully opaque, so a re-export can't silently
+# shift a rail onto a transparent texel):
+#   opaque bbox (11,4)-(179,223) | left bezel solid x 12..25 | right bezel solid x 165..178
+#   | top rail solid from y 5 | bottom rail solid to y 222 | both side bezels pixel-UNIFORM
+#   down the full source height, so a 1px slice stretched vertically is EXACT (no smear).
+# Rail thickness is the DEST-side bezel, deliberately much thinner than the source's own
+# 29px top band: the source is a ~230px menu plate and this is a 42-74px HUD plate, so
+# taking the source's native top band would eat two thirds of the plate's height.
+# ------------------------------------------------------------------------------------------
+const PLATE_FRAME_INSET := 1.0  # the rails sit INSIDE the plate edge, so the existing 1px hairline
+                        # stays the outermost line and the bevel reads as an EDGE, not as three
+                        # stacked rules on the same pixel
+const PLATE_BEVEL_L := 7.0    # rust left bezel width, in plate pixels
+const PLATE_BEVEL_R := 7.0    # rust right bezel width
+const PLATE_BEVEL_T := 4.0    # the bright top highlight rail
+const PLATE_BEVEL_B := 4.0    # the dark bottom shadow rail
+const PLATE_SRC_W := 190.0    # source frame width (all three files)
+const PLATE_SRC_L := 12.0     # first SOLID column of the left bezel
+const PLATE_SRC_SOLID_W := 166.0   # the SOLID band the rails span: columns 12..177 inclusive.
+                        # 11 and 178 are antialiased (alpha 157-172) and 0..11 / 178..189 are
+                        # fully transparent, so a centre slice MUST NOT sample the full 190px
+                        # source width — it would smear those transparent margins across the
+                        # middle of the top and bottom rails. Pinned by
+                        # test_plate_metal_frame_windows_are_solid_pixels.
+const PLATE_SRC_R := PLATE_SRC_L + PLATE_SRC_SOLID_W - PLATE_BEVEL_R   # 171 — first SOLID column
+                        # of the right bezel, DERIVED from the solid band and the bezel width so
+                        # the three horizontal source windows can never drift apart again (they
+                        # did once: the right bezel was reading a column that is only solid at
+                        # mid-height, which the pixel test caught as 3 non-opaque texels).
+const PLATE_SRC_T := 5.0      # first SOLID row of the top highlight rail
+const PLATE_SRC_B := 216.0    # first solid row of the dark bottom rail (222 is the last solid)
+const PLATE_SRC_MID := 115.0  # a row inside the hollow middle — the side bezels are uniform
+                        # there, so this 1px slice is what gets stretched down the plate
+# The frame composites OVER the backing and UNDER every glyph (the whole plate is on the z:-1
+# item, the text on `self`), so it can never occlude a readout — the only thing it can do is
+# eat contrast. It is therefore drawn DIM: the source top rail is lum 208 and at full strength
+# it became a pale bar directly behind the row-0 caps. These values were set by eye against
+# three rendered shots, not guessed.
+const PLATE_FRAME_MOD := Color(0.86, 0.88, 0.82, 0.42)
+const PLATE_BRACKET := Color(0.86, 0.9, 0.84, 0.38)  # corner brackets: machined corner marks
+const PLATE_BRACKET_INSET := 2.0   # px in from the plate corner, so a bracket never sits ON the rail
+const PLATE_BRACKET_ARM := 5.0    # length of each bracket leg
+const PLATE_RIVET := Color(0.95, 0.8, 0.66, 0.38)  # warm steel, matched to the rust bezels
+const PLATE_RIVET_PX := 2.0   # a rivet is a 2x2 bolt head
+# Which edges of a plate region carry a rail. A piece is emitted only when BOTH of its rails
+# are wanted, so the header/body L-shape traces its real union boundary and never draws a
+# bottom rail across the header's exposed overhang (which would read as a boxed-in shelf).
+const PLATE_RAIL_TOP := 1
+const PLATE_RAIL_BOTTOM := 2
+const PLATE_RAIL_LEFT := 4
+const PLATE_RAIL_RIGHT := 8
+const PLATE_RAIL_ALL := 15
 const PIP_SCRIM := Color(0.04, 0.05, 0.04, 0.92)   # near-opaque backing: even over white snow /
-                       # desert / an explosion flash it composites to a near-black plate so the pip
+                        # desert / an explosion flash it composites to a near-black plate so the pip
                        # never washes out. Extracted as a const so the contrast test measures the
                        # EXACT color the plate draws with (can't drift from what lands on-screen).
 const PIP_HAIRLINE := Color(0.75, 0.8, 0.75, 0.45)  # light edge stroke framing the scrim off a
@@ -1330,6 +1446,11 @@ static func _header_bottom(pip_n: int, panel_h: float) -> float:
 ## keeps its dynamic width, forming a full-width-header / narrow-body HUD. One virtual full-panel
 ## stretch feeds BOTH the header and body rects via texture_rect_region, so the panel texture is
 ## continuous across the header/body seam (no texture-scale mismatch). Extracted from _draw for clarity.
+##
+## c4-20: every region also gets the BEVELLED plate_metal frame + corner brackets + rivets on top
+## of its backing (_emit_plate_frame), which is what turns the backing from "a dark box over the
+## top-left" into equipment. The backing itself is deliberately untouched — its 0.65 alpha is what
+## every text-contrast assertion in the suite is measured against.
 func _draw_plate(panel_h: float) -> void:
 	if not _pip_cache_fresh:
 		_refresh_pip_cache()   # c4-16: standalone entry (unit test) — _draw already refreshed for its paint
@@ -1346,7 +1467,9 @@ func _draw_plate(panel_h: float) -> void:
 	var pip_n := _pips.size()   # c4-16: once-per-paint cache (refreshed at the top of _draw)
 	if pip_n == 0:
 		# Baseline: single dynamic-width rect (full texture) + hairline border.
-		_emit_plate_rect("body", Rect2(2, 2, _plate_r, panel_h), ptex, Rect2(0, 0, tsz.x, tsz.y), plate_col)
+		var r := Rect2(2, 2, _plate_r, panel_h)
+		_emit_plate_rect("body", r, ptex, Rect2(0, 0, tsz.x, tsz.y), plate_col)
+		_emit_plate_frame(r, PLATE_RAIL_ALL, true)
 		_emit_plate_border(PackedVector2Array([
 			Vector2(2, 2), Vector2(_plate_r, 2), Vector2(_plate_r, panel_h), Vector2(2, panel_h), Vector2(2, 2),
 		]), pborder)
@@ -1366,10 +1489,19 @@ func _draw_plate(panel_h: float) -> void:
 	var box_w := head_r - 2.0                    # bounding-box width the full texture width maps across
 	var box_h := panel_h - 2.0                   # bounding-box height the full texture height maps across
 	var seam_v := tsz.y * hb / box_h             # texture-space y of the header/body seam
-	_emit_plate_rect("header", Rect2(2, 2, box_w, hb), ptex, Rect2(0, 0, tsz.x, seam_v), plate_col)
-	if panel_h > 2.0 + hb + PLATE_EPS:
-		_emit_plate_rect("body", Rect2(2, 2.0 + hb, body_r - 2.0, panel_h - 2.0 - hb), ptex,
+	var has_body := panel_h > 2.0 + hb + PLATE_EPS
+	var header_rect := Rect2(2, 2, box_w, hb)
+	_emit_plate_rect("header", header_rect, ptex, Rect2(0, 0, tsz.x, seam_v), plate_col)
+	# c4-20: the bevelled frame. The header carries TOP|LEFT|RIGHT and, only when there is NO body
+	# under it, BOTTOM too — so the frame traces the real union boundary. The body carries
+	# LEFT|RIGHT|BOTTOM and never TOP, so no rail is drawn across the header's exposed overhang.
+	_emit_plate_frame(header_rect, PLATE_RAIL_TOP | PLATE_RAIL_LEFT | PLATE_RAIL_RIGHT
+		| (0 if has_body else PLATE_RAIL_BOTTOM), true)
+	if has_body:
+		var body_rect := Rect2(2, 2.0 + hb, body_r - 2.0, panel_h - 2.0 - hb)
+		_emit_plate_rect("body", body_rect, ptex,
 			Rect2(0, seam_v, tsz.x * (body_r - 2.0) / box_w, tsz.y - seam_v), plate_col)
+		_emit_plate_frame(body_rect, PLATE_RAIL_LEFT | PLATE_RAIL_RIGHT | PLATE_RAIL_BOTTOM, false)
 	# Outline traces the TRUE header+body union boundary — header to head_r, body to body_r.
 	_emit_plate_border(PackedVector2Array([
 		Vector2(2, 2), Vector2(head_r, 2), Vector2(head_r, 2.0 + hb),
@@ -1383,10 +1515,152 @@ func _draw_plate(panel_h: float) -> void:
 			Vector2(body_r, 2.0 + hb), Vector2(head_r, 2.0 + hb), Color(0, 0, 0, 0.28), 1.0)
 
 
+## c4-20: the pure geometry of the bevelled plate frame for ONE region — the 8 texture slices
+## that make up its five rails, in draw order. `rails` is a bitmask of PLATE_RAIL_*; a slice is
+## emitted only when BOTH of its rails are wanted, so the header/body L-shape outlines itself.
+## Each entry is {id, file, dest, src}: `file` is the Art.TEX key ("…_l"/"_c"/"_r") and `dest`/
+## `src` are the destination rect in plate pixels and the source rect in the 190x230 frame.
+## Pure + static so a headless test pins the ACTUAL geometry with no GL context.
+##
+## The source is hollow between its rails, so there is deliberately NO centre slice: the frame
+## is a frame. Everything it draws goes through _emit_plate_rect, i.e. onto the same z:-1
+## _plate_ci the dark backing uses — which is the ONLY reason the per-player transparency
+## aperture (hud_visibility.gdshader) keeps punching holes through it. A frame drawn anywhere
+## else (a new canvas item, a bare draw_* on the Control) would keep full opacity and turn the
+## corner plate into an opaque slab right where a player stands.
+static func plate_frame_geometry(plate: Rect2, rails: int) -> Array:
+	var out: Array = []
+	# The rails ride INSIDE the plate edge (PLATE_FRAME_INSET) so the pre-existing 1px hairline
+	# remains the outermost rule; a bevel flush with the border stacks three edges on one pixel
+	# and reads as a highlighter rather than a plate.
+	var rect := plate.grow(-PLATE_FRAME_INSET)
+	var w := rect.size.x
+	var h := rect.size.y
+	# A region too small to carry the full bezel would smear the rails into each other; skip the
+	# frame rather than draw a smear. Never hit by a real plate (min 262x42) — this is the
+	# degenerate/cropped-viewport guard, same fail-closed spirit as PIP_SUPPRESS.
+	if w < PLATE_BEVEL_L + PLATE_BEVEL_R or h < PLATE_BEVEL_T + PLATE_BEVEL_B:
+		return out
+	var l := PLATE_BEVEL_L
+	var r := PLATE_BEVEL_R
+	var t := PLATE_BEVEL_T
+	var b := PLATE_BEVEL_B
+	var top := (rails & PLATE_RAIL_TOP) != 0
+	var bot := (rails & PLATE_RAIL_BOTTOM) != 0
+	var left := (rails & PLATE_RAIL_LEFT) != 0
+	var right := (rails & PLATE_RAIL_RIGHT) != 0
+	# TOP RAIL — the bright highlight. Split l / centre / r so the rust bezels wrap the top
+	# corners; the centre slice is uniform across the source width, so it stretches cleanly.
+	if top:
+		if left:
+			out.append({"id": "t_l", "file": "ui_plate_metal_l",
+				"dest": Rect2(rect.position, Vector2(l, t)),
+				"src": Rect2(PLATE_SRC_L, PLATE_SRC_T, l, 1.0)})
+		out.append({"id": "t_c", "file": "ui_plate_metal_c",
+			"dest": Rect2(Vector2(rect.position.x + l, rect.position.y), Vector2(w - l - r, t)),
+			"src": Rect2(PLATE_SRC_L, PLATE_SRC_T, PLATE_SRC_SOLID_W, 1.0)})
+		if right:
+			out.append({"id": "t_r", "file": "ui_plate_metal_r",
+				"dest": Rect2(Vector2(rect.end.x - r, rect.position.y), Vector2(r, t)),
+				"src": Rect2(PLATE_SRC_R, PLATE_SRC_T, r, 1.0)})
+	# SIDE BEZELS — the rust hardware, one 1px source row stretched down the plate (the source
+	# bezels are pixel-uniform there, so this is exact rather than a smear). They run BETWEEN the
+	# top and bottom rails when those are wanted, so the eight slices tile the frame's perimeter
+	# with no overlap: a bezel that ran the full height would paint over its own corner and the
+	# bright top rail would stop short of the corner by 7px.
+	var side_y0 := rect.position.y + (t if top else 0.0)
+	var side_y1 := rect.end.y - (b if bot else 0.0)
+	if left:
+		out.append({"id": "l", "file": "ui_plate_metal_l",
+			"dest": Rect2(Vector2(rect.position.x, side_y0), Vector2(l, side_y1 - side_y0)),
+			"src": Rect2(PLATE_SRC_L, PLATE_SRC_MID, l, 1.0)})
+	if right:
+		out.append({"id": "r", "file": "ui_plate_metal_r",
+			"dest": Rect2(Vector2(rect.end.x - r, side_y0), Vector2(r, side_y1 - side_y0)),
+			"src": Rect2(PLATE_SRC_R, PLATE_SRC_MID, r, 1.0)})
+	# BOTTOM RAIL — the dark shadow. Same l / centre / r split, and the centre slice carries the
+	# source's rust-to-neutral falloff, so the bottom edge reads as one continuous cast shadow.
+	if bot:
+		if left:
+			out.append({"id": "b_l", "file": "ui_plate_metal_l",
+				"dest": Rect2(Vector2(rect.position.x, rect.end.y - b), Vector2(l, b)),
+				"src": Rect2(PLATE_SRC_L, PLATE_SRC_B, l, 1.0)})
+		out.append({"id": "b_c", "file": "ui_plate_metal_c",
+			"dest": Rect2(Vector2(rect.position.x + l, rect.end.y - b), Vector2(w - l - r, b)),
+			"src": Rect2(PLATE_SRC_L, PLATE_SRC_B, PLATE_SRC_SOLID_W, 1.0)})
+		if right:
+			out.append({"id": "b_r", "file": "ui_plate_metal_r",
+				"dest": Rect2(Vector2(rect.end.x - r, rect.end.y - b), Vector2(r, b)),
+				"src": Rect2(PLATE_SRC_R, PLATE_SRC_B, r, 1.0)})
+	return out
+
+
+## c4-20: the four corner brackets for a region — a 3-point L polyline each (corner + two arm
+## ends), inset from the corner so a bracket never lands on top of the rail it reinforces. Pure +
+## static for the same reason plate_frame_geometry is. Only the corners whose two rails are both
+## wanted are bracketed, so the header/body L-shape gets brackets on its real corners only.
+static func plate_bracket_geometry(plate: Rect2, rails: int) -> Array:
+	var out: Array = []
+	var rect := plate.grow(-PLATE_FRAME_INSET)
+	if rect.size.x < PLATE_BEVEL_L + PLATE_BEVEL_R or rect.size.y < PLATE_BEVEL_T + PLATE_BEVEL_B:
+		return out
+	var i := PLATE_BRACKET_INSET
+	var a := PLATE_BRACKET_ARM
+	var x0 := rect.position.x + i
+	var y0 := rect.position.y + i
+	var x1 := rect.end.x - i
+	var y1 := rect.end.y - i
+	if (rails & PLATE_RAIL_TOP) != 0 and (rails & PLATE_RAIL_LEFT) != 0:
+		out.append({"id": "tl", "pts": PackedVector2Array([Vector2(x0, y0 + a), Vector2(x0, y0), Vector2(x0 + a, y0)])})
+	if (rails & PLATE_RAIL_TOP) != 0 and (rails & PLATE_RAIL_RIGHT) != 0:
+		out.append({"id": "tr", "pts": PackedVector2Array([Vector2(x1 - a, y0), Vector2(x1, y0), Vector2(x1, y0 + a)])})
+	if (rails & PLATE_RAIL_BOTTOM) != 0 and (rails & PLATE_RAIL_LEFT) != 0:
+		out.append({"id": "bl", "pts": PackedVector2Array([Vector2(x0, y1 - a), Vector2(x0, y1), Vector2(x0 + a, y1)])})
+	if (rails & PLATE_RAIL_BOTTOM) != 0 and (rails & PLATE_RAIL_RIGHT) != 0:
+		out.append({"id": "br", "pts": PackedVector2Array([Vector2(x1 - a, y1), Vector2(x1, y1), Vector2(x1, y1 - a)])})
+	return out
+
+
+## c4-20: the two rivets — bolt heads on the side bezels, just under the top rail, so they read as
+## the plate being fastened to its frame rather than as two more glyphs. `rivets` is true only for
+## the region that owns the TOP rail, so a 2P plate (header + body) gets two, not four.
+static func plate_rivet_geometry(plate: Rect2) -> Array:
+	var out: Array = []
+	var rect := plate.grow(-PLATE_FRAME_INSET)
+	if rect.size.x < PLATE_BEVEL_L + PLATE_BEVEL_R or rect.size.y < PLATE_BEVEL_T + PLATE_BEVEL_B:
+		return out
+	var cy := rect.position.y + PLATE_BEVEL_T + 4.0
+	var half := PLATE_RIVET_PX / 2.0
+	out.append({"id": "l", "pos": Vector2(rect.position.x + PLATE_BEVEL_L / 2.0 - half, cy - half)})
+	out.append({"id": "r", "pos": Vector2(rect.end.x - PLATE_BEVEL_L / 2.0 - half, cy - half)})
+	return out
+
+
+## c4-20: emit ONE region's bevelled frame + brackets (+ rivets) onto the z:-1 plate item.
+## Everything routes through _emit_plate_rect / _emit_plate_border / _emit_plate_dot, the SAME
+## seams (and therefore the same canvas item) the dark backing uses — that is what keeps the
+## per-player transparency aperture working over the new hardware. See plate_frame_geometry.
+func _emit_plate_frame(rect: Rect2, rails: int, rivets: bool) -> void:
+	# One dict of the three frame RIDs per call: plate_frame_geometry names the file, and the
+	# same two or three files repeat across its 8 slices, so resolve each at most once.
+	var rids := {}
+	for piece in plate_frame_geometry(rect, rails):
+		var key := String(piece["file"])
+		if not rids.has(key):
+			rids[key] = Art.tex(key).get_rid()
+		_emit_plate_rect("frame/" + String(piece["id"]), piece["dest"],
+			rids[key], piece["src"], PLATE_FRAME_MOD)
+	for br in plate_bracket_geometry(rect, rails):
+		_emit_plate_border(br["pts"], PackedColorArray([PLATE_BRACKET]))
+	if rivets:
+		for rv in plate_rivet_geometry(rect):
+			_emit_plate_dot(rv["pos"])
+
+
 ## c2-18: overridable emit seams for the plate texture rect and border polyline, so a headless capture
 ## hud can record the ACTUAL plate geometry _draw_plate lays out (header reaches the design edge, body
 ## width, coverage of the docked pip stack) without a live GL context. `id` tags the rect ("header"/
-## "body") for the capture. Production routes straight to the z:-1 plate canvas item.
+## "body"/"frame/…") for the capture. Production routes straight to the z:-1 plate canvas item.
 func _emit_plate_rect(_id: String, dest: Rect2, tex: RID, src: Rect2, col: Color) -> void:
 	if not _plate_ci.is_valid():
 		return
@@ -1395,6 +1669,13 @@ func _emit_plate_border(points: PackedVector2Array, col: PackedColorArray) -> vo
 	if not _plate_ci.is_valid():
 		return
 	RenderingServer.canvas_item_add_polyline(_plate_ci, points, col, 1.0)
+## c4-20: a rivet — a solid rect on the same z:-1 plate item as everything else, so the aperture
+## dissolves it with the plate. A seam (not a bare canvas_item_add_rect) so the corner-bracket and
+## rivet pass is capturable headlessly.
+func _emit_plate_dot(pos: Vector2) -> void:
+	if not _plate_ci.is_valid():
+		return
+	RenderingServer.canvas_item_add_rect(_plate_ci, Rect2(pos, Vector2(PLATE_RIVET_PX, PLATE_RIVET_PX)), PLATE_RIVET)
 
 
 ## c1-06: pure two-pass overflow planner shared by the player rows (and mirrored by
@@ -2454,7 +2735,7 @@ func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
 	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act),
 		main.pad_bind_for_glyph(act))
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
-	Art.text(self, txt, pos, 8, c)
+	Art.text(self, txt, pos, TYPE_MICRO, c)
 
 
 ## c1-04: pure geometry of the transient verb chip — [left_x, content_width]. Same
@@ -2467,7 +2748,7 @@ static func verb_legend_extent(segs: Array = VERB_SEGS) -> Array:
 		# localization-text-pipeline: translate() BEFORE measuring, same reasoning as
 		# hud.gd's K.I.A./BAIL OUT fix -- verb_legend_primitives below measures/draws
 		# the SAME translated string, so the two never disagree on width.
-		total += VERB_GH + 3.0 + f.get_string_size(TranslationServer.translate(s[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + 12.0
+		total += VERB_GH + 3.0 + f.get_string_size(TranslationServer.translate(s[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, TYPE_MICRO).x + 12.0
 	return [320.0 - total / 2.0, total]
 
 
@@ -2489,9 +2770,9 @@ static func verb_legend_primitives(y: float, segs: Array = VERB_SEGS) -> Array:
 		var label_txt := TranslationServer.translate(s[1])
 		# Real font metrics (measured width + ascent/height), not a hard-coded box —
 		# Art.text places the baseline at y+3, so the ink spans up by the ascent.
-		var lsz := f.get_string_size(label_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8)
+		var lsz := f.get_string_size(label_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, TYPE_MICRO)
 		out.append({"act": s[0], "label_txt": label_txt, "glyph": grect,
-			"label": Rect2(x, y + 3.0 - f.get_ascent(8), lsz.x, lsz.y)})
+			"label": Rect2(x, y + 3.0 - f.get_ascent(TYPE_MICRO), lsz.x, lsz.y)})
 		x += lsz.x + 12.0
 	return out
 

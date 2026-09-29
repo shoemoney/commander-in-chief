@@ -1024,11 +1024,17 @@ class _CaptureMenu extends GameMenu:
 		ops.append({"k": "fit", "id": key, "box": r, "reg": _reg, "col": _c})
 	func _emit_glyph(act: String, center: Vector2, size: float, _c: Color) -> void:
 		ops.append({"k": "glyph", "id": act, "box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
-	func _emit_stamp(txt: String, pos: Vector2, _c: Color) -> void:
-		ops.append({"k": "stamp", "id": txt, "box": Rect2(pos, Vector2.ZERO)})
+	func _emit_stamp(txt: String, pos: Vector2, _c: Color, size: int) -> void:
+		# c4-20: `size` is now a real argument (the seam serves the on-grid codename tab
+		# AND the off-grid keycap letters), so the capture records it — a stamp drawn at an
+		# unasserted size would otherwise be invisible to every test in this file.
+		ops.append({"k": "stamp", "id": txt, "size": size, "box": Rect2(pos, Vector2.ZERO)})
 	func _emit_label(txt: String, pos: Vector2, _c: Color) -> void:
-		var s := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 8)
-		ops.append({"k": "label", "id": txt, "box": Rect2(pos - Vector2(0.0, Art.font().get_ascent(8)), s)})
+		# The capture measures at the DEFAULT _label_size (HudIcons.TYPE_MICRO), which is
+		# deliberately NOT _label_size — a transient bump (the group caption) is right-aligned,
+		# so its clearance asserts hold at any rendered size. See the _label_size docstring.
+		var s := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO)
+		ops.append({"k": "label", "id": txt, "box": Rect2(pos - Vector2(0.0, Art.font().get_ascent(HudIcons.TYPE_MICRO)), s)})
 
 
 # c1-04 TRUE draw-command capture: invoke the REAL _footer_legend() on every non-TITLE
@@ -1325,7 +1331,7 @@ class _CtrlLayoutMenu extends GameMenu:
 		rows.append(r.position.y + 10.0)   # _verb_line draws the hint at base_y - 10
 	func _emit_glyph(_act: String, center: Vector2, _size: float, _c: Color) -> void:
 		rows.append(center.y + 4.0)        # ...and the square prompt at base_y - 4
-	func _emit_stamp(_txt: String, _pos: Vector2, _c: Color) -> void:
+	func _emit_stamp(_txt: String, _pos: Vector2, _c: Color, _size: int) -> void:
 		pass
 
 
@@ -1349,16 +1355,25 @@ static func _controls_rows(pad: bool) -> Array:
 	m.free()
 	stub.free()
 
-	# The verb sentences are the size-11 ink; the orange 10px page header is not a row.
+	# c4-20: the verb sentences and the orange page header are now BOTH at the TYPE_BODY rung, so
+	# size can no longer tell them apart (it used to: 11 vs 10). The discriminator is now
+	# POSITION, which is strictly better — the header is the one line that sits exactly on
+	# CONTENT_BODY_Y, and every verb row flows below it. Filtering by a font size also made this
+	# helper silently vacuous the day the body rung moved; a y cannot move under it.
 	var lines: Array = []
 	for op in ops:
-		if int(op.get("size", 0)) == 11:
-			lines.append(op["box"] as Rect2)
+		if op["k"] != "text" or int(op.get("size", 0)) != GameMenu.ROW_LABEL_SIZE:
+			continue
+		var box: Rect2 = op["box"]
+		if is_equal_approx(box.position.y + Art.font().get_ascent(GameMenu.ROW_LABEL_SIZE),
+				Menu.CONTENT_BODY_Y):
+			continue   # the page header — not a verb row
+		lines.append(box)
 	lines.sort_custom(func(a, b): return a.position.y < b.position.y)
 	starts.sort()
 	var out: Array = []
 	for box in lines:
-		var baseline: float = box.position.y + Art.font().get_ascent(11)
+		var baseline: float = box.position.y + Art.font().get_ascent(GameMenu.ROW_LABEL_SIZE)
 		# A line opens a new row when a recorded glyph base_y sits at (or above) it
 		# and has not been consumed yet.
 		if out.is_empty() or (not starts.is_empty() and baseline >= starts[0] - 1.0):
@@ -3431,11 +3446,11 @@ func test_destructive_label_fits_plate_and_keeps_context() -> void:
 		Runner.T.eq(pre, name, "%s rests as its own name, no baked instruction (got '%s')" % [name, pre])
 		Runner.T.ok(not ("PRESS" in pre), "%s pre-armed carries no instruction tail (got '%s')" % [name, pre])
 		Runner.T.eq(pre.find(idword), 0, "%s pre-armed LEADS with its identity word" % name)
-		Runner.T.ok(font.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= pre_avail,
+		Runner.T.ok(font.get_string_size(pre, HORIZONTAL_ALIGNMENT_LEFT, -1, Menu.ROW_LABEL_SIZE).x <= pre_avail,
 			"%s pre-armed label fits the plate (no ellipsis): '%s'" % [name, pre])
 		Runner.T.eq(arm.find(verb), 0, "%s armed LEADS with the verb for context (got '%s')" % [name, arm])
 		Runner.T.ok(arm.find("AGAIN") >= 0, "%s armed says AGAIN (press again to confirm)" % name)
-		Runner.T.ok(font.get_string_size(arm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= armed_avail,
+		Runner.T.ok(font.get_string_size(arm, HORIZONTAL_ALIGNMENT_LEFT, -1, Menu.ROW_LABEL_SIZE).x <= armed_avail,
 			"%s armed label fits the tighter glyph-reserved slot: '%s'" % [name, arm])
 	# aaa-c6 FLIP: with no cue to make room for, the RESTING label has nothing to abbreviate
 	# away — a mid-narrow plate still shows the whole name (and _ellipsize, not this helper,
@@ -3449,8 +3464,16 @@ func test_destructive_label_fits_plate_and_keeps_context() -> void:
 	var tiny_pre := Menu.destructive_label("TITLE SCREEN", "TITLE", false, font, 110.0)
 	var tiny_arm := Menu.destructive_label("TITLE SCREEN", "TITLE", true, font, 100.0)
 	Runner.T.eq(tiny_pre, "TITLE SCREEN", "the resting tier is the name at any width")
-	Runner.T.eq(tiny_arm, "PRESS AGAIN", "narrowest armed fallback is the explicit PRESS AGAIN, never a bare AGAIN")
-	Runner.T.ok(font.get_string_size(tiny_arm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= 100.0,
+	# c4-20: the ROW_LABEL rung moved 11 -> 10, which is ~9% narrower per character, so on a
+	# 100px plate the tight form "TITLE: AGAIN" (94px) now FITS where at 11px (103px) it did not
+	# and the bare-cue fallback fired. That is a strictly BETTER answer, not a regression: it still
+	# leads with the verb (the assertion below) and still ends in the explicit AGAIN cue. The
+	# invariant this test exists for is "never a bare AGAIN, and never an overflowing string" —
+	# the literal is the calibrated tier, so it moved with the rung.
+	Runner.T.eq(tiny_arm, "TITLE: AGAIN", "narrowest armed fallback keeps verb + explicit AGAIN, never a bare AGAIN")
+	Runner.T.ok(tiny_arm.ends_with("AGAIN") and tiny_arm != "AGAIN",
+		"the narrowest armed form is never a bare AGAIN (got '%s')" % tiny_arm)
+	Runner.T.ok(font.get_string_size(tiny_arm, HORIZONTAL_ALIGNMENT_LEFT, -1, Menu.ROW_LABEL_SIZE).x <= 100.0,
 		"the armed cue floor genuinely fits a narrow plate")
 
 
@@ -4899,7 +4922,13 @@ func test_text_scale_persistence_migration_and_reset() -> void:
 	# longer a 7px centered label — it draws inline at the row size, which was the readability
 	# complaint this setting existed to compensate for. The 7px seed tag below still pins the
 	# smallest-type case.)
-	Runner.T.eq(Art.fs(Menu.SEED_TAG_SIZE), 11, "the 7px seed-validity tag scales with TEXT SIZE")
+	# c4-20: SEED_TAG_SIZE moved 7 -> TYPE_MICRO (8) (off-grid at 7, and the seed sub-line is the
+	# smallest type on the TITLE screen). At 150% the multiplier therefore lands on 12, not 11.
+	# The INVARIANT is that the multiplier REACHES this label at all — pinned as a relation, not a
+	# magic number, so a future rung change can no longer silently stop this assertion meaning
+	# anything (a bare `== Art.fs(...)` comparison would have passed vacuously at scale 1.0).
+	Runner.T.ok(Art.fs(Menu.SEED_TAG_SIZE) > Menu.SEED_TAG_SIZE,
+		"the seed-validity tag scales with TEXT SIZE (size %d at 150%%)" % Art.fs(Menu.SEED_TAG_SIZE))
 	Runner.T.eq(Art.fs(8), 12, "the 8px in-world callouts scale with TEXT SIZE")
 
 	var offrung: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
@@ -6848,8 +6877,13 @@ func test_c3_08_armed_destructive_rows_keep_verb() -> void:
 	var f: Font = Art.font()
 	# Gather EVERY destructive row across the modes that hold one (via real _menu_items).
 	var stub := _StubMain.new()
+	# c4-20: recalibrated for ROW_LABEL_SIZE 11 -> 10. "RESTART  PRESS AGAIN" measured 178px at
+	# 11 and overflows the 170px armed plate, so RESTART fell back to the tight "RESTART: AGAIN";
+	# at 10 it measures 161px and the FULL form fits, which is the better copy — the tier list is
+	# ordered longest-first precisely so a wider fit wins. The two RESET rows still take the tight
+	# form ("RESET DEFAULTS  PRESS AGAIN" does not fit at any rung). Same invariant, new numbers.
 	var expect := {
-		"restart": "RESTART: AGAIN", "title": "TITLE  PRESS AGAIN",
+		"restart": "RESTART  PRESS AGAIN", "title": "TITLE  PRESS AGAIN",
 		"quit": "QUIT  PRESS AGAIN", "reset_defaults": "RESET: AGAIN",
 		"reset_controls": "RESET: AGAIN",
 	}
@@ -8897,6 +8931,139 @@ func test_every_floattext_ink_wears_a_backdrop() -> void:
 		Runner.T.ok(on_plate >= 8.0,
 			"'%s' on the shipped backdrop reads %.2f:1 (bare on sand it is %.2f:1)"
 				% [spec[1], on_plate, bare])
+
+
+# c4-20: the ratchet that stops the menu's size sprawl returning. menu.gd must never name a raw
+# integer as a font size: every text call site has to pass a rung of the ONE scale
+# (HudIcons.TYPE_*) or a named constant traceable to one. Before this pass the menu drew NINE
+# undeclared sizes across 89 bare literals.
+#
+# It looks like test_hud_names_no_bare_font_size (same calls, same argument index per call, same
+# comment-line skip) but it is STRICTLY STRONGER in four ways, each of which was forced by a real
+# offender this pass would otherwise have shipped:
+#
+#   1. It parses with this file's OWN _split_args, which is string-aware and balances "]" and "}"
+#   as well as ")". The HUD version's hand-rolled parser only ever DECREMENTS on ")" — so after
+#   the first subscript in an argument (menu.gd has `String(m[2])`, `cells[c]`, `ptag[pi]`, ...)
+#   its depth never returns to zero, the call never terminates, and the offender is SILENTLY
+#   MISSED. Measured on the pre-pass file: the HUD-style parser finds 37 sites, a correct one 56.
+#   A ratchet that cannot fail is worse than no ratchet, so this one borrows the correct helper.
+#   (That bug is still live in tests/test_hud.gd — REPORTED, not fixed, hud.gd's tests being
+#   another owner's territory.)
+#
+#   2. It is MULTI-LINE. A single-line scan is blind to any call whose size argument sits on a
+#   continuation line, and menu.gd has one that matters: the HALL SCORE column sizes itself off
+#   `get_string_size(\n "9,999,999", ..., 11)` — a bare 11 that survived the first pass here and
+#   would have survived a HUD-shaped ratchet forever. Statements are joined until they balance.
+#
+#   3. It scans the WRAPPER doors too. menu.gd does not always reach Art.text directly: it hands
+#   the size to its own helpers first — _center_text / _center_text_at / _body_block / _row_fit /
+#   wrap_translated / Art.fs / get_height. A scan that only knows Art's API sees none of them,
+#   and those 36 sites were the single largest pocket of off-grid type in the file.
+#
+#   4. It pins its own REACH (the `scanned` floor below) and the rung each menu constant resolves
+#   to, so neither "the scan stopped matching" nor "someone retyped a rung as a literal" can pass
+#   quietly.
+func test_menu_names_no_bare_font_size() -> void:
+	var src := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	# call -> index of the font-size argument, per each function's own signature. The first seven
+	# are Art/Font API; the rest are menu.gd's own wrappers, which forward the size to Art.text.
+	var size_arg := {"Art.text(": 3, "Art.text_center(": 4, "Art.tw(": 1,
+		"get_string_size(": 3, "get_ascent(": 0, "get_descent(": 0, "get_height(": 0,
+		"draw_string(": 5, "_center_text(": 2, "_center_text_at(": 3, "_body_block(": 3,
+		"_row_fit(": 1, "wrap_translated(": 1, "Art.fs(": 0}
+	var offenders: Array[String] = []
+	var scanned := 0
+	var i := 0
+	var lines := src.split("\n")
+	while i < lines.size():
+		var stripped := lines[i].strip_edges()
+		if stripped.begins_with("#") or stripped.begins_with("func "):
+			i += 1
+			continue   # the scale's own documentation quotes the numbers it replaces
+		# Join forward until the statement's parens balance, so a size argument on a
+		# continuation line is scanned with the call it belongs to.
+		var stmt := stripped
+		var depth := 0
+		for ch in stmt:
+			if ch == "(" or ch == "[":
+				depth += 1
+			elif ch == ")" or ch == "]":
+				depth -= 1
+		var j := i
+		while depth != 0 and j + 1 < lines.size() and j - i < 15:
+			j += 1
+			if lines[j].strip_edges().begins_with("#"):
+				continue
+			stmt += " " + lines[j].strip_edges()
+			for ch in lines[j]:
+				if ch == "(" or ch == "[":
+					depth += 1
+				elif ch == ")" or ch == "]":
+					depth -= 1
+		for call in size_arg.keys():
+			var at := stmt.find(call)
+			while at >= 0:
+				# Skip the callee's OWN `func name(` definition — its params are not call sites.
+				if stmt.substr(maxi(0, at - 5), 5) != "func ":
+					scanned += 1
+					var args := _split_args(stmt.substr(at + call.length(), 400))
+					var idx: int = size_arg[call]
+					if args.size() > idx:
+						var bare: String = args[idx].strip_edges()
+						var cut := bare.find(")")
+						if cut >= 0:
+							bare = bare.substr(0, cut).strip_edges()
+						if bare != "" and (bare.is_valid_int() or bare.is_valid_float()):
+							offenders.append("%s -> %s" % [call, bare])
+				at = stmt.find(call, at + 1)
+		i = j + 1
+	Runner.T.eq(offenders, [],
+		"menu.gd names no bare font-size literal — every text call site uses the TYPE_* scale or a named constant (offenders: %s)"
+			% str(offenders))
+	# A ratchet that scans nothing is green forever. Pin the population it watches, so a rename
+	# that quietly stops matching a call site fails HERE instead of passing vacuously. The floor
+	# is the pre-pass population of 89, less headroom: the honest number is ~85 call sites.
+	Runner.T.ok(scanned >= 80,
+		"the ratchet actually reaches the call sites (%d found across the fourteen size doors)" % scanned)
+
+	# --- the scale must be REACHABLE from the menu, not merely declared on the HUD. ---
+	Runner.T.eq(GameMenu.TITLE_WORDMARK_FONT, HudIcons.TYPE_TITLE, "the wordmark draws at the title rung")
+	Runner.T.eq(GameMenu.HUB_HEADER_FONT, HudIcons.TYPE_HEAD, "the hub header draws at the head rung")
+	Runner.T.eq(GameMenu.OPTS_TITLE_FONT, HudIcons.TYPE_LABEL, "the OPTIONS title draws at the label rung")
+	Runner.T.eq(GameMenu.CONTENT_TITLE_SIZE, HudIcons.TYPE_LABEL, "the content-screen title draws at the label rung")
+	Runner.T.eq(GameMenu.ROW_LABEL_SIZE, HudIcons.TYPE_BODY, "the row label draws at the readout rung")
+	Runner.T.eq(GameMenu.SEED_TAG_SIZE, HudIcons.TYPE_MICRO, "the seed sub-label draws at the em floor")
+	Runner.T.eq(GameMenu.FOOTER_HELP_MAX_SIZE, 9,
+		"the footer description cap keeps its measured value (9) — it is a MULTIPLIER ceiling, not a font size; see the const's strip arithmetic")
+
+	# --- the ONE sanctioned off-grid size, pinned as an exception with its reason attached. ---
+	# KEYCAP_STAMP_SIZE (6) is the letters stamped INSIDE an 11px keycap sprite. It is allowed to
+	# be off-grid ONLY because it is a NAMED constant carrying a measurement; if someone inlines a
+	# bare 6 anywhere else the scan above catches it, and if someone renames the constant away the
+	# next assertion here fails. Assert it is still the value the two call sites were tuned at,
+	# so "retune the keycap" is a deliberate edit to this line and nothing else.
+	Runner.T.eq(GameMenu.KEYCAP_STAMP_SIZE, 6,
+		"the keycap letter-stamp keeps its one measured off-grid exception (6px)")
+	Runner.T.ok(src.contains("const KEYCAP_STAMP_SIZE := 6"),
+		"the keycap exception is a named constant, not an inline literal at either call site")
+
+	# --- the accessible pager's three off-grid DESIGN sizes, pinned with their measurement. ---
+	# These are the packer's input, not the shipped typography (they only ever draw above 100%
+	# TEXT SIZE, multiplied by Art.fs). test_manual_never_leaves_a_leaf_half_empty's 55% floor is
+	# calibrated to exactly these values and re-measuring the copy one pixel differently moves
+	# which leaf ends up sparse — every on-grid alternative was tried and each one breaks that
+	# floor on a different leaf (see the const block's measured table in menu.gd). If anyone
+	# retunes them, that floor is the thing that will tell them, and these assertions make the
+	# change a deliberate edit rather than a quiet drift.
+	Runner.T.eq(GameMenu.HOWTO_PAGER_BANNER_SIZE, 13, "the pager's banner heading keeps its calibrated design size")
+	Runner.T.eq(GameMenu.HOWTO_PAGER_WARCHEST_SIZE, 11, "the pager's WAR CHEST sub-head keeps its calibrated design size")
+	Runner.T.eq(GameMenu.HOWTO_PAGER_HEADING_SIZE, 10, "the pager's other headings keep their calibrated design size")
+	Runner.T.eq(GameMenu.HOWTO_PAGER_BODY_SIZE, 11, "the pager's body entries keep their calibrated design size")
+	# The 100% pages are the SHIPPED typography and DO ride the scale — assert they moved, so the
+	# deviation above can never be mistaken for "the pager was left alone and nothing changed".
+	Runner.T.ok(src.contains("\"ONE HIT AND YOU DROP.\", Vector2(ICON_X, y), HudIcons.TYPE_LABEL"),
+		"the 100% WAR CHEST banner still draws at the label rung (the pager deviation is pager-only)")
 
 
 # Split a top-level argument list (the text AFTER the opening paren, up to its match).

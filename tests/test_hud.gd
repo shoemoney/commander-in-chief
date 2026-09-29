@@ -4994,3 +4994,465 @@ func test_plate_width_is_now_content_driven() -> void:
 		"a right-anchored PRESSURE telegraph still pins the plate to the usable edge (unchanged by T2)")
 	h2.free()
 	main2.free()
+
+
+# ==========================================================================================
+# c4-20 — THE BEVELLED PLATE (assets/art/ui/plate_metal_{l,c,r}.png, preloaded by Art as
+# ui_plate_metal_{l,c,r}) and THE TYPE SCALE.
+#
+# Both of these are ratchets, not one-off measurements. The plate frame in particular has ONE
+# failure mode that no pixel test catches and no amount of "it looks fine" review catches: if
+# a future edit draws the hardware anywhere but the z:-1 _plate_ci canvas item, the per-player
+# transparency aperture stops punching holes through it and the corner plate silently becomes an
+# opaque slab in exactly the place a player stands. test_plate_chrome_rides_the_aperture_canvas_item
+# is the guard for that; the render proof behind it is in the commit message.
+# ==========================================================================================
+
+
+# c4-20: every source window plate_frame_geometry samples must be FULLY OPAQUE in the shipped
+# PNGs. The whole frame is a set of hand-measured source rects; if a plate_metal texture is ever
+# re-exported (a 1px shift, a different bleed, a mip-map round-trip) and one of those windows
+# slides onto a transparent texel, the rail silently loses a slice and NOTHING ELSE FAILS — the
+# geometry test below still passes because it only knows the numbers, not the pixels. This is the
+# test that connects the two. Also asserts the three files are the right size and that the side
+# bezels really are the pixel-UNIFORM columns the 1px vertical stretch assumes.
+func test_plate_metal_frame_windows_are_solid_pixels() -> void:
+	for key in ["ui_plate_metal_l", "ui_plate_metal_c", "ui_plate_metal_r"]:
+		var t: Texture2D = Art.tex(key)
+		Runner.T.ok(t != null, "%s is preloaded" % key)
+		if t == null:
+			continue
+		Runner.T.eq(t.get_size(), Vector2(HudIcons.PLATE_SRC_W, 230.0),
+			"%s is the 190x230 plate frame the source rects are measured against" % key)
+		var img := t.get_image()
+		var transparent := 0
+		for p in HudIcons.plate_frame_geometry(Rect2(0, 0, 400, 60), HudIcons.PLATE_RAIL_ALL):
+			var src: Rect2 = p["src"]
+			for y in range(int(src.position.y), int(src.end.y)):
+				for x in range(int(src.position.x), int(src.end.x)):
+					if img.get_pixel(x, y).a < 0.9:
+						transparent += 1
+		Runner.T.eq(transparent, 0,
+			"%s: every source window the frame geometry samples is fully opaque" % key)
+	# The 1px vertical stretch of the side bezels is only EXACT if the source column really is
+	# uniform; a textured bezel would smear into vertical streaks. Pin it on the left file.
+	var l := Art.tex("ui_plate_metal_l").get_image()
+	var ref := l.get_pixel(int(HudIcons.PLATE_SRC_L) + 2, int(HudIcons.PLATE_SRC_MID))
+	var varied := 0
+	for y in range(60, 200):
+		if l.get_pixel(int(HudIcons.PLATE_SRC_L) + 2, y) != ref:
+			varied += 1
+	Runner.T.eq(varied, 0, "the left bezel column is pixel-uniform down the source (a 1px stretch is exact, not a smear)")
+
+
+# c4-20: the frame is FIVE rails (bright top, dark bottom, two rust side bezels) in eight
+# texture slices, drawn INSIDE the plate edge so the pre-existing 1px hairline stays the
+# outermost rule, and never a centre slice — the source is hollow, so the frame is a frame.
+func test_plate_frame_geometry_is_five_rails_inside_the_plate() -> void:
+	var plate := Rect2(2, 2, 265.5, 40.0)
+	var ids := []
+	for p in HudIcons.plate_frame_geometry(plate, HudIcons.PLATE_RAIL_ALL):
+		ids.append(p["id"])
+		Runner.T.ok(String(p["file"]).ends_with("_l") or String(p["file"]).ends_with("_r")
+				or String(p["file"]).ends_with("_c"),
+			"frame slice %s names one of the three plate_metal files" % p["id"])
+		Runner.T.ok(p["dest"].size.x > 0.0 and p["dest"].size.y > 0.0
+				and p["src"].size.x > 0.0 and p["src"].size.y > 0.0,
+			"frame slice %s has positive dest and source rects" % p["id"])
+	Runner.T.eq(ids, ["t_l", "t_c", "t_r", "l", "r", "b_l", "b_c", "b_r"],
+		"the frame is exactly five rails in eight slices — top, both sides, bottom, and NO centre")
+	# The rails ride INSIDE the plate rect: nothing may reach the plate's own outer edge, or the
+	# bevel and the 1px hairline land on the same pixel and read as a highlighter.
+	var frame := plate.grow(-HudIcons.PLATE_FRAME_INSET)
+	for p in HudIcons.plate_frame_geometry(plate, HudIcons.PLATE_RAIL_ALL):
+		Runner.T.ok(frame.encloses(p["dest"]),
+			"frame slice %s stays inside the plate edge (frame inset %.1f)" % [p["id"], HudIcons.PLATE_FRAME_INSET])
+	# The eight slices must exactly cover the frame's PERIMETER — no gap, no overlap, and the
+	# only uncovered area is the hollow interior. A gap here is an un-drawn seam down the middle
+	# of a rail; an overlap is a doubled-alpha stripe. (The frame is a FRAME: the middle is
+	# deliberately uncovered, which is why this is "perimeter", not "the whole box".)
+	var interior := Rect2(frame.position.x + HudIcons.PLATE_BEVEL_L,
+		frame.position.y + HudIcons.PLATE_BEVEL_T,
+		frame.size.x - HudIcons.PLATE_BEVEL_L - HudIcons.PLATE_BEVEL_R,
+		frame.size.y - HudIcons.PLATE_BEVEL_T - HudIcons.PLATE_BEVEL_B)
+	var covered := 0.0
+	for p in HudIcons.plate_frame_geometry(plate, HudIcons.PLATE_RAIL_ALL):
+		covered += p["dest"].get_area()
+	Runner.T.ok(absf(covered + interior.get_area() - frame.get_area()) < 0.01,
+		"the eight slices tile the frame's perimeter exactly — no gap, no overlap (%.1f + %.1f vs %.1f px^2)"
+			% [covered, interior.get_area(), frame.get_area()])
+	# …and the top/bottom rails are continuous edge to edge: the centre slice's SOURCE must span
+	# the solid band only. Sampling the full 190px source width smears the transparent margins
+	# (columns 0..11 and 179..189) across the middle of the rail — a 2px fade at each end.
+	for rail in ["t_c", "b_c"]:
+		for p in HudIcons.plate_frame_geometry(plate, HudIcons.PLATE_RAIL_ALL):
+			if p["id"] != rail:
+				continue
+			Runner.T.ok(p["src"].position.x >= HudIcons.PLATE_SRC_L - 0.01
+					and p["src"].end.x <= HudIcons.PLATE_SRC_L + HudIcons.PLATE_SRC_SOLID_W + 0.01,
+				"rail %s samples only solid source columns (%.0f..%.0f inside %.0f..%.0f)"
+					% [rail, p["src"].position.x, p["src"].end.x,
+					HudIcons.PLATE_SRC_L, HudIcons.PLATE_SRC_L + HudIcons.PLATE_SRC_SOLID_W])
+
+
+# c4-20: the header/body L-shape must never draw a bottom rail across the header's exposed
+# overhang — that is what would make the raised shelf read as a boxed-in rectangle floating over
+# the field. A piece is emitted only when BOTH of its rails are wanted, so this is the mask test.
+func test_plate_frame_rails_follow_the_header_body_l_shape() -> void:
+	var header := Rect2(2, 2, 630.0, 26.0)
+	var body := Rect2(2, 28.0, 265.5, 14.0)
+	var h_ids := []
+	for p in HudIcons.plate_frame_geometry(header, HudIcons.PLATE_RAIL_TOP | HudIcons.PLATE_RAIL_LEFT | HudIcons.PLATE_RAIL_RIGHT):
+		h_ids.append(p["id"])
+	Runner.T.eq(h_ids, ["t_l", "t_c", "t_r", "l", "r"],
+		"a header with a body under it draws its top + sides and NO bottom rail")
+	var b_ids := []
+	for p in HudIcons.plate_frame_geometry(body, HudIcons.PLATE_RAIL_LEFT | HudIcons.PLATE_RAIL_RIGHT | HudIcons.PLATE_RAIL_BOTTOM):
+		b_ids.append(p["id"])
+	Runner.T.eq(b_ids, ["l", "r", "b_l", "b_c", "b_r"],
+		"the body draws its sides + bottom and NO top rail (the seam must stay open)")
+	# …and a plate with no body at all is fully framed.
+	var full := []
+	for p in HudIcons.plate_frame_geometry(header, HudIcons.PLATE_RAIL_ALL):
+		full.append(p["id"])
+	Runner.T.eq(full.size(), 8, "a bodyless plate is framed on all four sides")
+
+
+# c4-20: four corner brackets, one per REAL corner (both of a corner's rails present), and
+# exactly TWO rivets no matter how many regions the plate is split into — a 2P plate is header +
+# body and must not end up with four bolt heads.
+func test_plate_brackets_and_rivets_stay_on_the_real_corners() -> void:
+	var header := Rect2(2, 2, 630.0, 26.0)
+	var body := Rect2(2, 28.0, 265.5, 14.0)
+	Runner.T.eq(HudIcons.plate_bracket_geometry(header, HudIcons.PLATE_RAIL_TOP | HudIcons.PLATE_RAIL_LEFT | HudIcons.PLATE_RAIL_RIGHT).size(), 2,
+		"a header open at the bottom brackets only its two top corners")
+	Runner.T.eq(HudIcons.plate_bracket_geometry(body, HudIcons.PLATE_RAIL_LEFT | HudIcons.PLATE_RAIL_RIGHT | HudIcons.PLATE_RAIL_BOTTOM).size(), 2,
+		"the body brackets only its two bottom corners")
+	Runner.T.eq(HudIcons.plate_bracket_geometry(body, HudIcons.PLATE_RAIL_ALL).size(), 4,
+		"a fully-framed region gets all four brackets")
+	Runner.T.eq(HudIcons.plate_rivet_geometry(header).size(), 2,
+		"a plate carries a couple of rivets, not one per corner")
+	# A bracket is a 3-point L (corner + two arm ends), inset so it never sits on the rail it
+	# reinforces, and inside the frame box.
+	for b in HudIcons.plate_bracket_geometry(header, HudIcons.PLATE_RAIL_ALL):
+		var pts: PackedVector2Array = b["pts"]
+		Runner.T.eq(pts.size(), 3, "bracket %s is a 3-point L" % b["id"])
+		var box := header.grow(-HudIcons.PLATE_FRAME_INSET)
+		for pt in pts:
+			Runner.T.ok(box.grow(HudIcons.PLATE_BRACKET_ARM).has_point(pt),
+				"bracket %s point %s is inside the frame box" % [b["id"], str(pt)])
+
+
+# c4-20: a region too small to carry the bezel emits NOTHING rather than smearing the rails into
+# each other. Same fail-closed spirit as PIP_SUPPRESS: on a degenerate/cropped viewport the plate
+# degrades to the bare backing rather than to a smear.
+func test_plate_frame_degrades_instead_of_smearing() -> void:
+	Runner.T.eq(HudIcons.plate_frame_geometry(Rect2(0, 0, 10, 40), HudIcons.PLATE_RAIL_ALL).size(), 0,
+		"a region narrower than both bezels draws no frame at all")
+	Runner.T.eq(HudIcons.plate_frame_geometry(Rect2(0, 0, 400, 5), HudIcons.PLATE_RAIL_ALL).size(), 0,
+		"a region shorter than both rails draws no frame at all")
+	Runner.T.eq(HudIcons.plate_bracket_geometry(Rect2(0, 0, 10, 40), HudIcons.PLATE_RAIL_ALL).size(), 0,
+		"and no brackets")
+	Runner.T.eq(HudIcons.plate_rivet_geometry(Rect2(0, 0, 10, 40)).size(), 0,
+		"and no rivets")
+	# …and a REAL plate (the narrowest the content-driven width can produce) is never skipped.
+	Runner.T.ok(HudIcons.plate_frame_geometry(
+		Rect2(2, 2, HudIcons.PLATE_MIN_W, 42.0), HudIcons.PLATE_RAIL_ALL).size() == 8,
+		"the narrowest real plate (PLATE_MIN_W wide) still gets its full frame")
+
+
+# --- THE TRAP TEST -----------------------------------------------------------------------------
+# c4-20: the plate's per-player transparency aperture (hud_visibility.gdshader) works by
+# multiplying COLOR.a on everything that inherits the HudIcons material, and _sync_visibility
+# only marks ONE canvas item for that inheritance: the z:-1 _plate_ci the backing is emitted on.
+# So the new hardware is safe ONLY while it is emitted through a seam that lands on _plate_ci.
+# Drive the REAL _draw_plate through a capture that records every seam call, and assert:
+#   1. every frame slice went through _emit_plate_rect (never a bypass), tagged "frame/…";
+#   2. the production seam implementations all target _plate_ci and nothing else;
+#   3. _sync_visibility still marks that exact canvas item for parent-material inheritance.
+# A frame drawn on a NEW canvas item (or with a bare draw_*) passes every other test here and
+# turns the plate into an opaque slab right where a player stands.
+class _ChromeCaptureHud extends HudIcons:
+	var rect_ids := {}
+	var polys := 0
+	var dots := 0
+	func _pip_bounds() -> Vector2:
+		return Vector2(PIP_MIN_X, RIGHT)
+	func _emit_plate_rect(id: String, dest: Rect2, _tex: RID, _src: Rect2, _col: Color) -> void:
+		rect_ids[id] = dest
+	func _emit_plate_border(_points: PackedVector2Array, _col: PackedColorArray) -> void:
+		polys += 1
+	func _emit_plate_dot(_pos: Vector2) -> void:
+		dots += 1
+
+
+func test_plate_chrome_rides_the_aperture_canvas_item() -> void:
+	var was_cb: bool = Art.colorblind
+	Art.colorblind = false
+	# (1) Every slice of the new frame reaches the renderer through the SAME overridable seam
+	# the dark backing uses — that is the routing the aperture depends on.
+	var h := _ChromeCaptureHud.new()
+	h.main = _RowMain.new()
+	h.main._motion = 1.0
+	h._plate_r = 265.5
+	h._ready()
+	h._draw_plate(40.0)
+	var frame_ids := []
+	for id in h.rect_ids:
+		if String(id).begins_with("frame/"):
+			frame_ids.append(String(id))
+	frame_ids.sort()
+	Runner.T.eq(frame_ids, ["frame/b_c", "frame/b_l", "frame/b_r", "frame/l", "frame/r",
+		"frame/t_c", "frame/t_l", "frame/t_r"],
+		"every frame slice is emitted through _emit_plate_rect (the seam the backing uses)")
+	Runner.T.ok(h.rect_ids.has("body"), "the dark backing is still emitted on the same seam")
+	Runner.T.eq(h.dots, 2, "the plate's rivets go through the _emit_plate_dot seam")
+	# One outline + four corner brackets = five polylines on the same item.
+	Runner.T.eq(h.polys, 5, "outline + 4 corner brackets go through the _emit_plate_border seam")
+	h.main.free()
+	h.free()
+	# (2)+(3) The production seam bodies all target _plate_ci, and _sync_visibility marks that
+	# same canvas item for the aperture material. Read off the real methods, not a comment.
+	var src := FileAccess.get_file_as_string("res://src/view/hud.gd")
+	for fn in ["_emit_plate_rect", "_emit_plate_border", "_emit_plate_dot"]:
+		var at := src.find("func %s(" % fn)
+		Runner.T.ok(at > 0, "%s exists" % fn)
+		if at <= 0:
+			continue
+		var body := src.substr(at, 320).split("\n\n")[0]
+		Runner.T.ok(body.contains("_plate_ci"),
+			"%s draws onto _plate_ci — the canvas item the aperture material is applied to" % fn)
+		Runner.T.ok(body.contains("if not _plate_ci.is_valid()"),
+			"%s no-ops when the plate item is invalid (no draw outside _draw's lifetime)" % fn)
+	# The frame emitter must not reach for any canvas item but _plate_ci's.
+	var femit := src.substr(src.find("func _emit_plate_frame("), 900)
+	Runner.T.ok(not femit.contains("canvas_item_create"),
+		"_emit_plate_frame never allocates its own canvas item (a new one would NOT inherit the aperture)")
+	Runner.T.ok(not femit.contains("draw_rect(") and not femit.contains("draw_texture"),
+		"_emit_plate_frame issues no bare draw_* — every pixel routes through a _plate_ci seam")
+	Art.colorblind = was_cb
+
+
+# c4-20: the plate's dynamic width is content-driven, so the frame must be sized from the SAME
+# rect the backing is — a frame drawn at a fixed width would visibly overhang a narrow row. Pin
+# the relationship on the real _draw_plate output: every frame slice must sit inside the backing
+# rect the same call emitted, and the frame must never exceed it.
+func test_plate_frame_is_sized_from_the_same_content_driven_rect() -> void:
+	var h := _ChromeCaptureHud.new()
+	h.main = _RowMain.new()
+	h.main._motion = 1.0
+	h._plate_r = HudIcons.PLATE_MIN_W
+	h._ready()
+	h._draw_plate(40.0)
+	var backing: Rect2 = h.rect_ids["body"]
+	for id in h.rect_ids:
+		if not String(id).begins_with("frame/"):
+			continue
+		Runner.T.ok(backing.encloses(h.rect_ids[id]),
+			"frame slice %s (%s) is contained by the backing rect it frames" % [id, str(h.rect_ids[id])])
+	h.main.free()
+	h.free()
+
+
+# --- c4-20: THE TYPE SCALE ----------------------------------------------------------------------
+
+# The scale's whole claim is that the DISPLAY tier sits on the 8px em. Pin it: every
+# display-tier constant is a whole multiple of the em AND is one of the declared grid steps, so
+# a new one cannot be added off-grid while still looking like "part of the scale".
+func test_type_scale_display_tier_is_on_the_em_grid() -> void:
+	var display_tier := {
+		"TYPE_MICRO": HudIcons.TYPE_MICRO, "TYPE_LABEL": HudIcons.TYPE_LABEL,
+		"TYPE_HEAD": HudIcons.TYPE_HEAD, "TYPE_TITLE": HudIcons.TYPE_TITLE,
+	}
+	for name in display_tier:
+		var v: int = display_tier[name]
+		Runner.T.eq(v % 8, 0, "%s (%d) is a whole multiple of PixelOperator8's 8px em" % [name, v])
+		Runner.T.ok(HudIcons.TYPE_EM_GRID.has(v),
+			"%s (%d) is a declared rung of TYPE_EM_GRID" % [name, v])
+	Runner.T.eq(HudIcons.TYPE_EM_GRID, [8, 16, 24, 32],
+		"the display tier is 1x/2x/3x/4x the 8px em — the only sizes clean at 1x, 2x AND 3x")
+	# Distinct rungs, strictly increasing: a scale with two names on one size is a scale with a lie.
+	var ladder := [HudIcons.TYPE_MICRO, HudIcons.TYPE_LABEL, HudIcons.TYPE_HEAD, HudIcons.TYPE_TITLE]
+	for i in range(1, ladder.size()):
+		Runner.T.ok(ladder[i] > ladder[i - 1], "rung %d is strictly larger than the one below" % i)
+
+
+# The readout tier (TYPE_BODY) is the scale's ONE documented off-grid exception, and the reason
+# is structural, not stylistic: a HUD row is ROW_H tall and the next rung up cannot physically fit
+# in it. This test is what keeps that exception honest — it proves TYPE_LABEL's real ink height
+# (ascent + descent + the 1px drop-shadow Art.text always paints) exceeds the row, so nobody can
+# "fix" the off-grid value by moving up a rung and silently blow the row budget apart.
+func test_type_scale_readout_tier_cannot_reach_the_em_grid() -> void:
+	var f := Art.font()
+	for size in [HudIcons.TYPE_LABEL, HudIcons.TYPE_HEAD, HudIcons.TYPE_TITLE]:
+		var ink := float(f.get_ascent(size) + f.get_descent(size)) + 1.0
+		Runner.T.ok(ink > HudIcons.ROW_H,
+			"the %dpx rung needs %.0fpx of ink, more than the %.0fpx HUD row — it cannot be the readout size"
+				% [size, ink, HudIcons.ROW_H])
+	# …and the readout size itself is unchanged, so every measurement already pinned against
+	# FONT_SIZE / BOSS_LABEL_SIZE across test_hud, test_assets and test_localization still holds.
+	Runner.T.eq(HudIcons.TYPE_BODY, 10, "the readout tier is still 10px (its VALUE did not change)")
+	Runner.T.eq(HudIcons.FONT_SIZE, HudIcons.TYPE_BODY, "FONT_SIZE is the readout rung, by name")
+	Runner.T.eq(HudIcons.BOSS_LABEL_SIZE, HudIcons.TYPE_BODY, "BOSS_LABEL_SIZE is the readout rung, by name")
+	Runner.T.eq(HudIcons.LABEL_PLATE_RISE, 11.0, "the label-plate rise derived from it is unchanged")
+	Runner.T.eq(HudIcons.TYPE_BODY % 8, 2, "…and it really is off-grid, so this test is not vacuous")
+
+
+# The ratchet that stops the sprawl returning: hud.gd must never again name a raw integer as a
+# font size. Every Art.text / Art.text_center / Font.get_string_size call site in this file has to
+# pass a rung of the scale (or a variable traceable to one — the caption's `cs`, which is
+# Art.fs(TYPE_BODY), the ACCESSIBILITY text-scale multiplier). Before c4-20 the file passed bare
+# literals (8) or the undeclared FONT_SIZE, and the view as a whole was drawing 12 sizes.
+func test_hud_names_no_bare_font_size() -> void:
+	var src := FileAccess.get_file_as_string("res://src/view/hud.gd")
+	# call -> index of the font-size argument, per each function's own signature.
+	var size_arg := {"Art.text(": 3, "Art.text_center(": 4, "get_string_size(": 3,
+		"get_ascent(": 0, "get_descent(": 0, "get_height(": 0, "Art.fs(": 0}
+	var offenders: Array[String] = []
+	var scanned := 0
+	var i := 0
+	var lines := src.split("\n")
+	while i < lines.size():
+		var stripped := lines[i].strip_edges()
+		if stripped.begins_with("#") or stripped.begins_with("func "):
+			i += 1
+			continue   # the scale's own documentation quotes the numbers it replaces
+		# Join forward until the statement's brackets balance, so a size argument on a
+		# continuation line is scanned with the call it belongs to. The ORIGINAL
+		# version of this ratchet was single-line AND only decremented depth on ")",
+		# never on "]" — so any call with a subscript in an argument (m[2], cells[c])
+		# left depth permanently positive and the call never terminated. Measured: 37
+		# sites found where this scanner finds 56. A gate that silently reads a third
+		# of its input is worse than no gate, hence the scanned-count floor below.
+		var stmt := stripped
+		var depth := 0
+		for ch in stmt:
+			if ch == "(" or ch == "[":
+				depth += 1
+			elif ch == ")" or ch == "]":
+				depth -= 1
+		var j := i
+		while depth != 0 and j + 1 < lines.size() and j - i < 15:
+			j += 1
+			if lines[j].strip_edges().begins_with("#"):
+				continue
+			stmt += " " + lines[j].strip_edges()
+			for ch in lines[j]:
+				if ch == "(" or ch == "[":
+					depth += 1
+				elif ch == ")" or ch == "]":
+					depth -= 1
+		for call in size_arg.keys():
+			var at := stmt.find(call)
+			while at >= 0:
+				if stmt.substr(maxi(0, at - 5), 5) != "func ":
+					scanned += 1
+					var args := _split_args(stmt.substr(at + call.length(), 400))
+					var idx: int = size_arg[call]
+					if args.size() > idx:
+						var bare: String = args[idx].strip_edges()
+						var cut := bare.find(")")
+						if cut >= 0:
+							bare = bare.substr(0, cut).strip_edges()
+						if bare != "" and (bare.is_valid_int() or bare.is_valid_float()):
+							offenders.append("%s -> %s" % [call, bare])
+				at = stmt.find(call, at + 1)
+		i = j + 1
+	Runner.T.eq(offenders, [],
+		"hud.gd names no bare font-size literal — every text call site uses the TYPE_* scale (offenders: %s)"
+			% str(offenders))
+	# NON-VACUITY: if a refactor collapses the text calls this must go red rather
+	# than quietly pass an empty scan.
+	# Measured floor: hud.gd has 16 text/size call sites (Art.text x2,
+	# Art.text_center x2, get_string_size x8, get_ascent x3, Art.fs x1); the scanner
+	# skips the `func Art.text_center(`-style definition line, so 15 is the true
+	# count. The point is not the number but the DIRECTION: the broken parser read
+	# a third of this file's calls, so any drop below the measured baseline means the
+	# scan has gone blind again rather than that the code got tidier.
+	Runner.T.ok(scanned >= 14, "the scan actually reached every text call site (%d calls)" % scanned)
+	# The scale must be reachable, not just declared: prove the micro rung really is the one the
+	# verb legend draws at, and that the readout rung is what every HUD readout measures at.
+	Runner.T.eq(HudIcons.TYPE_MICRO, 8, "the micro rung is 8px (the em floor)")
+	var segs: Array = HudIcons.VERB_SEGS
+	if segs.size() > 0:
+		var label := TranslationServer.translate(segs[0][1])
+		var pr := HudIcons.verb_legend_primitives(344.0, segs)
+		Runner.T.ok(absf(pr[0]["label"].size.y - Art.font().get_string_size(
+			label, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO).y) < 0.01,
+			"the verb-legend label is measured at the micro rung it is actually drawn at")
+
+func _split_args(s: String) -> Array[String]:
+	var out: Array[String] = []
+	var d := 0
+	var cur := ""
+	var in_str := false
+	for i in s.length():
+		var ch := s[i]
+		if ch == "\"":
+			in_str = not in_str
+		if not in_str:
+			if ch == "(" or ch == "[" or ch == "{":
+				d += 1
+			elif ch == ")" or ch == "]" or ch == "}":
+				if d == 0:
+					out.append(cur.strip_edges())
+					return out
+				d -= 1
+			elif ch == "," and d == 0:
+				out.append(cur.strip_edges())
+				cur = ""
+				continue
+		cur += ch
+	if not cur.strip_edges().is_empty():
+		out.append(cur.strip_edges())
+	return out
+
+
+# The expression that follows a dict key, up to the top-level ',' or '}'.
+func _arg_expr(s: String, from: int) -> String:
+	var d := 0
+	var out := ""
+	var in_str := false
+	for i in range(from, s.length()):
+		var ch := s[i]
+		if ch == "\"":
+			in_str = not in_str
+		if not in_str:
+			if ch == "(" or ch == "[":
+				d += 1
+			elif ch == ")" or ch == "]":
+				d -= 1
+			elif d == 0 and (ch == "," or ch == "}"):
+				break
+		out += ch
+	return " ".join(out.strip_edges().split("\n", false))
+
+
+# Colors an ink expression can produce. [] means UNRESOLVABLE — the caller fails by name.
+func _resolve_ink(expr: String, consts: Dictionary) -> Array[Color]:
+	var out: Array[Color] = []
+	var e := " ".join(expr.strip_edges().split("\t", false)).strip_edges()
+	while e.contains("  "):
+		e = e.replace("  ", " ")
+	if e.begins_with("Art.safe(") and e.ends_with(")"):
+		# Art.safe is the colourblind remap; the shipped default (colorblind off) is identity.
+		return _resolve_ink(e.substr(9, e.length() - 10), consts)
+	if e.begins_with("Color(") and e.ends_with(")"):
+		var parts := _split_args(e.substr(6))
+		if parts.size() < 3:
+			return out
+		var v := PackedFloat32Array()
+		for i in 3:
+			if not parts[i].is_valid_float():
+				return out
+			v.append(parts[i].to_float())
+		out.append(Color(v[0], v[1], v[2]))
+		return out
+	if e.begins_with("_CAPSULE_COL["):
+		for col in consts.get("_CAPSULE_COL", []):
+			out.append(col)
+		return out
+	if consts.has(e) and consts[e] is Color:
+		out.append(consts[e])
+	return out
+

@@ -102,24 +102,24 @@ static func hall_highlight_band(y: float) -> Rect2:
 const HALL_GUTTER := 14.0
 static func hall_col_x() -> Array:
 	var f := Art.font()
-	var num_w := maxf(f.get_string_size("#", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x,
-		maxf(f.get_string_size("40", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x,
-			f.get_string_size("--", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x))
+	var num_w := maxf(f.get_string_size("#", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x,
+		maxf(f.get_string_size("40", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x,
+			f.get_string_size("--", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x))
 	var rank_x := 112.0 + num_w + HALL_GUTTER
 	# The RANK column's cell is a grade letter at +2 (10px) with a 12px tier medal at
 	# +14 — a 26px block; the "RANK" header (10px) is wider and owns the column.
-	var rank_w := maxf(f.get_string_size("RANK", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x, 26.0)
+	var rank_w := maxf(f.get_string_size("RANK", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x, 26.0)
 	# SCORE right-aligns its numerals; the column is sized off the widest bankable score
 	# so even "9,999,999" cannot reach the medal (the literal 214.0 sat 5px INSIDE it).
 	var score_r := rank_x + rank_w + HALL_GUTTER + f.get_string_size(
-		"9,999,999", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		"9,999,999", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x
 	var mode_x := score_r + HALL_GUTTER
-	var mode_w := maxf(f.get_string_size("MODE", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x,
-		f.get_string_size("BOSS RUSH", HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
+	var mode_w := maxf(f.get_string_size("MODE", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x,
+		f.get_string_size("BOSS RUSH", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x)
 	var reached_x := mode_x + mode_w + HALL_GUTTER
-	var reach_w := f.get_string_size("REACHED", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	var reach_w := f.get_string_size("REACHED", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x
 	for s in ["SECTOR 9", "VICTORY", "WAVE 99", "BOSS 3/3"]:
-		reach_w = maxf(reach_w, f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x)
+		reach_w = maxf(reach_w, f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x)
 	return [112.0, rank_x, score_r, mode_x, reached_x, reached_x + reach_w + HALL_GUTTER]
 const MEDAL_CB_DARKEN := 0.25   # c4-08: luminance drop on a grade-medal tint under colorblind mode so the white-alpha sprite keeps body
 
@@ -362,11 +362,17 @@ const TITLE_HEAD_MARGIN := FOCUS_RING_GROW_MAX + HEADER_INK_CHANNEL   # TITLE se
 # by eye (the exact drift this item kills): a record line now moves only by editing its FONT SIZE or the
 # shared pad, and the plates below it reflow with no overlap and no hand-copied y.
 # ---- drawn font sizes (the size passed to _center_text; the heights below derive from these) ----
-const TITLE_WORDMARK_FONT := 32   # 4.000x on PixelOperator8's 8px em -- 30 (3.746x) uneven-quantized stems
-const TITLE_BYLINE_FONT := 8
-const TITLE_TAGLINE_FONT := 10     # the taller of the two lines the shared record plate must seat
-const TITLE_BEST_FONT := 9
-const TITLE_CAREER_FONT := 8
+# c4-20: every size here is a RUNG OF THE ONE TYPE SCALE (HudIcons.TYPE_*, see its doc block for
+# the whole 8px-em argument) rather than a locally-typed pixel count. The menu drew nine distinct
+# undeclared sizes before this; each one below now names WHY that rung and not a neighbour.
+const TITLE_WORDMARK_FONT := HudIcons.TYPE_TITLE   # 32 — 4.000x em. 30 (3.746x) uneven-quantized stems
+const TITLE_BYLINE_FONT := HudIcons.TYPE_MICRO
+const TITLE_TAGLINE_FONT := HudIcons.TYPE_BODY    # the taller of the two lines the shared record plate must seat
+const TITLE_BEST_FONT := HudIcons.TYPE_MICRO      # was 9 (off-grid). The record plate is 13px (derived
+                                                  # from the 10px tagline), and at the 8px rung the glyphs
+                                                  # seat y5..y13 inside it — the 9px line sat y3..y13, so
+                                                  # the move trades top air for an on-grid stem.
+const TITLE_CAREER_FONT := HudIcons.TYPE_MICRO
 # c4-04: ONE shared vertical plate padding — every TITLE header plate is its drawn font size plus this
 # pad top AND bottom, so a font-size change resizes the plate with it (no hand-tuned per-plate height).
 const TITLE_PLATE_PAD_V := 1.5
@@ -445,15 +451,31 @@ const FOOTER_H := 17.0             # height of the shared SELECT/BACK footer-leg
 # keycaps below it overrunning the fixed strip bottom (FOOTER_Y + FOOTER_H, unaffected by this
 # const). Capped by content_frame_border's list-screen bottom (336, see its comment) too — this
 # strip's top must stay AT OR BELOW that, or it overlaps the dialog frame it sits under; that's
-# the tighter of the two ceilings and the one that pins FOOTER_HELP_MAX_SIZE at 9, not further.
-# That leaves 2.5px real clearance over the glow on the fullest OPTS/SETUP list (was 3.5px at the
-# old 4.0) — test_opts_footer_describes_focused_setting and
+# the tighter of the two ceilings and the one that pins FOOTER_HELP_MAX_SIZE, not further. (It sat
+# at 9 until c4-20 put the rest of the menu on the type scale; 9 stayed — see the const's own note
+# for the strip arithmetic that makes it the only value with both bounds intact.)
+# test_opts_footer_describes_focused_setting and
 # test_help_footer_shared_across_settings_screens pin the (now smaller, still real) clearance.
 const FOOTER_HELP_RISE := 5.0
 # The description font cannot grow past this: bigger and either the legend keycaps below it (packed
 # from the FIXED strip bottom) run off the 360px canvas, or the strip top rises far enough to overlap
 # the list-screen dialog frame's border (content_frame_border's 336) — measured empirically, see the
-# #1 note above. mini(Art.fs(8), FOOTER_HELP_MAX_SIZE) is the whole scaling story for _draw_footer_help.
+# #1 note above. mini(Art.fs(TYPE_MICRO), FOOTER_HELP_MAX_SIZE) is the whole scaling story for
+# _draw_footer_help.
+#
+# c4-20 DEVIATION, and a deliberate one: 9 is NOT on the 8px em grid and is NOT moved onto it,
+# because this number is not a font size — it is the CEILING on the accessibility multiplier, and
+# its exact value is set by the strip's fixed bottom edge. The arithmetic (all from the consts
+# above; FOOTER_H, FOOTER_HELP_RISE, _LEG_H):
+#   base_off  = get_ascent(size)      legend baseline = strip_top + base_off + 8
+#   keycap    = _LEG_H (11) centred on that baseline, so it reaches baseline + 5.5
+#   strip_bot = strip_top + FOOTER_H (17) + FOOTER_HELP_RISE (5) = strip_top + 22
+# At 9: base_off 8 -> keycap reaches +21.5, i.e. 0.5px INSIDE the strip. At 10 (the next rung up)
+# base_off 9 -> +22.5, which OVERFLOWS the plate by 0.5px and trips the containment sweep in
+# test_two_line_footer_help_never_collides_with_the_legend. At 8 (the rung BELOW, the naive map)
+# base_off 7 -> the font never grows at all, because mini(Art.fs(8), 8) is a constant, which
+# silently deletes the TEXT SIZE accessibility this const exists to preserve (r4-menu #1). So the
+# scale offers no correct answer here and 9 — the single value with BOTH bounds intact — stays.
 const FOOTER_HELP_MAX_SIZE := 9
 const BACK_H_RATIO := 0.7          # BACK plate is BTN scaled to this fraction of full row height
 const REBIND_TAB_W := 96.0         # REBIND category-tab plate width
@@ -463,10 +485,14 @@ const REBIND_TAB_GAP := 6.0        # gap between REBIND tab / device plates
 # lands in one place instead of per-screen literals in _draw). The INFO/DISP/SETUP
 # hubs share one title+subtitle rhythm; HALL/HOWTO share one content-title baseline.
 const HUB_HEADER_Y := 84.0         # INFO / DISP / SETUP header title baseline
-const HUB_HEADER_FONT := 24        # 3.000x on PixelOperator8's 8px em -- 22 (2.746x) uneven-quantized stems
+const HUB_HEADER_FONT := HudIcons.TYPE_HEAD  # 24 — 3.000x em. 22 (2.746x) uneven-quantized stems
 const HUB_SUBTITLE_Y := 104.0      # ...and their subtitle line
 const CONTENT_TITLE_Y := 58.0      # HALL / HOWTO content-screen title baseline (was 38: at size 22 that put the cap top at y18, 18.2px ABOVE the frame's real interior)
-const CONTENT_TITLE_SIZE := 18     # ...and its size. 22 no longer fits between FRAME_INNER_T and the tab plate.
+const CONTENT_TITLE_SIZE := HudIcons.TYPE_LABEL   # was 18 (2.254x, off-grid). 16 drops 1px of cap
+                                    # height, so the title seats LOW in its slot: the test frame-bounds
+                                    # ratchet measures the whole title's ink top against FRAME_INNER_T
+                                    # (41) and its ink bottom against the tab plate's hit rect (top 62),
+                                    # so the fit is asserted, not assumed.
 const TAB_PLATE_Y := 64.0          # HALL filter / HOWTO page tab plate top (16px tall)
 const TAB_BASELINE_Y := 76.0       # ...its label baseline, and TAB_PLATE_Y + 16 its underline
 const TAB_ARROW_Y := TAB_PLATE_Y + 2.0   # HALL's left/right cycle affordance, seated in the plate band
@@ -511,7 +537,7 @@ const PAUSE_HEADER_Y := 78.0       # PAUSED title baseline
 const PAUSE_SUBTITLE_Y := 100.0    # PAUSE run-status subline
 const PAUSE_FOOTNOTE_Y := 114.0    # PAUSE RUN# footnote — the lowest header line first_row_top(PAUSE) clears
 const OPTS_TITLE_Y := 80.0         # OPTIONS title baseline
-const OPTS_TITLE_FONT := 16        # 2.000x on PixelOperator8's 8px em -- 18 (2.254x) uneven-quantized stems
+const OPTS_TITLE_FONT := HudIcons.TYPE_LABEL   # 16 — 2.000x em. 18 (2.254x) uneven-quantized stems
 const OPTS_SUBLINE_Y := 94.0       # OPTIONS a11y-summary subline — the lowest header line first_row_top(OPTS) clears
 # Horizontal half-padding of the small dark plates behind TITLE's byline / tagline /
 # BEST / CAREER lines (a plate spans measured_text_w + 2x this).
@@ -596,14 +622,20 @@ const OVERFLOW_CHIP_PAD := 3.0                           # c2-14 breathing room 
 # clipboard gets a LEFT-EDGE red status stripe (a shape marker, deliberately UNLIKE the
 # destructive armed FULL flood so an invalid paste never reads as an armed RESTART/QUIT) over a
 # very faint veil, both brightening/widening on a denied press (via the decaying _seed_flash).
-const ROW_LABEL_SIZE := 11                                # c3-13: the main row-label font size — one source shared by the label draw AND the seed sub-label's clearance/alignment math
+const ROW_LABEL_SIZE := HudIcons.TYPE_BODY                    # c3-13: the main row-label font size — one source shared by the label draw AND the seed sub-label's clearance/alignment math. Was 11 (1.375x em, off-grid); the readout rung is 10.
 const ROW_LABEL_BASELINE_DY := 4.0                        # c3-13: main row-label baseline offset below the row center (cy) — shared with the seed sub-label so the two never drift apart
 const SEED_ROW_LABEL := "PASTE SEED"   # the seed row's base label. "PASTE" IS the source cue —
 # it replaces the old "(FROM CLIPBOARD)" sub-label, which cost 95px of a 184px column and forced
 # the name itself to ellipsize ("CHALL…"). Every author-written state of this row
 # (bare / (EMPTY) / (OK) / (INVALID)) now measures <= 184px at ROW_LABEL_SIZE; only the
 # player's own pasted text may ellipsize. Do NOT re-add a second in-plate string here.
-const SEED_TAG_SIZE := 7                                  # px; the ONE size seed sub-lines are measured AND drawn at
+const SEED_TAG_SIZE := HudIcons.TYPE_MICRO                   # was 7; the ONE size seed sub-lines are
+                                                             # measured AND drawn at. The UPWARD move is
+                                                             # safe by construction: _seed_tag_stacks
+                                                             # re-measures at the SAME size, so a plate
+                                                             # too short to stack falls back to the
+                                                             # right-margin hint (a designed path), never
+                                                             # an overrun — and it rides Art.fs either way.
 const SEED_DENY_RED := Color(0.62, 0.13, 0.08)           # red for the invalid-seed status stripe + faint veil
 const SEED_DENY_VEIL_A := 0.09                            # faint full-plate tint (far below the destructive flood's ~0.82, so the two never read alike)
 const SEED_DENY_BAR_W := 3.0                             # left-edge status-stripe width at rest (a denied press widens it)
@@ -1638,7 +1670,7 @@ static func destructive_label(name: String, verb: String, armed: bool, font: Fon
 	if font == null:
 		return forms[0]
 	for f in forms:
-		if font.get_string_size(f, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x <= avail:
+		if font.get_string_size(f, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x <= avail:
 			return f
 	# MINIMUM SUPPORTED WIDTH: the narrowest armed form is the bare cue ("PRESS AGAIN"
 	# ~99px at 11px); the resting form is the label itself. The only caller draws on the
@@ -3412,10 +3444,10 @@ func _draw_seed_subline(r: Rect2, cy: float, text: String, col: Color) -> int:
 	if _seed_tag_stacks(r, cy):
 		_label_max_w = right - lx
 		_emit_label(text, Vector2(lx, r.end.y - f.get_descent(ts) - SEED_SUB_MARGIN), col)
-		_label_size = 8
+		_label_size = HudIcons.TYPE_MICRO
 		_label_max_w = 0.0
 		return SEED_SUB_STACKED
-	_label_size = 8
+	_label_size = HudIcons.TYPE_MICRO
 	_label_max_w = 0.0
 	return SEED_SUB_NONE
 
@@ -3468,12 +3500,12 @@ func _draw_seed_hint(r: Rect2, cy: float, selected: bool) -> void:
 	# stacks upward so its baseline row stays aligned with cy.
 	var hw := 0.0
 	for ln in lines:
-		hw = maxf(hw, f.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x)
+		hw = maxf(hw, f.get_string_size(ln, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO).x)
 	var hx := seed_hint_x(r.end.x, hw)
-	var line_h := f.get_ascent(8) + f.get_descent(8) + 2.0
+	var line_h := f.get_ascent(HudIcons.TYPE_MICRO) + f.get_descent(HudIcons.TYPE_MICRO) + 2.0
 	var n := lines.size()
 	var hby := cy + 3.0 - float(n - 1) * line_h   # first baseline; extra lines drop below it
-	var ptop := hby - f.get_ascent(8) - 1.0
+	var ptop := hby - f.get_ascent(HudIcons.TYPE_MICRO) - 1.0
 	var ph := float(n) * line_h + 3.0
 	_emit_rect(Rect2(hx - 4.0, ptop, hw + 8.0, ph), Color(0.03, 0.05, 0.03, 0.72))
 	for li in n:
@@ -3730,11 +3762,17 @@ func _draw_content_frame() -> void:
 	# already speak, so the screen names itself before a word of content reads.
 	var tag: String = chrome.get("tag", "")
 	if tag != "":
-		var tw := Art.tw(tag, 6)
+		# c4-20: the codename stencil was 6px — off-grid, and the smallest ink on any framed
+		# screen. It moves to the 8px em floor. The plate is FIXED at 13px tall and auto-sizes
+		# horizontally off the measured string, so the only budget that mattered was vertical:
+		# ink (ascent 7 + descent 1 + Art.text's always-on 1px shadow = 9px) still seats inside
+		# 13 with 4px to spare, and the widest codename ("OPERATION BRIEF") grows its plate
+		# 84 -> 108px, i.e. x266..374, clear of both frame ornaments on a 640px canvas.
+		var tw := Art.tw(tag, HudIcons.TYPE_MICRO)
 		var plate := Rect2(320.0 - tw / 2.0 - 5.0, border.position.y - 5.0, tw + 10.0, 13.0)
 		_emit_rect(plate, Color(0.05, 0.06, 0.05, 0.92 * _open_t))
 		_emit_stamp(tag, Vector2(320.0 - tw / 2.0, border.position.y + 4.0),
-			Color(tint, _open_t))
+			Color(tint, _open_t), HudIcons.TYPE_MICRO)
 
 
 func _draw_frame_nine(key: String, r: Rect2, c: Color) -> void:
@@ -3918,36 +3956,36 @@ func _draw_mode_header() -> void:
 	elif mode == Mode.INFO:
 		_center_text("INFO", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		# The look-back screens: records, the field manual, and your last run.
-		_center_text("RECORDS · HOW TO PLAY · REPLAY", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+		_center_text("RECORDS · HOW TO PLAY · REPLAY", HUB_SUBTITLE_Y, HudIcons.TYPE_MICRO, SUBTITLE_COL)
 	elif mode == Mode.DISP:
 		_center_text("DISPLAY", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		# c1-19: the subtitle NAMES the two controls while windowed, and while FULLSCREEN it EXPLAINS
 		# that WINDOW SCALE applies on return to windowed — so the row's deferred behavior is spelled
 		# out in words, matching the inline "(WINDOWED)" tag on the value label. The row itself stays
 		# fully adjustable in both modes; nothing here is a dead, silently-ignored control.
-		_center_text(disp_subtitle(main._fullscreen, main._win_scale, main._win_scale_norm()), HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+		_center_text(disp_subtitle(main._fullscreen, main._win_scale, main._win_scale_norm()), HUB_SUBTITLE_Y, HudIcons.TYPE_MICRO, SUBTITLE_COL)
 	elif mode == Mode.AUDIO:
 		# audio-identity (judge follow-up): the AUDIO sub-screen header — same lone-subtitle hub
 		# style as DISPLAY above (roomy, non-compact clearance; mode_header_bottom's default falls
 		# through to HUB_SUBTITLE_Y for any mode not explicitly listed there).
 		_center_text("AUDIO", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		_center_text("SFX & MUSIC VOLUME", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+		_center_text("SFX & MUSIC VOLUME", HUB_SUBTITLE_Y, HudIcons.TYPE_MICRO, SUBTITLE_COL)
 	elif mode == Mode.SETUP:
 		_center_text("SETUP", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		# c2-04: the hub for everything demoted off TITLE — the run config toggles plus
 		# the OPTIONS and INFO screens.
-		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO  ·  MODES", HUB_SUBTITLE_Y, 8,
+		_center_text("RUN CONFIG  ·  OPTIONS  ·  INFO  ·  MODES", HUB_SUBTITLE_Y, HudIcons.TYPE_MICRO,
 			SUBTITLE_COL)
 	elif mode == Mode.MODES:
 		# authored-campaign-and-modes.
 		_center_text("MODES", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		_center_text("BOSS RUSH  ·  ARCADE  ·  CHAPTER SELECT", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+		_center_text("BOSS RUSH  ·  ARCADE  ·  CHAPTER SELECT", HUB_SUBTITLE_Y, HudIcons.TYPE_MICRO, SUBTITLE_COL)
 	elif mode == Mode.CHAPTERS:
 		_center_text("CHAPTER SELECT", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		_center_text("PICK A ZONE — ARCADE STARTS THERE", HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+		_center_text("PICK A ZONE — ARCADE STARTS THERE", HUB_SUBTITLE_Y, HudIcons.TYPE_MICRO, SUBTITLE_COL)
 	elif mode == Mode.PERKS:
 		_center_text("VETERAN PERKS", HUB_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
-		_center_text(_perk_subtitle_text(), HUB_SUBTITLE_Y, 8, SUBTITLE_COL)
+		_center_text(_perk_subtitle_text(), HUB_SUBTITLE_Y, HudIcons.TYPE_MICRO, SUBTITLE_COL)
 	else:
 		_center_text("PAUSED", PAUSE_HEADER_Y, HUB_HEADER_FONT, HEADER_COL)
 		# Pause doubles as a status check — the run so far.
@@ -3967,9 +4005,9 @@ func _draw_mode_header() -> void:
 				line = "SECTOR %d/%d  ·  %dm" % [mini(opened + 1, SimWorld.FINAL_GATE_INDEX), SimWorld.FINAL_GATE_INDEX,
 					-Fixed.to_int(s.camera_top) / 10]
 			_center_text("SCORE %d  ·  CHEST %d  ·  %s" % [s.score, s.war_chest, line],
-				PAUSE_SUBTITLE_Y, 10, SUBTITLE_COL)
+				PAUSE_SUBTITLE_Y, HudIcons.TYPE_BODY, SUBTITLE_COL)
 			if main._current_seed > 0:
-				_center_text("RUN #%d" % main._current_seed, PAUSE_FOOTNOTE_Y, 8, RUN_FOOTNOTE_COL)
+				_center_text("RUN #%d" % main._current_seed, PAUSE_FOOTNOTE_Y, HudIcons.TYPE_MICRO, RUN_FOOTNOTE_COL)
 
 
 func _draw() -> void:
@@ -4197,7 +4235,7 @@ func _draw() -> void:
 		var badge: String = String(mitems[k].get("badge", ""))
 		var badge_w := 0.0
 		if badge != "":
-			badge_w = Art.font().get_string_size(badge, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+			badge_w = Art.font().get_string_size(badge, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO).x
 			label_r = minf(label_r, r.end.x - badge_w - 12.0)
 		var armed_glyph: Texture2D = null
 		var cw := 0.0
@@ -4317,7 +4355,7 @@ func _draw() -> void:
 		# warning off the tail. destructive_label already fits the plate; this is the safety net
 		# for the floor/localized case where the label still overflows _row_fit's column.
 		var keep_tail := destructive_cue_tail(label, armed) if destr else ""
-		var fit := _row_fit(label, 11, avail, reserve, keep_tail, destr)
+		var fit := _row_fit(label, HudIcons.TYPE_BODY, avail, reserve, keep_tail, destr)
 		var show_chip: bool = fit["show_chip"]
 		# max_w hard-clips as a backstop for the degenerate case (even one glyph +
 		# ellipsis wider than the column) so a floor label can never overdraw the slot.
@@ -4422,7 +4460,7 @@ func _draw() -> void:
 		# with the disabled palette so the status reads as a MUTED lock state, not a bright
 		# actionable highlight.
 		if badge != "":
-			Art.text(self, badge, Vector2(r.end.x - 8.0 - badge_w, cy + 3.0), 9,
+			Art.text(self, badge, Vector2(r.end.x - 8.0 - badge_w, cy + 3.0), HudIcons.TYPE_MICRO,
 				DISABLED_TEXT if disabled else Color(1.0, 0.85, 0.5, 0.85))
 		# c4-15: left/right cycle affordance drawn on EVERY cycle row, not just the selected one.
 		# A dim resting glyph flags "this row cycles (left/right / Enter)" so keyboard users can
@@ -4561,8 +4599,18 @@ func _draw_rebind_header() -> void:
 		_emit_rect(r, Color(0.14, 0.3, 0.16, 0.95) if on else Color(0.07, 0.1, 0.06, 0.7))
 		_emit_rect_outline(r, Color(0.9, 0.95, 0.6, 0.9) if on else Color(0.4, 0.45, 0.36, 0.6), 1.0)
 		var col := Color(1.0, 1.0, 0.85) if on else Color(0.6, 0.65, 0.55)
-		_center_text_at(REBIND_TABS[d], r.get_center().x, r.position.y + 11.0, 8, col, r.size.x - 12.0)
-	_center_text("CONTROLS", 66, 13, HEADER_COL)
+		_center_text_at(REBIND_TABS[d], r.get_center().x, r.position.y + 11.0, HudIcons.TYPE_MICRO, col, r.size.x - 12.0)
+	# c4-20 DEVIATION: this title was 13 (off-grid) and the naive map is TYPE_LABEL (16). It was
+	# TRIED at 16 and REVERTED on a measured collision, not a hunch. The REBIND header has only the
+	# ~20px band between the tab row's underline (ends y57) and the 8px subtitle (ink top y71),
+	# and a 16px title needs 14 ascent + 2 descent + Art.text's 1px shadow = 17px of ink, so it
+	# CANNOT fit there at any baseline. Rendered at 16 its cap top landed on y52 — inside the tab
+	# plates, straight through the ACTIONS/GAMEPAD labels (measured row-by-row against the
+	# baseline capture: ink at y52 jumps 35 -> 73). At 13 the cap top is y58, clear of the plates
+	# by 1px. TYPE_BODY is the largest ON-GRID rung that clears it, so the grid wins here where the
+	# label rung could not. Moving the tab row or the baseline instead is a layout change, not a
+	# typography one, and is out of scope for this pass.
+	_center_text("CONTROLS", 66, HudIcons.TYPE_BODY, HEADER_COL)
 	var sub: String
 	var scol: Color
 	if _rebind_action != "":
@@ -4591,7 +4639,7 @@ func _draw_rebind_header() -> void:
 		# stay literal: those are the immutable emergency keys and always work.
 		sub = "ENTER: REBIND   %s: SWITCH TAB   -   MENUS ALWAYS USE ARROWS/ENTER/ESC" % _tab_keycap()
 		scol = SUBTITLE_COL
-	_center_text(sub, 78, 8, scol)
+	_center_text(sub, 78, HudIcons.TYPE_MICRO, scol)
 	# c1-18: on the GAMEPAD tab, the P1|P2 sub-selector — each player has an INDEPENDENT pad
 	# layout, and this names+switches which one the rows below are editing. ◄/► or a click flips
 	# it. Drawn only on the pad tab (the keyboard/menu maps aren't per-player).
@@ -4601,7 +4649,7 @@ func _draw_rebind_header() -> void:
 			var pon := pd == _rebind_pad_dev
 			_emit_rect(pr, Color(0.14, 0.26, 0.3, 0.95) if pon else Color(0.07, 0.09, 0.1, 0.7))
 			_emit_rect_outline(pr, Color(0.6, 0.9, 0.95, 0.9) if pon else Color(0.36, 0.42, 0.45, 0.6), 1.0)
-			_center_text_at("PLAYER %d" % (pd + 1), pr.get_center().x, pr.position.y + 9.0, 7,
+			_center_text_at("PLAYER %d" % (pd + 1), pr.get_center().x, pr.position.y + 9.0, HudIcons.TYPE_MICRO,
 				Color(0.95, 1.0, 1.0) if pon else Color(0.55, 0.62, 0.65), pr.size.x - 8.0)
 	# (The c1-18 fixed-input footnote used to draw HERE at baseline 324 — it moved to the
 	# footer's two-line help strip: the BACK row plate, drawn after this header, painted
@@ -4614,7 +4662,7 @@ func _draw_back_button() -> void:
 	draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
 	Art.menu_plate(self, r.grow(3), Color(1.0, 0.9, 0.4, 0.95))
 	draw_rect(r, Color(1.0, 0.97, 0.88), false, 1.0)   # focus ring (only row here)
-	_center_text("BACK", r.position.y + 16.0, 11, Color(1.0, 0.95, 0.75))
+	_center_text("BACK", r.position.y + 16.0, HudIcons.TYPE_BODY, Color(1.0, 0.95, 0.75))
 
 
 # Pure per-tab visual treatment for the HALL filter row — text color plus whether
@@ -4776,7 +4824,7 @@ func _tab_rects_for(names: Array) -> Array[Rect2]:
 	var tw: Array[float] = []
 	var total := -22.0
 	for n in names:
-		var w := f.get_string_size(n, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+		var w := f.get_string_size(n, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x
 		tw.append(w)
 		total += w + 22.0
 	var x := CENTER_X - total / 2.0
@@ -4824,7 +4872,7 @@ func _draw_hall() -> void:
 			# not state) — a dimmer echo for the hover preview so the pointer's target
 			# reads as a real button, not just tinted text.
 			_emit_rect(Rect2(tr.position.x, TAB_PLATE_Y, tr.size.x, 16.0), plate)
-		Art.text(self, names[i], Vector2(tr.position.x + 4.0, TAB_BASELINE_Y), 10, st["text"])
+		Art.text(self, names[i], Vector2(tr.position.x + 4.0, TAB_BASELINE_Y), HudIcons.TYPE_BODY, st["text"])
 		var uh: float = st["underline_h"]
 		if uh > 0.0:
 			# Underline: 2px live rule for the selected tab, a fainter 1px preview on
@@ -4862,10 +4910,10 @@ func _draw_hall() -> void:
 	# the content well shifts (see HALL_RECENCY_Y for what a typed copy cost us).
 	for c in headers.size():
 		if c == 2:
-			var hw := f.get_string_size(headers[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-			Art.text(self, headers[c], Vector2(col_x[2] - hw, HALL_HEADER_Y), 10, Color(1.0, 0.82, 0.4))
+			var hw := f.get_string_size(headers[c], HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x
+			Art.text(self, headers[c], Vector2(col_x[2] - hw, HALL_HEADER_Y), HudIcons.TYPE_BODY, Color(1.0, 0.82, 0.4))
 		else:
-			Art.text(self, headers[c], Vector2(col_x[c], HALL_HEADER_Y), 10, Color(1.0, 0.82, 0.4))
+			Art.text(self, headers[c], Vector2(col_x[c], HALL_HEADER_Y), HudIcons.TYPE_BODY, Color(1.0, 0.82, 0.4))
 	# Page the board: HALL_PAGE_ROWS rows per screen, up/down turns the page. Switching the filter
 	# tab resets _hall_page to 0 (see the nav + click handlers); c4-13: this clamp runs EVERY draw,
 	# so even if the filter or row count shrinks the board underneath a stale page index (from any
@@ -4889,8 +4937,8 @@ func _draw_hall() -> void:
 	# that more rows follow. Empty on a single page so a short board carries no redundant "PAGE 1/1".
 	var ptag := hall_page_tag(_hall_page, pages)
 	if ptag != "":
-		var psw := f.get_string_size(ptag, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		Art.text(self, ptag, Vector2(HALL_PAGE_TAG_R - psw, TAB_BASELINE_Y), 10, HALL_COUNT_COL)
+		var psw := f.get_string_size(ptag, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x
+		Art.text(self, ptag, Vector2(HALL_PAGE_TAG_R - psw, TAB_BASELINE_Y), HudIcons.TYPE_BODY, HALL_COUNT_COL)
 	if latest_idx >= 0:
 		@warning_ignore("integer_division")
 		var lpage := latest_idx / HALL_PAGE_ROWS
@@ -4901,15 +4949,15 @@ func _draw_hall() -> void:
 			var msg := hall_latest_legend(over)
 			if not over:
 				msg += "   ·   " + keep_note
-			_center_text(msg, HALL_RECENCY_Y, 9, Color(1.0, 0.86, 0.55))
+			_center_text(msg, HALL_RECENCY_Y, HudIcons.TYPE_MICRO, Color(1.0, 0.86, 0.55))
 		else:
 			var dir := "<<" if lpage < _hall_page else ">>"
 			_center_text("%s YOUR LATEST RUN IS ON PAGE %d %s   ·   %s" % [dir, lpage + 1, dir, keep_note],
-				HALL_RECENCY_Y, 9, Color(1.0, 0.82, 0.4))
+				HALL_RECENCY_Y, HudIcons.TYPE_MICRO, Color(1.0, 0.82, 0.4))
 	else:
 		# No fresh run to flag — the band states the retention rule so a returning player
 		# still sees the cutoff (paging resolves hidden entries; it doesn't hide the cap).
-		_center_text("BOARD KEEPS YOUR TOP %d RUNS" % HALL_KEEP, HALL_RECENCY_Y, 9,
+		_center_text("BOARD KEEPS YOUR TOP %d RUNS" % HALL_KEEP, HALL_RECENCY_Y, HudIcons.TYPE_MICRO,
 			Color(0.82, 0.86, 0.72))
 	# The header row and the retention status band above always draw, so an empty
 	# filter reads as a laid-out board that simply has no entries yet rather than a
@@ -4919,13 +4967,13 @@ func _draw_hall() -> void:
 		# it, keep the mode word for the CAMPAIGN/ENDLESS filters. Sits in the empty row
 		# area; the window/count math below is skipped so it never renders a bare "1-0 OF 0".
 		var empty_noun: String = "" if _hall_filter == 0 else str(names[_hall_filter]) + " "
-		_center_text("NO %sRUNS YET \u2014 GO EARN YOUR PLACE" % empty_noun, 190, 11,
+		_center_text("NO %sRUNS YET \u2014 GO EARN YOUR PLACE" % empty_noun, 190, HudIcons.TYPE_BODY,
 			Color(0.8, 0.84, 0.74))
 		# The count indicator survives the empty state too \u2014 same y306 footer slot the
 		# populated board uses, and the SAME "start-stop OF total" shape ("0-0 OF 0"), so the
 		# counter never changes form when a filter has no runs. Same warm gold as the
 		# populated counters (HALL_COUNT_COL) so the total reads identically in every state.
-		_center_text("0-0 OF 0", HALL_PAGE_ROW_Y, 11, HALL_COUNT_COL)
+		_center_text("0-0 OF 0", HALL_PAGE_ROW_Y, HudIcons.TYPE_BODY, HALL_COUNT_COL)
 	else:
 		# c4-13: the visible slice is the paged window [start, stop) from hall_page_window, NOT a
 		# hard mini(rows.size(), 8) crop — start = page*8, stop clamps to the row count, so every
@@ -4959,7 +5007,7 @@ func _draw_hall() -> void:
 			if run.get("hard", false):
 				tag += "  *HARD"   # NG+ inflates score; same board as normal — say so
 			var streak_s := "x%d%s" % [run.get("streak", 0), tag]
-			if streak_x + f.get_string_size(streak_s, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x > HALL_CELL_R:
+			if streak_x + f.get_string_size(streak_s, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x > HALL_CELL_R:
 				# Cell would run off the frame — abbreviate the tags for this row.
 				tag = ("  *D" if run.get("daily", false) else "")
 				if run.get("assist", false):
@@ -4987,12 +5035,12 @@ func _draw_hall() -> void:
 				if c == 1:
 					# Right-aligned numerals against the measured SCORE column right
 					# edge — sized off "9,999,999" so no bankable score reaches the medal.
-					var sw := Art.font().get_string_size(cells[c], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-					Art.text(self, cells[c], Vector2(col_x[2] - sw, y), 11, col)
+					var sw := Art.font().get_string_size(cells[c], HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x
+					Art.text(self, cells[c], Vector2(col_x[2] - sw, y), HudIcons.TYPE_BODY, col)
 				else:
 					# Cells past SCORE sit one slot up in col_x (there is no cell for
 					# col_x[1] — the RANK column's content is the grade block below).
-					Art.text(self, cells[c], Vector2(col_x[0] if c == 0 else col_x[c + 1], y), 11, col)
+					Art.text(self, cells[c], Vector2(col_x[0] if c == 0 else col_x[c + 1], y), HudIcons.TYPE_BODY, col)
 			# Earned run grade (S/A/B/C/D), colored by tier, in the RANK column the
 			# header names: letter at +2, tier medal at +14 (the measured 26px grade
 			# block hall_col_x sizes the column from). Old saves predate the key —
@@ -5001,7 +5049,7 @@ func _draw_hall() -> void:
 			if gr != "":
 				var gcol: Color = {"S": Color(1.0, 0.85, 0.3), "A": Color(0.55, 0.9, 1.0),
 					"B": Color(0.6, 0.9, 0.5), "C": Color(0.85, 0.85, 0.8)}.get(gr, Color(0.7, 0.7, 0.7))
-				Art.text(self, gr, Vector2(col_x[1] + 2.0, y), 11, gcol)
+				Art.text(self, gr, Vector2(col_x[1] + 2.0, y), HudIcons.TYPE_BODY, gcol)
 				# Tier medal beside the letter (D=1 … S=5) — sprite is white-with-alpha,
 				# tinted to the tier color so medal and letter read as one badge.
 				# c4-08: under colorblind mode the tier hues flatten onto one axis, so a white-with-alpha
@@ -5033,7 +5081,7 @@ func _draw_hall() -> void:
 			# 267..373) — inside the PREV/NEXT gap (prev right edge 238, next left edge 402) with
 			# ~29px of clearance on each side. So the two indicators split cleanly: rows here, page
 			# there — a player reads which rows show AND which of how many pages they are on.
-			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], HALL_PAGE_ROW_Y, 11, HALL_COUNT_COL)
+			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], HALL_PAGE_ROW_Y, HudIcons.TYPE_BODY, HALL_COUNT_COL)
 			# Mouse-clickable page buttons flanking the counter — a second way to page for the
 			# mouse (c3-06: the wheel now scrolls the board too). Each carries a VERTICAL arrow glyph, not just a
 			# word: paging is bound to UP/DOWN (left/right is the filter), so a horizontal cue
@@ -5053,7 +5101,7 @@ func _draw_hall() -> void:
 					draw_rect(pr[pi], pplate)
 				# Vertical arrow glyph + label, centered as a unit in the rect. The triangle
 				# (up for PREV, down for NEXT) is the primary axis cue; the word confirms it.
-				var lw := f.get_string_size(plbl[pi], HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x
+				var lw := f.get_string_size(plbl[pi], HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO).x
 				var gw := 7.0
 				var bx := pr[pi].position.x + (pr[pi].size.x - lw - gw - 2.0) / 2.0
 				var ay := HALL_PAGE_LABEL_Y
@@ -5065,7 +5113,7 @@ func _draw_hall() -> void:
 					pts = PackedVector2Array([Vector2(bx, ay - 6.0),
 						Vector2(bx + gw, ay - 6.0), Vector2(bx + gw / 2.0, ay - 1.0)])
 				draw_colored_polygon(pts, pcol)
-				Art.text(self, plbl[pi], Vector2(bx + gw + 2.0, ay), 9, pcol)
+				Art.text(self, plbl[pi], Vector2(bx + gw + 2.0, ay), HudIcons.TYPE_MICRO, pcol)
 				# Paged AWAY from your latest run: a warm dot on the button that leads back to
 				# it (the top-band "ON PAGE n" cue names the page) so the run you opened the
 				# board for is never simply gone — the recency payoff survives a full board.
@@ -5078,7 +5126,7 @@ func _draw_hall() -> void:
 			# format AND the same warm gold (HALL_COUNT_COL) the paged footer uses, so the
 			# indicator reads identically across every filter state (here start=0,
 			# stop=rows.size(), so it renders "1-N OF N").
-			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], HALL_PAGE_ROW_Y, 11, HALL_COUNT_COL)
+			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], HALL_PAGE_ROW_Y, HudIcons.TYPE_BODY, HALL_COUNT_COL)
 
 
 func _hall_rows() -> Array:
@@ -5188,7 +5236,7 @@ func _draw_howto() -> void:
 # 640px canvas. Every instructional string below the strip uses Art.fs(), which
 # is the player's requested 100..200% size with no fit-time reduction.
 func _howto_large_text() -> bool:
-	return Art.fs(10) > 10
+	return Art.fs(HudIcons.TYPE_BODY) > 10
 
 
 func _howto_tr(source: String) -> String:
@@ -5248,6 +5296,36 @@ static func wrap_translated(txt: String, size: int, max_w: float) -> Array[Strin
 	return out
 
 
+# c4-20 DEVIATION — the accessible pager's design sizes STAY off-grid, as three named constants.
+#
+# These are not the typography the player reads at rest: _howto_large_rows runs ONLY above 100%
+# TEXT SIZE (see _howto_large_text), and every one of these values is multiplied by Art.fs before
+# it is measured or drawn. What they actually are is the INPUT to _howto_large_pages' greedy,
+# sentence-aware flow packer, and that packer's output is chaotic in the design size: re-measuring
+# the same copy one pixel differently moves which sentence lands where, and therefore how full each
+# leaf ends up. test_manual_never_leaves_a_leaf_half_empty's 55% floor is calibrated to THESE
+# numbers. Measured, moving them off-grid in either direction breaks it on a different leaf:
+#   HEAD (13/11/10, unchanged) ....... 0 offenders
+#   headings alone (16/10/10) ........ 200%/WAR CHEST leaf 2/6 at 49%   (WORSE)
+#   body alone (13/11/10 -> base 10) . 150%/WAR CHEST leaf 1/3 at 54%
+#   both (16/10/10, base 10) ......... 175%/WAR CHEST leaf 2/4 at 54%
+# The single 175% case was inspected, not assumed: the packer is CORRECT there — it broke at the
+# last legal sentence boundary and the next sentence genuinely does not fit in the remaining 76px.
+# There is no better break available to it. The floor is a knife-edge heuristic, and no on-grid rung
+# clears it, so the grid yields here rather than shipping a sparser manual behind a green test.
+#
+# The 100% pages keep their on-grid sizes (see the _howto_page_* draw functions) — that IS the
+# shipped typography, and it is unchanged by this. Naming the four constants here (rather than
+# leaving 13/11/10 as bare dict literals) is the part of c4-20 that does apply to them: a size
+# with a name and a measurement is reviewable; a bare literal is not. Note there are FOUR, not
+# three — the pre-pass headings were already two different sizes, and collapsing the 11 into the
+# 10 group is itself a packer change (it breaks the 200% MODES leaf, so it is not a "cleanup").
+const HOWTO_PAGER_BANNER_SIZE := 13      # "ONE HIT AND YOU DROP." — the manual's one banner heading
+const HOWTO_PAGER_WARCHEST_SIZE := 11    # "THE WAR CHEST ..." — the WAR CHEST page's own sub-head
+const HOWTO_PAGER_HEADING_SIZE := 10     # the CONTROLS / MODES / RED TEAM / SPECIALISTS headings
+const HOWTO_PAGER_BODY_SIZE := 11        # the body/sprite/action entries' default
+
+
 # Content model for the accessible pager. Copy stays single-sourced with the
 # default pages above; dynamic bindings and sim constants are resolved before
 # measuring so the exact text drawn is the exact text paginated.
@@ -5255,7 +5333,7 @@ func _howto_large_entries(tab: int) -> Array:
 	match tab:
 		0:
 			return [
-				{"kind": "heading", "text": "MOVE AND AIM FIRST — THE REST IS EXTRA:", "size": 10},
+				{"kind": "heading", "text": "MOVE AND AIM FIRST — THE REST IS EXTRA:", "size": HOWTO_PAGER_HEADING_SIZE},
 				{"kind": "action", "action": "move", "text": _howto_tr("MOVE with %s.") % _dir_devices("move")},
 				{"kind": "action", "action": "aim", "text": _howto_tr("AIM with %s. The gun fires on its own — just point it.") % _dir_devices("aim")},
 				{"kind": "action", "action": "grenade", "text": "GRENADES crack armor. TAP lobs far — HOLD pops it at the arc."},
@@ -5264,27 +5342,27 @@ func _howto_large_entries(tab: int) -> Array:
 				{"kind": "action", "action": "interact", "text": "PLANT a claymore clear of any tank — it hurts BOTH sides."}]
 		1:
 			return [
-				{"kind": "heading", "text": "ONE HIT AND YOU DROP.", "size": 13},
+				{"kind": "heading", "text": "ONE HIT AND YOU DROP.", "size": HOWTO_PAGER_BANNER_SIZE},
 				{"kind": "body", "text": "No health bar. Use cover and keep moving. Death strips vests, buffs and TRIPLE SHOT — buy them again."},
-				{"kind": "heading", "text": "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", "size": 11},
+				{"kind": "heading", "text": "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", "size": HOWTO_PAGER_WARCHEST_SIZE},
 				{"kind": "body", "text": _howto_tr("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back up — in ENDLESS chained deaths slow it to %ds, and with nobody up that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives.") % [SimWorld.BROKE_RESPAWN_TICKS / 60, SimWorld.BROKE_RESPAWN_TICKS * SimWorld.BROKE_WAIT_MAX_MULT / 60]},
 				{"kind": "body", "text": _howto_tr("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home.") % [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT, SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)]},
 				{"kind": "action", "action": "wheel", "text": "Hold to open the supply wheel."}]
 		2:
-			var out: Array = [{"kind": "heading", "text": "MODES + ASSIST:", "size": 10}]
+			var out: Array = [{"kind": "heading", "text": "MODES + ASSIST:", "size": HOWTO_PAGER_HEADING_SIZE}]
 			for row in _howto_mode_entries():
 				out.append({"kind": "sprite", "icon": row[0],
 					"text": "%s — %s" % [row[1], row[2]]})
 			return out
 		3:
 			return [
-				{"kind": "heading", "text": "THE RED TEAM — WHO'S SHOOTING BACK:", "size": 10},
+				{"kind": "heading", "text": "THE RED TEAM — WHO'S SHOOTING BACK:", "size": HOWTO_PAGER_HEADING_SIZE},
 				{"kind": "sprite", "icon": "enemy_smg", "text": "RIFLEMAN — holds range, telegraphs and fires; contact still kills"},
 				{"kind": "sprite", "icon": "enemy_assault", "text": "ELITE — keeps range, telegraphs one shot"},
 				{"kind": "sprite", "icon": "frogman", "text": "FROGMAN — submerged: bullets pass over, GRENADES ONLY"},
 				{"kind": "sprite", "icon": "m_pilot", "text": "DOWNED PILOT — reach him to RESCUE (touch, don't shoot). Not a HOSTILE, so the tally skips him."}]
 		_:
-			var out: Array = [{"kind": "heading", "text": "THE SPECIALISTS — RANGED & ARMORED:", "size": 10}]
+			var out: Array = [{"kind": "heading", "text": "THE SPECIALISTS — RANGED & ARMORED:", "size": HOWTO_PAGER_HEADING_SIZE}]
 			for row in _endless_threats():
 				out.append({"kind": "sprite", "icon": row[0], "tint": row[1], "text": row[2]})
 			return out
@@ -5312,7 +5390,7 @@ func _entry_rows(entry: Dictionary, ei: int, txt: String, is_head: bool, is_tail
 	var f := Art.font()
 	var rows: Array = []
 	var kind: String = entry["kind"]
-	var design_size: int = int(entry.get("size", 11))
+	var design_size: int = int(entry.get("size", HOWTO_PAGER_BODY_SIZE))
 	var size := Art.fs(design_size)
 	var x := ICON_X
 	var max_w := FRAME_INNER_R - x
@@ -5569,7 +5647,7 @@ func _draw_howto_tabs() -> void:
 		var plate: Color = st["plate"]
 		if plate.a > 0.0:
 			_emit_rect(Rect2(tr.position.x, TAB_PLATE_Y, tr.size.x, 16.0), plate)
-		Art.text(self, HOWTO_TABS[i], Vector2(tr.position.x + 4.0, TAB_BASELINE_Y), 10, st["text"])
+		Art.text(self, HOWTO_TABS[i], Vector2(tr.position.x + 4.0, TAB_BASELINE_Y), HudIcons.TYPE_BODY, st["text"])
 		var uh: float = st["underline_h"]
 		if uh > 0.0:
 			_emit_rect(Rect2(tr.position.x + 2.0, TAB_PLATE_Y + 16.0, tr.size.x - 4.0, uh), st["underline"])
@@ -5582,8 +5660,8 @@ func _draw_howto_tabs() -> void:
 	# adding the MODES tab moved it 4->5 automatically, so the counter can't lie to the player.
 	var tab_total := HOWTO_TABS.size()
 	var pg := "%d / %d" % [_howto_page + 1, tab_total]
-	var pw := Art.font().get_string_size(pg, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-	Art.text(self, pg, Vector2(FRAME_INNER_R - pw, TAB_BASELINE_Y), 10, Color(0.7, 0.75, 0.7, 0.85))
+	var pw := Art.font().get_string_size(pg, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x
+	Art.text(self, pg, Vector2(FRAME_INNER_R - pw, TAB_BASELINE_Y), HudIcons.TYPE_BODY, Color(0.7, 0.75, 0.7, 0.85))
 
 
 # c3-05 page 1 — CONTROLS. The input verbs, one per line so each glyph reads against its own
@@ -5602,7 +5680,7 @@ func _draw_howto_tabs() -> void:
 func _howto_page_controls() -> void:
 	var col := Color(0.9, 0.92, 0.8)
 	var y := CONTENT_BODY_Y
-	Art.text(self, "MOVE AND AIM FIRST — THE REST IS EXTRA:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	Art.text(self, "MOVE AND AIM FIRST — THE REST IS EXTRA:", Vector2(ICON_X, y), HudIcons.TYPE_BODY, Color(1.0, 0.7, 0.4))
 	y += 24.0
 	# Each text token after a glyph leads with a space so the word never glues to the device art.
 	y = _verb_line(["@move", " MOVE with %s." % _dir_devices("move")], y, col) + VERB_ROW_GAP
@@ -5648,12 +5726,12 @@ func _dir_devices(prefix: String) -> String:
 # the middle of a wrapped line), so it reads as one plain sentence.
 func _howto_page_warchest() -> void:
 	var y := CONTENT_BODY_Y
-	Art.text(self, "ONE HIT AND YOU DROP.", Vector2(ICON_X, y), 13, Color(1.0, 0.9, 0.6))
+	Art.text(self, "ONE HIT AND YOU DROP.", Vector2(ICON_X, y), HudIcons.TYPE_LABEL, Color(1.0, 0.9, 0.6))
 	y += 22.0
 	y = _body_block("No health bar. Use cover and keep moving. Death strips vests, buffs and TRIPLE SHOT — buy them again.",
-		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
+		ICON_X, y, HudIcons.TYPE_BODY, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 16.0   # was 26 — the death-strip sentence grew this block a line; 16 keeps the BACK-plate clearance the frame-bounds ratchet measures
-	Art.text(self, "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", Vector2(ICON_X, y), 11, Color(1.0, 0.9, 0.6))
+	Art.text(self, "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", Vector2(ICON_X, y), HudIcons.TYPE_BODY, Color(1.0, 0.9, 0.6))
 	y += 18.0
 	# aaa-c6: the page used to say "no second chance" and offer the chest only for a PARTNER,
 	# while the sim grants three continues it never mentioned — self-revive, a free rally at
@@ -5671,7 +5749,7 @@ func _howto_page_warchest() -> void:
 	y = _body_block("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back up — in ENDLESS chained deaths slow it to %ds, and with nobody up that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives."
 			% [SimWorld.BROKE_RESPAWN_TICKS / 60,
 				SimWorld.BROKE_RESPAWN_TICKS * SimWorld.BROKE_WAIT_MAX_MULT / 60],
-		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
+		ICON_X, y, HudIcons.TYPE_BODY, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 10.0
 	# All THREE rates come off the sim consts so this sentence can never drift from the payout.
 	# review tell 1: the WIN conversion — the richest rate in the economy, the one the 6x spend
@@ -5681,7 +5759,7 @@ func _howto_page_warchest() -> void:
 	y = _body_block("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home."
 			% [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT,
 				SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)],
-		ICON_X, y, 11, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
+		ICON_X, y, HudIcons.TYPE_BODY, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
 	y += 10.0
 	y = _verb_line(["Hold ", "@wheel", " to open the supply wheel."],
 		y, Color(0.85, 0.9, 0.8))
@@ -5693,7 +5771,7 @@ func _howto_page_warchest() -> void:
 # one width-clamped line (same grammar as the ENDLESS roster) so the page scans by name.
 func _howto_page_modes() -> void:
 	var y := CONTENT_BODY_Y
-	Art.text(self, "MODES + ASSIST:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	Art.text(self, "MODES + ASSIST:", Vector2(ICON_X, y), HudIcons.TYPE_BODY, Color(1.0, 0.7, 0.4))
 	y += 25.0
 	var name_col := Color(1.0, 0.85, 0.45)
 	var body_col := Color(0.9, 0.92, 0.82)
@@ -5706,9 +5784,9 @@ func _howto_page_modes() -> void:
 		if Art.TEX.has(m[0]):
 			_draw_sprite_fit(m[0], Rect2(ICON_X + 2.0, y - 17.0, 20.0, 20.0), Art.tint(m[0]))
 		var nm: String = m[1]
-		Art.text(self, nm, Vector2(TEXT_X, y - 5.0), 10, name_col)
-		var nx := TEXT_X + Art.tw(nm, 10) + 8.0
-		Art.text(self, "— " + String(m[2]), Vector2(nx, y - 5.0), 9, body_col)
+		Art.text(self, nm, Vector2(TEXT_X, y - 5.0), HudIcons.TYPE_BODY, name_col)
+		var nx := TEXT_X + Art.tw(nm, HudIcons.TYPE_BODY) + 8.0
+		Art.text(self, "— " + String(m[2]), Vector2(nx, y - 5.0), HudIcons.TYPE_MICRO, body_col)
 		y += 29.0
 
 
@@ -5716,7 +5794,7 @@ func _howto_page_modes() -> void:
 # instead of the 18px it once crammed under the ranged block.
 func _howto_page_enemies() -> void:
 	var y := CONTENT_BODY_Y
-	Art.text(self, "THE RED TEAM — WHO'S SHOOTING BACK:", Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	Art.text(self, "THE RED TEAM — WHO'S SHOOTING BACK:", Vector2(ICON_X, y), HudIcons.TYPE_BODY, Color(1.0, 0.7, 0.4))
 	y += 24.0
 	# sol-08: front the LIVE red-team sprites the player now sees (rusher/elite draw the pack enemy_* cel bakes).
 	# c4-09: the FROGMAN line now names its bullet-IMMUNITY outright — while submerged, bullets pass
@@ -5727,7 +5805,7 @@ func _howto_page_enemies() -> void:
 		["frogman", "FROGMAN — submerged: bullets pass over, GRENADES ONLY"]]
 	for r in roster:
 		_draw_sprite_fit(r[0], Rect2(ICON_X, y - 22, 28, 26), Art.tint(r[0]))
-		y = maxf(y + 12.0, _body_block(r[1], TEXT_X, y - 6, 11, Color(0.9, 0.92, 0.82), BODY_W)) + 16.0
+		y = maxf(y + 12.0, _body_block(r[1], TEXT_X, y - 6, HudIcons.TYPE_BODY, Color(0.9, 0.92, 0.82), BODY_W)) + 16.0
 	# c4-09: the DOWNED PILOT is the reason the HOSTILES tally can read fewer than the bodies on
 	# screen — he is a rescue objective, not a kill (the sim's wave-clear check and the HUD counter
 	# both skip him), and shooting him does nothing. Called out as a note UNDER the red-team roster
@@ -5736,7 +5814,7 @@ func _howto_page_enemies() -> void:
 	if Art.TEX.has("m_pilot"):   # c4-09: same guard — the pilot NOTE survives a missing sprite
 		_draw_sprite_fit("m_pilot", Rect2(ICON_X, y - 22, 28, 26), Art.tint("m_pilot"))
 	_body_block("DOWNED PILOT — reach him to RESCUE (touch, don't shoot). Not a HOSTILE, so the tally skips him.",
-		TEXT_X, y - 6, 11, Color(0.85, 0.95, 0.85), BODY_W)
+		TEXT_X, y - 6, HudIcons.TYPE_BODY, Color(0.85, 0.95, 0.85), BODY_W)
 
 
 # c3-05 SPECIALS tab — the ranged specialists. NOT an Endless roster: BOTH modes
@@ -5813,7 +5891,7 @@ func _howto_page_endless(page: int = 0) -> void:
 	# Both modes field these ranged specialists (campaign from sector 2 via
 	# SECTOR_SPECIALS, Endless from wave 3) — teach their counters. The "(1/2)"
 	# marker tells a paging player this roster continues on the next sub-page.
-	Art.text(self, "THE SPECIALISTS — RANGED & ARMORED (%d/%d):" % [page + 1, pages], Vector2(ICON_X, y), 10, Color(1.0, 0.7, 0.4))
+	Art.text(self, "THE SPECIALISTS — RANGED & ARMORED (%d/%d):" % [page + 1, pages], Vector2(ICON_X, y), HudIcons.TYPE_BODY, Color(1.0, 0.7, 0.4))
 	y += 24.0
 	# Threat rows are the tight spot, so their pitch is DERIVED, not typed: fit
 	# every row's text baseline between here (`y`) and the last baseline the BACK
@@ -5864,10 +5942,10 @@ func _howto_page_endless(page: int = 0) -> void:
 		_draw_sprite_fit(rows[i][0], Rect2(ICON_X, sy - TEXT_MID_10 - box / 2.0, box, box), rows[i][1])
 		var parts: PackedStringArray = String(rows[i][2]).split(" ", true, 1)
 		var name := parts[0]
-		var name_w := f.get_string_size(name + " ", HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
-		Art.text(self, name, Vector2(TEXT_X, sy), 10, name_col, text_w)
+		var name_w := f.get_string_size(name + " ", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x
+		Art.text(self, name, Vector2(TEXT_X, sy), HudIcons.TYPE_BODY, name_col, text_w)
 		if parts.size() > 1:
-			_body_block(parts[1], TEXT_X + name_w, sy, 10, body_col, maxf(0.0, text_w - name_w), 11.0)
+			_body_block(parts[1], TEXT_X + name_w, sy, HudIcons.TYPE_BODY, body_col, maxf(0.0, text_w - name_w), 11.0)
 	_draw_howto_endless_nav(page, pages)
 
 
@@ -5898,12 +5976,12 @@ func _draw_howto_page_nav(page: int, pages: int) -> void:
 			var hot := side == _howto_nav_hover
 			_emit_rect(rects[side], Color(1, 1, 1, 0.22 if hot else 0.10))
 			_emit_rect_outline(rects[side], Color(0.85, 0.9, 0.72, 0.6 if hot else 0.35), 1.0)
-	Art.text_center(self, "<", rects[0].get_center().x, ny, 12, live if enabled[0] else dim)
-	Art.text_center(self, ">", rects[1].get_center().x, ny, 12, live if enabled[1] else dim)
+	Art.text_center(self, "<", rects[0].get_center().x, ny, HudIcons.TYPE_MICRO, live if enabled[0] else dim)
+	Art.text_center(self, ">", rects[1].get_center().x, ny, HudIcons.TYPE_MICRO, live if enabled[1] else dim)
 	# Draw the SAME padded string the geometry measures (see _howto_endless_counter), so the
 	# < / > sit exactly against the counter's footprint instead of drifting off a width the
 	# counter never actually occupied. text_center centers it, so the pad stays symmetric.
-	Art.text_center(self, _howto_page_counter(page, pages), CENTER_X, ny, 12, Color(0.8, 0.82, 0.75))
+	Art.text_center(self, _howto_page_counter(page, pages), CENTER_X, ny, HudIcons.TYPE_MICRO, Color(0.8, 0.82, 0.75))
 
 
 # Shared geometry for the ENDLESS PREV/NEXT chevrons — a "<" rect left of the counter and
@@ -5922,8 +6000,8 @@ func _howto_page_counter(page: int, pages: int) -> String:
 func _howto_endless_nav_rects() -> Array[Rect2]:
 	var f := Art.font()
 	var mid := _howto_page_counter(_howto_subpage(), _howto_subpages())
-	var mw := f.get_string_size(mid, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-	var cw := f.get_string_size("<", HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
+	var mw := f.get_string_size(mid, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO).x
+	var cw := f.get_string_size("<", HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO).x
 	var x0 := CENTER_X - (cw + mw + cw) / 2.0
 	var top := _howto_nav_y() - 12.0
 	return [Rect2(x0 - 6.0, top, cw + 12.0, 20.0),
@@ -6089,7 +6167,7 @@ func _draw_opts_header() -> void:
 		# only line on OPTS_SUBLINE_Y whose ink reached y96, one pixel into the channel the
 		# focused row's halo needs (ring top 97) — the same plate-vs-ink mistake TITLE_HEAD_MARGIN
 		# made, one pixel instead of three. The emphasis is the GREEN, not the extra pixel.
-		_center_text("DEFAULTS RESTORED", OPTS_SUBLINE_Y, 8, Art.safe(Color(0.55, 0.95, 0.5, ba)))
+		_center_text("DEFAULTS RESTORED", OPTS_SUBLINE_Y, HudIcons.TYPE_MICRO, Art.safe(Color(0.55, 0.95, 0.5, ba)))
 	elif _menu_items()[sel]["id"] == "reset_defaults":
 		# When focus is on RESET DEFAULTS, the summary line names EXACTLY what the
 		# two-press confirm will wipe — every settings group at once — so the player
@@ -6101,15 +6179,15 @@ func _draw_opts_header() -> void:
 		# (every setting already at its factory default) the header says so plainly instead of
 		# threatening a wipe that would change nothing.
 		if _menu_items()[sel].get("disabled", false):
-			_center_text("EVERY SETTING IS ALREADY AT ITS FACTORY DEFAULT", OPTS_SUBLINE_Y, 8, SUBTITLE_COL)
+			_center_text("EVERY SETTING IS ALREADY AT ITS FACTORY DEFAULT", OPTS_SUBLINE_Y, HudIcons.TYPE_MICRO, SUBTITLE_COL)
 		elif _confirm >= 0 and _confirm == sel:
-			_center_text("PRESS AGAIN TO RESTORE ALL DEFAULTS", OPTS_SUBLINE_Y, 8, WARN_COL)
+			_center_text("PRESS AGAIN TO RESTORE ALL DEFAULTS", OPTS_SUBLINE_Y, HudIcons.TYPE_MICRO, WARN_COL)
 		else:
 			_center_text("RESET RESTORES AUDIO / HAPTICS / ACCESSIBILITY / GAMEPLAY / DISPLAY TO DEFAULTS",
-				OPTS_SUBLINE_Y, 8, WARN_COL)
+				OPTS_SUBLINE_Y, HudIcons.TYPE_MICRO, WARN_COL)
 	else:
 		_center_text(a11y_summary(main._motion < 0.5, main.colorblind,
-			main._rumble_on, main._fullscreen), OPTS_SUBLINE_Y, 8, SUBTITLE_COL)
+			main._rumble_on, main._fullscreen), OPTS_SUBLINE_Y, HudIcons.TYPE_MICRO, SUBTITLE_COL)
 
 
 # drain-menu: the NAME/VALUE separators a menu ROW LABEL can use — ": " for the toggle
@@ -6344,13 +6422,13 @@ func _verb_line(segs: Array, base_y: float, col: Color) -> float:
 			# mid-word at a hardcoded 612 (which was 41px outside the real border, so
 			# the clip landed on the ornament). Continuation lines hang under the
 			# text column, clear of the device glyph.
-			var seg_w := f.get_string_size(seg, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+			var seg_w := f.get_string_size(seg, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x
 			if x + seg_w <= FRAME_INNER_R:
-				Art.text(self, seg, Vector2(x, base_y), 11, col)
+				Art.text(self, seg, Vector2(x, base_y), HudIcons.TYPE_BODY, col)
 				x += seg_w
 			else:
 				bottom = maxf(bottom,
-					_body_block(seg, x, base_y, 11, col, FRAME_INNER_R - x, VERB_LEAD))
+					_body_block(seg, x, base_y, HudIcons.TYPE_BODY, col, FRAME_INNER_R - x, VERB_LEAD))
 				x = FRAME_INNER_R
 	return bottom
 
@@ -6359,6 +6437,20 @@ const _LEG_H := 11.0   # legend glyph height (aspect preserved per sprite)
 const LEG_GAP := 14.0        # c4-05: default inter-segment spacing on a legend/footer row
 const LEG_MIN_GAP := 5.0     # c4-05: floor the gap compresses to (glyph+label never collide)
 const LEG_SAFE_W := CANVAS_WIDTH - 16.0   # c4-05: legend must fit this band (8px safe margin/side)
+
+# c4-20: THE ONE off-grid size left in menu.gd, and it is a genuine exception, not an oversight.
+# These are the letters stamped INSIDE a keycap sprite — glyph_key_wide is 64x64 drawn at _LEG_H,
+# so the cap the letters must fit inside is 11px wide, and legend_extent reserves exactly that
+# 11px (never the letters' own width) before placing the segment's LABEL. The stamp therefore
+# overhangs its reserved slot symmetrically, into the inter-segment gap. MEASURED string widths
+# at 6 vs the 8px rung: "ESC" 16 -> 21, "L/R" 14 -> 19, "UP/DN" 25 -> 33, "HOME/END" 42 -> 56.
+# At 6 the worst overhang is 15.5px against a LEG_GAP of 14 (it already grazes); at 8 it is 22.5px,
+# i.e. past the default gap and into LEG_MIN_GAP's 5px floor — the stamped letters would collide
+# with the neighbouring segment's label, and no amount of gap compression fixes it because the
+# letters' width is never reserved. 6 is therefore the tuned compromise for THIS plate, the way
+# TYPE_BODY (10) is the tuned compromise for a 16px HUD row: an exception with a measurement
+# behind it. Every OTHER size in menu.gd is a named rung.
+const KEYCAP_STAMP_SIZE := 6
 
 
 # Legend glyph width for a segment: "tex" = registry sprite, "stamp" = letters
@@ -6384,7 +6476,7 @@ static func legend_extent(segs: Array, gap := LEG_GAP, label_cap := 0.0) -> Arra
 	var total := -gap   # segments separated by `gap` px; first one has no gap
 	for seg in segs:
 		var gw := _glyph_w(seg)
-		var lw := f.get_string_size(_legend_label(seg), HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
+		var lw := f.get_string_size(_legend_label(seg), HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO).x
 		if label_cap > 0.0:
 			lw = minf(lw, label_cap)   # c4-05: ellipsized labels measure at the cap (last-resort)
 		total += gw + (3.0 if gw > 0.0 else 0.0) + lw + gap
@@ -6458,13 +6550,13 @@ static func legend_primitives(segs: Array, y: float, gap := LEG_GAP, label_cap :
 		if gw > 0.0:
 			grect = Rect2(x, y - _LEG_H / 2.0, gw, _LEG_H)
 			x += gw + 3.0
-		var lsz := f.get_string_size(_legend_label(seg), HORIZONTAL_ALIGNMENT_LEFT, -1, 8)
+		var lsz := f.get_string_size(_legend_label(seg), HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO)
 		var lw: float = lsz.x
 		if label_cap > 0.0:
 			lw = minf(lw, label_cap)   # c4-05: last-resort ellipsis width so nothing clips off-canvas
 		# Real font metrics (measured width + ascent/height), not a hard-coded 8/9px
 		# box: Art.text places the baseline at y+3, so the ink spans up by the ascent.
-		var lrect := Rect2(x, y + 3.0 - f.get_ascent(8), lw, lsz.y)
+		var lrect := Rect2(x, y + 3.0 - f.get_ascent(HudIcons.TYPE_MICRO), lw, lsz.y)
 		out.append({"seg": seg, "glyph": grect, "label": lrect})
 		x += lw + gap
 	return out
@@ -6479,7 +6571,7 @@ static func legend_primitives(segs: Array, y: float, gap := LEG_GAP, label_cap :
 # changing the _emit_label signature (a headless capture-test subclass overrides that seam
 # with the fixed 3-arg shape — its recorded box stays size-independent since the caption is
 # right-aligned, so its clearance asserts hold regardless of the rendered size).
-var _label_size := 8
+var _label_size := HudIcons.TYPE_MICRO
 # c3-13: optional width clamp the next _emit_label draw passes to Art.text (0 = no clip). Sits
 # alongside _label_size as a transient stamp so the _emit_label SEAM keeps its fixed 3-arg shape
 # (the capture-test subclass overrides it), while callers that need a max_w set this first.
@@ -6504,8 +6596,12 @@ func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
 	# rebound a verb staring at the frozen _GLYPH_PAD ship default. Menus are P1's (device 0).
 	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act),
 		main.pad_bind_for_glyph(act))
-func _emit_stamp(txt: String, pos: Vector2, c: Color) -> void:
-	draw_string(Art.font(), pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, c)
+func _emit_stamp(txt: String, pos: Vector2, c: Color, size: int) -> void:
+	# c4-20: `size` became an argument because this one seam had TWO callers with genuinely
+	# different answers — the frame's codename tab (HudIcons.TYPE_MICRO, on the em grid) and the
+	# keycap letters (KEYCAP_STAMP_SIZE, the documented exception). While the size was hardcoded
+	# to 6 inside the seam, the codename inherited an off-grid stencil it never asked for.
+	draw_string(Art.font(), pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, size, c)
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
 	Art.text(self, txt, pos, _label_size, c, _label_max_w)
 
@@ -6530,7 +6626,7 @@ func _emit_group_caption(mitems: Array, k: int, cy: float, plate_left := CENTER_
 	# plate_left-25, clear of the selected-row cycle arrow (drawn at plate_left-13). Routed
 	# through _emit_label/_emit_rect so a headless capture test can inspect the exact boxes.
 	var f := Art.font()
-	var hsz := 10
+	var hsz := HudIcons.TYPE_BODY
 	var gw := f.get_string_size(ghdr, HORIZONTAL_ALIGNMENT_LEFT, -1, hsz).x
 	# c4-14: anchor the caption gutter to the group-start row's OWN column left edge (passed by
 	# _draw as row_rect(g,k).x) so a wrapped block's header rides its column, not the far-left
@@ -6546,7 +6642,7 @@ func _emit_group_caption(mitems: Array, k: int, cy: float, plate_left := CENTER_
 	_emit_rect(Rect2(gx - padx, ptop, gw + padx * 2.0, ph), Color(0.12, 0.16, 0.09, 0.6))
 	_label_size = hsz
 	_emit_label(ghdr, Vector2(gx, by), CAPTION_COL)
-	_label_size = 8
+	_label_size = HudIcons.TYPE_MICRO
 	_emit_rect(Rect2(gx - padx, ptop + ph - 1.0, gw + padx * 2.0, 1.0), CAPTION_COL)
 
 
@@ -6572,9 +6668,12 @@ func _legend_row(segs: Array, y: float, a: float) -> void:
 				_emit_tex(seg.get("tex", "glyph_key_wide"), grect, Color(1, 1, 1, a))
 				if seg.has("stamp"):
 					var st: String = seg["stamp"]
-					var sw := f.get_string_size(st, HORIZONTAL_ALIGNMENT_LEFT, -1, 6).x
+					# KEYCAP_STAMP_SIZE, not a rung — see that const for the measurement. The
+					# measure and the draw MUST agree or the letters stop being centred on
+					# their keycap, so both read the same named exception.
+					var sw := f.get_string_size(st, HORIZONTAL_ALIGNMENT_LEFT, -1, KEYCAP_STAMP_SIZE).x
 					_emit_stamp(st, Vector2(grect.position.x + (grect.size.x - sw) / 2.0, y + 2.0),
-						Color(0.15, 0.16, 0.12, a))
+						Color(0.15, 0.16, 0.12, a), KEYCAP_STAMP_SIZE)
 		# When the hard cap is armed, clamp the label draw to the SAME width the layout reserved
 		# so Art.text ellipsizes to match its measured box (0.0 = no clip, the usual path).
 		_label_max_w = p["label"].size.x if cap > 0.0 else 0.0
@@ -6624,7 +6723,7 @@ func _draw_footer_help(row_help: String, strip_top: float) -> float:
 	# eating the UNMUTE recovery instruction the muted-row prefix front-loads. Every
 	# destructive-row label routes through _row_fit/_ellipsize above, so the cue-preserving
 	# path still covers all destructive truncation; nothing here needs keep_tail/warn.
-	var hs: int = mini(Art.fs(8), FOOTER_HELP_MAX_SIZE)
+	var hs: int = mini(Art.fs(HudIcons.TYPE_MICRO), FOOTER_HELP_MAX_SIZE)
 	var base_off: float = Art.font().get_ascent(hs)
 	_center_text(_trim_tail(row_help, hs, CANVAS_WIDTH - 24.0), strip_top + base_off, hs, FOOTER_HELP_COL)
 	_emit_rect(Rect2(CENTER_X - BTN.x / 2.0, strip_top + base_off + 1.0, BTN.x, 1.0), DIVIDER_DIM)

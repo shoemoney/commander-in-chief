@@ -107,6 +107,19 @@ const TEX := {
 	"ui_bar_frame": preload(ART + "ui/bar_frame.png"),
 	"ui_dial_fuel": preload(ART + "ui/dial_fuel.png"),
 	"ui_panel": preload(ART + "ui/panel.png"),
+	# c4-20: the BEVELLED plate hardware, owned and shipped but previously preloaded nowhere.
+	# Three 190x230 frames that tile as one 570px plate: `_l` carries the warm rust LEFT bezel,
+	# `_r` the matching RIGHT bezel, `_c` the neutral middle whose top row is the bright
+	# highlight rail and whose bottom row is the dark shadow rail. All three are hollow between
+	# those rails, so the HUD composes them as a five-rail frame OVER its existing dark backing
+	# rather than replacing it (the backing is what the text-contrast math is measured against).
+	# MEASURED, and pinned by test_hud::test_plate_metal_frame_windows_are_solid_pixels:
+	# opaque bbox (11,4)-(179,223); side bezels solid at x 12..25 / 165..178 and pixel-UNIFORM
+	# down the height (so a 1px slice stretched vertically is exact); top rail solid from y 5;
+	# bottom rail solid to y 222. See HudIcons.plate_frame_geometry.
+	"ui_plate_metal_l": preload(ART + "ui/plate_metal_l.png"),
+	"ui_plate_metal_c": preload(ART + "ui/plate_metal_c.png"),
+	"ui_plate_metal_r": preload(ART + "ui/plate_metal_r.png"),
 	"ui_key_blank": preload(ART + "ui/key_blank.png"),
 	"ui_pad_x": preload(ART + "ui/pad_x.png"),
 	"ui_pad_y": preload(ART + "ui/pad_y.png"),
