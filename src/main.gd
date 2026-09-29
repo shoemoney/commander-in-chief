@@ -7782,6 +7782,22 @@ static func _ground_stops(mode: String) -> Array:
 		# saturated orange rectangle on a neutral floor, across the whole screen. The
 		# base/dirt relationship is a single design decision spread over ten
 		# constants, not five independent swatches, and it has to move as one.
+		# a3-23 ATTEMPTED, BLOCKED, REVERTED. Five labs named the same thing: the
+		# player is not the first thing the eye finds. DeepSeek's prescription was
+		# "push the ground down 15-20% in value, 30% in saturation" and it is the
+		# right idea — but the floor is not available to give.
+		#
+		# _ground_stops()[0] * GROUND_SHADE is a load-bearing contrast input in four
+		# test files, and test_the_result_card_scrims_its_backdrop pins the brightest
+		# campaign sand at lum > 0.12. Measured: the value this file was running at
+		# is ALREADY 0.10183 against that 0.12 floor, so there is no 15-20% to take
+		# — the ground is living on borrowed headroom. Darkening it by 12% to buy
+		# actor contrast spends a margin four other files depend on.
+		#
+		# So the floor holds, and actor contrast has to come from the actors. This
+		# is worth knowing as a standing constraint: the single most-recommended fix
+		# across the loop is architecturally unavailable here, and anyone who tries
+		# it will find the ratchet before they find the reason.
 		[Color(0.95, 0.72, 0.42), Color(0.90, 0.62, 0.34), Color(0.82, 0.52, 0.28),
 			Color(0.70, 0.44, 0.26), Color(0.52, 0.30, 0.24)],
 		[Color(0.58, 0.50, 0.38, 0.7), Color(0.49, 0.42, 0.33, 0.7), Color(0.42, 0.38, 0.24, 0.7),
@@ -8187,9 +8203,9 @@ func _ground_shadow(pos: Vector2, r: float, a := 0.46, tint := Color(0.0, 0.03, 
 	# One extra draw per shadow across ~25 sites is the cost.
 	draw_texture_rect(_shadow_tex, _shadow_ellipse(pos, r), false,
 		Color(tint.r, tint.g, tint.b, a))
-	var core := _shadow_ellipse(pos, r * 0.52)
+	var core := _shadow_ellipse(pos, r * 0.60)
 	draw_texture_rect(_shadow_tex, core, false,
-		Color(tint.r * 0.6, tint.g * 0.6, tint.b * 0.6, minf(1.0, a * 1.9)))
+		Color(tint.r * 0.5, tint.g * 0.5, tint.b * 0.5, minf(1.0, a * 2.6)))
 
 
 static var _vehicle_spec_cache := {}
