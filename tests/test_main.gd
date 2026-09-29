@@ -4263,3 +4263,87 @@ func test_an_explosion_puts_light_in_the_room() -> void:
 		var rbody := src.substr(rstart, src.find("\nfunc ", rstart + 1) - rstart)
 		Runner.T.ok(rbody.contains("_flash_col = Color(1, 1, 1)"),
 			"_reset clears the tint — a new run must not inherit the last blast's colour")
+
+
+# ---------------------------------------------------------------------------
+# A body should have blood under it.
+#
+# Measured on HEAD: NOTHING in `_ev_kill` touched `_scorch`. The only match for
+# "blood" in the entire 160-line handler was a COMMENT naming "no blood pool" as
+# the thing being avoided — the author had noticed the gap and written it down
+# rather than closed it. Consequence: a firefight left corpses lying on
+# perfectly clean sand, and every ground mark the game could draw was one of the
+# same two dark scorch greys, so "fought-over" and "scorched" looked identical.
+#
+# The ratchet is a WIRING ratchet again, because the defect was an absence: a
+# test that asserted "blood looks right" would pass on code that never emits
+# any. It requires the pool to be EMITTED, gated on flesh, and drawn by the
+# shared decal painter rather than a private second one.
+#
+# Mutation table: delete the `_scorch.append` (fails 1); drop the flesh gate so
+# drones bleed (fails 2); move the pool onto the pilot branch (fails 3 — that
+# kill deliberately pays nothing visual); give blood the cracked-earth card
+# (fails 4 — fractured ground is what a BLAST does to a surface); draw it as a
+# single circle (fails 5 — a pool is never round).
+# ---------------------------------------------------------------------------
+func test_a_body_leaves_blood_under_it() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var kstart := src.find("func _ev_kill(")
+	Runner.T.ok(kstart >= 0, "found _ev_kill")
+	if kstart < 0:
+		return
+	var kend := src.find("\nfunc ", kstart + 1)
+	var kbody := src.substr(kstart, kend - kstart)
+
+	# 1. It is emitted at all.
+	Runner.T.ok(kbody.contains("\"blood\": true"),
+		"a flesh kill appends a blood decal — measured HEAD appended nothing, and the only mention "
+		+ "of a blood pool in the handler was a comment describing its absence")
+	Runner.T.ok(kbody.contains("_scorch.append"),
+		"the pool rides the shared decal array, so it inherits the a2-13 campaign lingering "
+		+ "(blood dries to a ghost) instead of being scrubbed like the old fast cleanup")
+	# 2. FLESH ONLY — the same predicate the death-yell uses. A drone bleeding is
+	#    a bug, not a detail.
+	Runner.T.ok(kbody.contains("if not _METAL_KINDS.has(kkind) and kkind != \"colossus\" and kkind != \"broadcast\":"),
+		"the pool is gated on flesh exactly as the death-yell is — metal does not bleed")
+	var app_at := kbody.find("\"blood\": true")
+	Runner.T.ok(app_at > 0 and kbody.find("_METAL_KINDS.has(kkind)") < app_at,
+		"the gate is checked BEFORE the append, not after — a gate that runs afterwards is a comment")
+	# 3. NOT on the pilot branch. That kill's own comment says the view must not
+	#    pay for it, and a blood pool is paying.
+	var pilot_at := kbody.find("RANSOM LOST")
+	Runner.T.ok(pilot_at < 0 or pilot_at < app_at,
+		"the pool is NOT on the pilot/ransom branch — that kill deliberately pays nothing visual, and "
+		+ "RANSOM LOST precedes the append")
+	# 4/5. The painter: shared, no cracked earth, more than one lobe.
+	var dstart := src.find("func _draw_scorch(")
+	Runner.T.ok(dstart > 0, "found _draw_scorch")
+	if dstart > 0:
+		var dbody := src.substr(dstart, src.find("\nfunc ", dstart + 1) - dstart)
+		Runner.T.ok(dbody.contains("s.get(\"blood\", false)"),
+			"the shared decal painter branches on blood — one painter, two decal families, so blood "
+			+ "keeps the off-screen cull and the aging for free")
+		var b_at := dbody.find("s.get(\"blood\", false)")
+		# Slice the blood block itself, to its `continue` — not a fixed window and
+		# not a tab-prefix search, either of which silently truncates and then
+		# reports the truncation as a missing feature.
+		var c_at := dbody.find("continue", b_at)
+		Runner.T.ok(b_at > 0 and c_at > b_at, "the blood block is delimited by its own `continue`")
+		if b_at > 0 and c_at > b_at:
+			var bblock := dbody.substr(b_at, c_at - b_at)
+			var cr_at := dbody.find("fx_groundbreak")
+			Runner.T.ok(cr_at > c_at,
+				"blood returns before the cracked-earth card — fractured ground is what a blast does "
+				+ "to a surface, and a man bleeding on it does not crack it")
+			Runner.T.ok(bblock.contains("for k in 3"),
+				"the pool draws three offset lobes, not one circle — a single circle is a sticker at "
+				+ "9-13px. (The lobes are a LOOP, so counting Art.circle( calls would under-report "
+				+ "them; the loop bound is the real proof.)")
+			Runner.T.ok(bblock.count("Art.circle(") >= 2,
+				"lobe call + a darker core pool, so the shape has internal structure (found %d calls)"
+					% bblock.count("Art.circle("))
+			# Colour family: blood is red-dominant, scorch is neutral-dark. A "blood"
+			# that lerped toward the scorch greys would pass every structural check.
+			Runner.T.ok(bblock.contains("0.26, 0.045, 0.035"),
+				"the pool uses the blood colour family (0.26, 0.045, 0.035) — the scorch greys would "
+				+ "make this another identical dark crater, which is the defect")

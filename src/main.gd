@@ -4270,6 +4270,25 @@ func _ev_kill(ev: Dictionary) -> void:
 	_corpses.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
 		"kind": _CORPSE_TEX.get(kkind, "elite"),
 		"spin": cspin, "wet": kwet})
+	# a2-18: a body with no blood under it. Measured: NOTHING in this handler
+	# touched `_scorch` — the only match for "blood" in the whole function was a
+	# COMMENT naming "no blood pool" as the thing being avoided. So a firefight
+	# left corpses lying on perfectly clean sand, and every decal the game could
+	# draw was one of the same two dark scorch greys.
+	#
+	# FLESH ONLY, on the same predicate the death-yell uses (`_METAL_KINDS`, plus
+	# colossus and broadcast): a drone or an MG nest does not bleed, and painting
+	# gore under a parked machine is the kind of detail that reads as a bug. NOT
+	# on the pilot branch above either — that kill deliberately pays nothing
+	# visual, and a pool would be paying.
+	#
+	# It reuses the decal system rather than a new one, so it inherits the a2-13
+	# campaign lingering for free: blood dries to a faint ghost instead of being
+	# scrubbed, which is what a fought-over field should look like.
+	if not _METAL_KINDS.has(kkind) and kkind != "colossus" and kkind != "broadcast":
+		_scorch.append({"x": ev["x"], "y": ev["y"], "t": 0.0,
+			"r": randf_range(9.0, 13.0), "blood": true,
+			"seed": int(ev["x"] ^ (ev["y"] >> 3)) & 0x7fffffff})
 	# Wet kills die in a splash, not a puff — the terrain reacts.
 	if kwet:
 		_sfx.play_at("splash", _to_screen(ev["x"], ev["y"]), -10.0, 1.2)
@@ -13470,6 +13489,26 @@ func _draw_scorch() -> void:
 		if pos.y < -60.0 or pos.y > 420.0:
 			continue
 		var a: float = 0.4 * (1.0 - s["t"])
+		if s.get("blood", false):
+			# a2-18: BLOOD, not scorch. Every decal this file ever made was a
+			# dark scorch in the same two greys, so a firefight left a field of
+			# identical black craters and a body lying on clean sand — the one
+			# thing that reads as "nothing happened here". Blood is its own
+			# colour family, its own alpha (wet, not burnt) and deliberately has
+			# NO cracked-earth card underneath: fractured ground is what a blast
+			# does to a surface, and a man bleeding on it does not crack it.
+			# Three offset lobes off the stored seed, because one circle is a
+			# sticker at 14-18px and a pool is never round.
+			var bp: int = s.get("seed", 0)
+			var br: float = s.get("r", 10.0)
+			var ba: float = 0.4 * (1.0 - float(s["t"]))
+			for k in 3:
+				var ba2: float = float(bp % 360) * 0.01745 + float(k) * 2.09
+				var boff: Vector2 = Vector2.from_angle(ba2) * br * (0.22 + float((bp >> (k * 2)) & 3) * 0.09)
+				Art.circle(self, pos + boff, br * (0.72 - float(k) * 0.12),
+					Color(0.26, 0.045, 0.035, ba * 0.85))
+			Art.circle(self, pos, br * 0.5, Color(0.15, 0.02, 0.015, 0.4 * (1.0 - float(s["t"]))))
+			continue
 		# Cracked-earth decal (the earlier art fx_groundbreak) under the scorch blobs,
 		# rotated per-decal off its world x so no two craters look identical.
 		var gr: float = s["r"] * 1.7
