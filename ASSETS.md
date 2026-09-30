@@ -314,6 +314,6 @@ python3 tools/fetch_cc0.py             # re-derive everything, then verify
 python3 tools/fetch_cc0.py --check     # verify only; exit 1 on any drift
 ```
 
-Kenney members are copied byte-for-byte from the archives in the shared library (`$GAMEASSETS_LIBRARY`, default `/Users/shoemoney/gameassets`). Ground tiles are re-derived from ambientCG's public JSON API: 1K-JPG archive → **colour map only** → centre-crop to 512 → half-offset wrap-blend (so both axes tile) → LANCZOS to 128 → PNG. No normal, roughness, displacement, AO, HDRI or USD data is ever downloaded.
+Kenney members are copied byte-for-byte from the archives in the shared library (`$GAMEASSETS_LIBRARY`, default `~/gameassets`). Ground tiles are re-derived from ambientCG's public JSON API: 1K-JPG archive → **colour map only** → centre-crop to 512 → half-offset wrap-blend (so both axes tile) → LANCZOS to 128 → PNG. No normal, roughness, displacement, AO, HDRI or USD data is ever downloaded.
 
 <!-- END generated: assets/cc0_extra -->

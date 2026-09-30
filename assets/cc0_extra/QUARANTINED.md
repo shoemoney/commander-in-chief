@@ -2,7 +2,7 @@
 
 `tools/fetch_cc0.py` refuses to extract anything it cannot prove is CC0 from a
 licence file **inside the artefact itself**. Two archives in the shared library
-(`/Users/shoemoney/gameassets/source/downloads/`) fail that test and are listed
+(`$GAMEASSETS_LIBRARY/source/downloads/`) fail that test and are listed
 here permanently, with the evidence, so a later reader cannot "helpfully"
 re-add them. `fetch_cc0.py --check` re-asserts that no claimed file's name
 matches either archive.
@@ -68,7 +68,7 @@ other licence statement in the artefact.
 
 ## Not quarantine, but also never import: the CraftPix library
 
-`/Users/shoemoney/gameassets/source/downloads/craftpix-10-year-anniversary/`
+`$GAMEASSETS_LIBRARY/source/downloads/craftpix-10-year-anniversary/`
 (775 packs, ~38 GB) is **unusable in this repository under any circumstance**,
 and is not a licence question that a later audit should re-open:
 

@@ -133,7 +133,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-006.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -144,7 +144,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-009.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -155,7 +155,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-026.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -166,7 +166,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-033.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -177,7 +177,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-038.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -188,7 +188,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-046.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -199,7 +199,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-066.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -210,7 +210,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-080.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -221,7 +221,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-081.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -232,7 +232,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-082.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -243,7 +243,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-092.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -254,7 +254,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-100.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -265,7 +265,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-102.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -276,7 +276,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-105.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -287,7 +287,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-134.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -298,7 +298,7 @@
    "kind": "png",
    "source_pack": "crosshair",
    "source_member": "PNG/Outline/crosshair-146.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_crosshair-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_crosshair-pack.zip",
    "source_url": "https://kenney.nl/assets/crosshair-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'Crosshair Pack (1.1)' / License.txt inside kenney_crosshair-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -381,7 +381,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/footstep_concrete_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -392,7 +392,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactBell_heavy_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -403,7 +403,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactGlass_heavy_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -414,7 +414,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactMetal_medium_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -425,7 +425,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactMetal_medium_002.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -436,7 +436,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactMining_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -447,7 +447,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactPlate_heavy_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -458,7 +458,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactPlate_medium_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -469,7 +469,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactPunch_heavy_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -480,7 +480,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactSoft_heavy_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -491,7 +491,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactTin_medium_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -502,7 +502,7 @@
    "kind": "ogg",
    "source_pack": "sfx_impact",
    "source_member": "Audio/impactWood_heavy_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/impact.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/impact.zip",
    "source_url": "https://kenney.nl/assets/impact-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Impact Sounds (1.0)' / License.txt inside impact.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -513,7 +513,7 @@
    "kind": "mp3",
    "source_pack": "freesound-baggo-notes-railgun",
    "source_member": "railgun-baggonotes-hq.mp3",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/railgun-baggonotes-hq.mp3",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/railgun-baggonotes-hq.mp3",
    "source_url": "https://freesound.org/people/BaggoNotes/sounds/785380/",
    "licence": "CC0-1.0",
    "licence_evidence": "kenney-audio/railgun-LICENSE.txt: 'RailGun_Fire1 by BaggoNotes, Creative Commons Zero (CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -524,7 +524,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/computerNoise_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -535,7 +535,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/engineCircular_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -546,7 +546,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/explosionCrunch_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -557,7 +557,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/explosionCrunch_003.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -568,7 +568,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/forceField_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -579,7 +579,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/impactMetal_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -590,7 +590,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/laserLarge_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -601,7 +601,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/laserRetro_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -612,7 +612,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/laserSmall_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -623,7 +623,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/laserSmall_003.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -634,7 +634,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/lowFrequency_explosion_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -645,7 +645,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/spaceEngineSmall_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -656,7 +656,7 @@
    "kind": "ogg",
    "source_pack": "sfx_scifi",
    "source_member": "Audio/thrusterFire_000.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney-audio/sci-fi.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney-audio/sci-fi.zip",
    "source_url": "https://kenney.nl/assets/sci-fi-sounds",
    "licence": "CC0-1.0",
    "licence_evidence": "'Sci-Fi Sounds (1.0)' / License.txt inside sci-fi.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -667,7 +667,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/click1.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -678,7 +678,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/click2.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -689,7 +689,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/click3.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -700,7 +700,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/click5.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -711,7 +711,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/mouseclick1.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -722,7 +722,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/rollover3.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -733,7 +733,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/switch1.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -744,7 +744,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/switch10.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -755,7 +755,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/switch17.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -766,7 +766,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/switch25.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -777,7 +777,7 @@
    "kind": "ogg",
    "source_pack": "sfx_ui",
    "source_member": "Audio/switch5.ogg",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-audio.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-audio.zip",
    "source_url": "https://kenney.nl/assets/ui-audio",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI SFX Set' / License.txt inside kenney_ui-audio.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -788,7 +788,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile065.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -799,7 +799,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile067.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -810,7 +810,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile068.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -821,7 +821,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile066.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -832,7 +832,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile005.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -843,7 +843,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile047.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -854,7 +854,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile055.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -865,7 +865,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile060.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -876,7 +876,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile092.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -887,7 +887,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile097.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -898,7 +898,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile150.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -909,7 +909,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile158.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -920,7 +920,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile144.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -931,7 +931,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile146.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -942,7 +942,7 @@
    "kind": "png",
    "source_pack": "td_ground",
    "source_member": "PNG/Default size/towerDefense_tile147.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_tower-defense-top-down.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_tower-defense-top-down.zip",
    "source_url": "https://kenney.nl/assets/tower-defense-top-down",
    "licence": "CC0-1.0",
    "licence_evidence": "'Tower Defense (top-down) Pack' / License.txt inside kenney_tower-defense-top-down.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -953,7 +953,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/button_rectangle_depth_border.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -964,7 +964,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/button_rectangle_line.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -975,7 +975,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/button_round_depth_border.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -986,7 +986,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/button_square_depth_border.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -997,7 +997,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/check_round_grey.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1008,7 +1008,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/check_square_grey.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1019,7 +1019,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/check_square_grey_checkmark.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1030,7 +1030,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Extra/Default/divider.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1041,7 +1041,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Extra/Default/divider_edges.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1052,7 +1052,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/icon_outline_checkmark.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1063,7 +1063,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/icon_outline_circle.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1074,7 +1074,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/icon_outline_cross.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1085,7 +1085,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/icon_outline_square.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1096,7 +1096,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Extra/Default/input_outline_rectangle.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1107,7 +1107,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Extra/Default/input_outline_square.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1118,7 +1118,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Extra/Default/input_rectangle.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1129,7 +1129,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Extra/Default/input_square.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1140,7 +1140,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/slide_horizontal_grey.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1151,7 +1151,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/slide_horizontal_grey_section.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1162,7 +1162,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/slide_horizontal_grey_section_wide.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"
@@ -1173,7 +1173,7 @@
    "kind": "png",
    "source_pack": "ui",
    "source_member": "PNG/Grey/Default/slide_vertical_grey.png",
-   "source_archive": "/Users/shoemoney/gameassets/source/downloads/kenney_ui-pack.zip",
+   "source_archive": "$GAMEASSETS_LIBRARY/source/downloads/kenney_ui-pack.zip",
    "source_url": "https://kenney.nl/assets/ui-pack",
    "licence": "CC0-1.0",
    "licence_evidence": "'UI Pack (2.0)' / License.txt inside kenney_ui-pack.zip asserts 'License: (Creative Commons Zero, CC0)' + creativecommons.org/publicdomain/zero/1.0/"

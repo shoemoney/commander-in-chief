@@ -6,7 +6,7 @@ REFUSES to run against anything it cannot prove is CC0 from a licence file
 inside the artefact itself:
 
 1. Kenney's own CC0 packs + two Kenney CC0 sound packs, already sitting in the
-   shared library at ``/Users/shoemoney/gameassets/source/downloads``. Only an
+   shared library at ``$GAMEASSETS_LIBRARY/source/downloads``. Only an
    explicit, enumerated member list is extracted -- never a whole pack.
 2. ambientCG, via its public JSON API, for desert/sand/dirt ground materials.
    The 1K **colour** map only is pulled out of each 1K-JPG archive; the rest of
@@ -83,7 +83,7 @@ OUT = REPO / "assets" / "cc0_extra"
 MANIFEST_PATH = OUT / "MANIFEST.json"
 ASSETS_MD = REPO / "ASSETS.md"
 
-LIBRARY = Path(os.environ.get("GAMEASSETS_LIBRARY", "/Users/shoemoney/gameassets"))
+LIBRARY = Path(os.environ.get("GAMEASSETS_LIBRARY", "~/gameassets")).expanduser()
 DOWNLOADS = LIBRARY / "source" / "downloads"
 CACHE = Path(
     os.environ.get("FETCH_CC0_CACHE", Path.home() / ".cache" / "commander-cc0")
@@ -1265,7 +1265,7 @@ def render_assets_md_section(manifest: dict) -> str:
     lines.append("")
     lines.append(
         "Kenney members are copied byte-for-byte from the archives in the shared "
-        "library (`$GAMEASSETS_LIBRARY`, default `/Users/shoemoney/gameassets`). "
+        "library (`$GAMEASSETS_LIBRARY`, default `~/gameassets`). "
         "Ground tiles are re-derived from ambientCG's public JSON API: 1K-JPG "
         "archive → **colour map only** → centre-crop to 512 → half-offset wrap-blend "
         "(so both axes tile) → LANCZOS to 128 → PNG. No normal, roughness, "
