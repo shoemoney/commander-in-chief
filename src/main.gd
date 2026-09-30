@@ -4252,9 +4252,42 @@ func _ev_explosion(ev: Dictionary) -> void:
 	if not barrel:
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_disc",
 			"sz": 30.0, "grow": 0.55, "fade": 1.8, "rate": 0.12, "col": Color(1.0, 0.82, 0.5, 0.85)})
-	# Dark crater stamp bridges the instant flash and the slow-building scorch.
+	# a3-32 BREAK THE BLAST SILHOUETTE.
+	#
+	# gpt-6.1-sol's THE ONE thing, named twice: "combat the player can read and act
+	# on at full speed -- effects overpowering the actual threats", with the
+	# specific complaint that the Foundry effects "resemble overlapping circular
+	# stamps, occupying considerable space without clearly communicating their
+	# material or direction."
+	#
+	# The stamp was fx_impactdark: ONE 20px near-black disc at 0.6 alpha, centred
+	# exactly on the blast. A perfect circle in the middle of a firefight is read
+	# by the eye as a HOLE or a solid obstacle -- a thing in the world you could
+	# stand behind -- rather than as combustion. Two enormous ones, and the arena
+	# floor stops reading as walkable ground.
+	#
+	# So the single disc becomes a small, softer core plus a ring of irregular
+	# shards. The shards reuse the existing "debris" kind, which draws a rotated
+	# rect -- already angular and non-circular, so the blast silhouette is broken by
+	# construction rather than by a new sprite. They ride the blast's own life
+	# (`rate`) so they cool with the fire instead of outliving it, and they are
+	# drawn UNDER the actors (_draw_fx_under / the alpha pass ordering) so they can
+	# never hide the player or a live round.
+	var _shard_seed := 0
+	# FIVE, not seven: _fx is a 400-entry cap and a drum chain can fire several
+	# blasts in one tick, so this is a real per-frame cost, not a free flourish.
+	for si in 5:
+		_shard_seed += 1
+		var ang := float(_shard_seed) * 0.8976   # irrational-ish step, no collinear spokes
+		var dist := 7.0 + float((_shard_seed * 5) % 9)
+		_fx.append({"x": ev["x"] + int(cos(ang) * dist * Fixed.ONE),
+			"y": ev["y"] + int(sin(ang) * dist * Fixed.ONE),
+			"t": 0.0, "kind": "debris", "rate": 0.30, "spin": ang,
+			"sz": 2.0 + float((_shard_seed * 3) % 4),
+			# ember-dark, cooling to ash across the blast's life
+			"col": Color(0.30, 0.16, 0.10)})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_impactdark",
-		"sz": 20.0, "grow": 0.2, "fade": 0.8, "rate": 0.02, "col": Color(1, 1, 1, 0.6)})
+		"sz": 11.0, "grow": 0.18, "fade": 0.8, "rate": 0.02, "col": Color(1, 1, 1, 0.34)})
 	var wet: bool = sim._in_water(ev["x"], ev["y"])
 	_burst(ev["x"], ev["y"], "splash" if wet else "dust", 8, 1.5, 3.0, 0.3)
 	_blast_debris(ev["x"], ev["y"], wet)
