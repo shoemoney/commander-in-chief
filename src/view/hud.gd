@@ -276,6 +276,10 @@ const GLYPH_GAP := 3.5  # gap between a label's right edge and the LEFT edge of 
 # panel and player rows live in the top ~90px, so this low band can't collide with
 # them; a layout test pins it clear of both the top HUD and the 360px viewport.
 const VERB_LEGEND_Y := 344.0
+# The enemy kinds that count as "a boss is on the field" for a3-27. The gunship
+# and the colossus are the two the campaign docks an HP bar for; the vehicles in
+# the endless arena are not bosses and do not suppress the legend.
+const BOSS_VERB_SUPPRESS := {"gunship": true, "colossus": true}
 # c1-16: kill-streak timer ring geometry. The old ring was a 4.5px radius / 1.5px hairline —
 # near-illegible at the 640-wide design size. A 5.5px radius / 2px stroke is drawn CENTERED in a
 # 14px slot that sits after a 3px gap off the count text, so radius + stroke provably stay inside
@@ -980,11 +984,37 @@ static func verb_active_segs(used: Dictionary, sim: SimWorld = null) -> Array:
 			available = [["wheel", "SUPPLY WHEEL"]]
 			if tank["occupant"] == 0:
 				available = [["grenade", "CANNON"], ["wheel", "SUPPLY WHEEL"]]
+	# a3-27: STOP TEACHING CONTROL VERBS DURING A BOSS FIGHT.
+	#
+	# The legend above already retires once every verb has been used — which the
+	# staged capture shots never satisfy, because the bot in them has not learned
+	# anything, so a reviewer looking at those frames sees the bar on every screen
+	# and reasonably calls it permanent. It is not permanent, and the existing
+	# burning-tank suppression right above is the precedent: when something more
+	# urgent owns the input, optional teaching yields.
+	#
+	# A boss fight is that moment. Gemini-3.8-Flash's iteration-2 pass put the bar
+	# directly on the boss health bar and the phase track in the foundry frame,
+	# which is the one screen where the bottom strip is busiest and the player
+	# least able to read a reminder. Same rule as the tank: yield.
+	if sim != null and _boss_engaged(sim):
+		return []
 	var out: Array = []
 	for s in available:
 		if not used.has(s[0]):
 			out.append(s)
 	return out
+
+
+## Any boss-class enemy on the field. The boss kinds are the ones main.gd draws
+## with the BOSS_RIM treatment and docks an HP bar for, so this is the same set —
+## asked of the sim directly rather than threaded through from the view, because
+## verb_active_segs is static and is called from three places.
+static func _boss_engaged(sim: SimWorld) -> bool:
+	for e in sim.enemies:
+		if BOSS_VERB_SUPPRESS.has(e.get("kind", "")):
+			return true
+	return false
 
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,

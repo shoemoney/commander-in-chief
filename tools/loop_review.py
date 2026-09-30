@@ -45,8 +45,7 @@ KEY = os.environ.get("OPENROUTER_API_KEY") or Path.home().joinpath(".openrouter"
 # a real completion. One per vendor family where possible — five opinions from
 # the same lab agree with each other, which is not evidence.
 ROTATION = [
-    "google/gemini-3.8-flash",
-    "openai/gpt-6-sol-pro",
+    "openai/gpt-6.1-sol",
     "x-ai/grok-4.7",
     "qwen/qwen3.8-omni-flash",
     "deepseek/deepseek-v4.1-flash",
@@ -126,6 +125,37 @@ def render() -> None:
     if "ALL SHOTS DONE" not in r.stdout:
         print("RENDER FAILED:", r.stdout[-800:], r.stderr[-800:])
         sys.exit(1)
+
+
+def ask_codex(model: str, shots: list[str]) -> None:
+    """The advisory reviewer: codex CLI, images attached natively via -i.
+
+    codex is ChatGPT-authenticated here and rejects gpt-6-1-sol outright
+    ("not supported when using Codex with a ChatGPT account"), so the reviewer is
+    pointed at OpenRouter with the Responses wire format codex now requires
+    (wire_api="chat" was removed upstream). Images go in as -i rather than as
+    base64 in a request body, which is what lets the reviewer actually SEE the
+    frames rather than reason about filenames.
+    """
+    import shlex
+    imgs = [s for s in shots if Path(s).exists()]
+    cmd = ["codex", "exec", "-m", model, "--sandbox", "read-only",
+           "--skip-git-repo-check", "-c",
+           'model_providers.openrouter={ name="OpenRouter", base_url="https://openrouter.ai/api/v1", env_key="OPENROUTER_API_KEY", wire_api="responses" }',
+           "-c", 'model_provider="openrouter"']
+    for i in imgs:
+        cmd += ["-i", i]
+    r = subprocess.run(cmd, cwd=REPO, input=PROMPT, capture_output=True, text=True, timeout=1800)
+    text = r.stdout
+    slug = model.replace("/", "_")
+    out = Path(f"/tmp/loop-{slug}.md")
+    out.write_text(text)
+    led = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"asked": []}
+    led["asked"].append({"model": "codex/" + model, "when": time.strftime("%Y-%m-%d %H:%M"),
+                         "shots": [Path(s).name for s in imgs], "out": str(out)})
+    LEDGER.write_text(json.dumps(led, indent=1))
+    print(f"=== codex {model} -> {out} ===")
+    print(text[-9000:])
 
 
 def ask(model: str, shots: list[str]) -> None:
