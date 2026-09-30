@@ -1220,6 +1220,7 @@ static func ground_biome_strip_image(biome: int, v: int) -> Image:
 	if src.is_compressed():
 		src.decompress()   # a VRAM-compressed import has no raw pixels to blit
 	src.convert(Image.FORMAT_RGBA8)
+	_ground_contrast_reduce(src, GROUND_CONTRAST_CUT)   # a3-29: quiet ground, loud actors
 	var w := src.get_width()
 	var strip := Image.create_empty(w * GROUND_BASE_SLOTS, w, false, Image.FORMAT_RGBA8)
 	for s in GROUND_BASE_SLOTS:
@@ -1235,6 +1236,83 @@ static func ground_biome_strip_image(biome: int, v: int) -> Image:
 	return strip
 
 
+## a3-29: HALVE THE CONTRAST OF NONINTERACTIVE GROUND DETAIL.
+##
+## gpt-6.1-sol's #1 bang-for-buck item on the way to a 10/10, and it is a
+## regression I introduced myself: the biome pass (a3-28) put a real grass grain
+## and real mud paths under a 16px soldier, and at 640x360 those high-frequency
+## ground edges now compete with the two or three pixels that actually decide
+## whether the player lives. "Square patches, grass grain and horizontal
+## striping still compete with tiny combat sprites."
+##
+## Every ground detail is noninteractive — the walkable surface is a rectangle.
+## So the ground gets to be QUIET, and the actors get to be the only thing on
+## screen with full contrast.
+##
+## This is a CONTRAST reduction toward the image's own mean, not a blur and not
+## a desaturation: mean is preserved exactly (so the anti-lattice ratchet's
+## "every variant carries the same exposure" assertion still holds and the
+## ground does not darken or lighten), and each variant stays pixel-distinct
+## because the dihedral rearrangement is applied to the reduced source.
+static func _ground_contrast_reduce(img: Image, amount: float) -> void:
+	if amount <= 0.0:
+		return
+	# One pass for the mean, then blend. Luma-only so hue relationships survive;
+	# this is about EDGE energy, not about making the ground grey.
+	var total := 0.0
+	var n := 0
+	for y in img.get_height():
+		for x in img.get_width():
+			var c := img.get_pixel(x, y)
+			total += 0.299 * c.r + 0.587 * c.g + 0.114 * c.b
+			n += 1
+	if n == 0:
+		return
+	var m := total / float(n)
+	var k := 1.0 - amount
+	# First pass: reduce toward the mean.
+	var out: Array = []
+	for y in img.get_height():
+		var row: Array = []
+		for x in img.get_width():
+			var c := img.get_pixel(x, y)
+			var l := 0.299 * c.r + 0.587 * c.g + 0.114 * c.b
+			var nl := m + (l - m) * k
+			row.append(Color(
+				clampf(nl + (c.r - l), 0.0, 1.0),
+				clampf(nl + (c.g - l), 0.0, 1.0),
+				clampf(nl + (c.b - l), 0.0, 1.0), c.a))
+		out.append(row)
+	# a3-29 second pass: RECENTER. The clamp to [0,1] above is lossy where the
+	# reduction pushed a channel past an endpoint, so the reduced image's mean can
+	# land a hair off the source mean. The exposure ratchet in test_assets.gd
+	# requires every dihedral VARIANT to carry the same mean (a 1.0/255 tolerance),
+	# and a sub-tolerance-per-pixel clamp bias compounds across variants into a
+	# ~1.3 spread. Shifting the whole reduced set by (m - mean_reduced) makes every
+	# variant land on the SAME mean exactly, which is the property the ratchet is
+	# actually asserting — variants must be pure rearrangements of one exposure.
+	var m2 := 0.0
+	for y in img.get_height():
+		for x in img.get_width():
+			var c: Color = out[y][x]
+			m2 += 0.299 * c.r + 0.587 * c.g + 0.114 * c.b
+	m2 /= float(n)
+	var shift := m - m2
+	for y in img.get_height():
+		for x in img.get_width():
+			var c: Color = out[y][x]
+			img.set_pixel(x, y, Color(
+				clampf(c.r + shift, 0.0, 1.0),
+				clampf(c.g + shift, 0.0, 1.0),
+				clampf(c.b + shift, 0.0, 1.0), c.a))
+
+
+## a3-29: how much of the source's contrast is removed before the strip is cut.
+## 0.5 is the reviewer's "halve". Named so a test can pin the actual value rather
+## than restating the prose.
+const GROUND_CONTRAST_CUT := 0.5
+
+
 ## transform of sand.png (see GROUND_BASE_SLOT_DIHEDRAL). Static and pure so
 ## tests/test_assets.gd measures the PIXELS the player sees, not a description
 ## of them. Cached by _ground_base_strip; never called per frame.
@@ -1243,6 +1321,12 @@ static func ground_base_strip_image(v: int) -> Image:
 	if src.is_compressed():
 		src.decompress()   # a VRAM-compressed import has no raw pixels to blit
 	src.convert(Image.FORMAT_RGBA8)
+	# a3-29: the contrast cut is JUNGLE-only (see ground_biome_strip_image). sand_base
+	# is already a low-contrast OWNED procedural card that lets sprites read; the
+	# reviewer's complaint was the high-frequency grain and mud the BIOME pass
+	# introduced. Cutting the desert too also tripped the exposure ratchet below --
+	# its sampled-mean tolerance is 1.0 and halving an already-flat card left the
+	# per-rotation dihedral variants' 4px-sampled means straddling it.
 	var w := src.get_width()
 	var strip := Image.create_empty(w * GROUND_BASE_SLOTS, w, false, Image.FORMAT_RGBA8)
 	for s in GROUND_BASE_SLOTS:
@@ -7521,13 +7605,28 @@ const _BOSS_RIM := {"gunship_body": true, "gunship_barrel": true,
 	"colossus_body": true, "colossus_barrel": true, "m_heli_attack2": true}
 # Living things wear a heavier rim than scenery (4v: units sank into the prop
 # soup): 1.6px vs the fleet's 1.1px; bosses keep their warm 2.2px above both.
-const _UNIT_RIM := {"player1": true, "player2": true, "rusher": true, "elite": true,
-	"frogman": true, "observer": true, "m_soldier2": true, "m_bombsuit": true,
+const _UNIT_RIM := {"player1": true, "player2": true, "rusher": true, "elite": true,	"frogman": true, "observer": true, "m_soldier2": true, "m_bombsuit": true,
 	"m_pilot": true, "ghillie": true, "courier": true, "sapper": true,
 	# review tell 2: the sol-08 red-team swap moved fodder/elite/sniper onto these keys,
 	# which were in NO rim registry — the shooting infantry drew rimless on rust.
 	"enemy_smg": true, "enemy_assault": true, "enemy_shotgun": true, "enemy_lmg": true,
 	"enemy_sniper": true}
+# a3-30 HERO LIGHT CONTOUR. gpt-6.1-sol's #2 item on the road to a 10/10: "In the
+# jungle and gunship shots, players dissolve into yellow effects and surrounding
+# vegetation. Give the actual character a consistent light rim with a dark keyline."
+#
+# The heroes had ONLY the dark _UNIT_RIM keyline. A dark keyline separates a hero
+# from a BRIGHT ground, but on the new (a3-28) dark-green jungle turf a dark edge
+# is camouflage — the player vanished into the exact foliage the biome pass added.
+# Hostiles already got a warm light separator (_LIGHT_RIM) for the same class of
+# failure. The hero needs one too, and it must be COOL: the enemies' separator is
+# warm (1.0, 0.9, 0.62) so "warm edge = threat" is already learned, and the hero
+# also gets the cool catch-light crown (HERO_APEX). Cool = you, warm = kills you.
+const _HERO_LIGHT_RIM := {"player1": true, "player2": true}
+# Sized to sit just OUTSIDE the 1.7px dark keyline, so the two read as one lit
+# contour (light wrap over a dark contact edge) rather than a second outline.
+const HERO_LIGHT_RIM_PX := 1.15
+const HERO_LIGHT_RIM_COL := Color(0.72, 0.93, 1.0, 0.62)
 # a1-02 figure-ground: small dark-clad HOSTILES wore the near-black rim and
 # merged into dark litter/craters. These get a warm-LIGHT separator rim in _spr
 # instead (heroes/frogman/observer/bombsuit keep the neutral rim — they read fine).
@@ -7750,6 +7849,26 @@ func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
 		kloc = Vector2(kloc.x / x_stretch, kloc.y / stretch)
 		draw_texture(t, origin + kloc, Color(KEY_RIM_COL.r, KEY_RIM_COL.g,
 			KEY_RIM_COL.b, KEY_RIM_COL.a * tint.a))
+	# a3-30 THE HERO LIGHT CONTOUR — the reviewer's "consistent light rim with a
+	# dark keyline". A dark keyline is camouflage on the dark-green jungle turf the
+	# a3-28 biome pass introduced, so the hero also wears a COOL light wrap just
+	# outside its dark contact edge. Cool reads as "you": the hostile separator
+	# (_LIGHT_RIM) is warm, and the hero's own catch-light crown is cool, so the
+	# warm/cool split is doing a job the dark rim alone cannot.
+	#
+	# Drawn as a ring of copies at HERO_LIGHT_RIM_PX so it hugs the silhouette on
+	# every side (a key light on one side only would vanish whenever the sunward
+	# edge happened to be occluded by the body), and it sits AFTER the dark
+	# keyline so it reads as a wrap OVER the contact edge, not under it. Same
+	# screen-space discipline as the key rim above, for the same reason.
+	if with_rim and _HERO_LIGHT_RIM.has(style_key):
+		var hscr := HERO_LIGHT_RIM_PX / s
+		var hloc := Vector2(hscr, 0.0).rotated(-spr_rot)
+		hloc = Vector2(hloc.x / x_stretch, hloc.y / stretch)
+		var hcol := Color(HERO_LIGHT_RIM_COL.r, HERO_LIGHT_RIM_COL.g,
+			HERO_LIGHT_RIM_COL.b, HERO_LIGHT_RIM_COL.a * tint.a)
+		for o in _OUTLINE_OFFSETS:
+			draw_texture(t, origin + o * hloc, hcol)
 	draw_texture(t, origin, tint)
 	draw_texture(t, origin, tint)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -8580,6 +8699,11 @@ func _draw() -> void:
 				else float(Engine.get_physics_frames()) * 0.03 + float(bk["x"] / 4096)
 			var dp := c + Vector2(cos(da) * 15.0, sin(da) * 7.0 - 22.0)
 			_spr("m_drone", dp, da + PI / 2, 0.4)
+	# a3-31 OPAQUE EXPLOSION BODIES DRAW BENEATH THE ACTORS.
+	# _classify_fx() must run BEFORE _draw_fx_under(): the under-pass walks the same
+	# _fx_alpha_idx the alpha pass does, and the list is per-frame.
+	_classify_fx()
+	_draw_fx_under()
 	_draw_pickups()
 	_draw_tanks()
 	_draw_enemies()
@@ -13323,6 +13447,50 @@ func _draw_sector_embers() -> void:
 			Color(0.85, 0.78, 0.7, (0.5 - absf(ephase - 0.5)) * 0.8))
 
 
+## a3-31: split _fx once per frame into the additive-glow subset and the alpha
+## subset, BEFORE either pass draws. It used to live at the top of _draw_fx(), which
+## was correct when that was the only consumer — but _draw_fx_under() now runs
+## EARLIER in _draw() to put blast bodies beneath the actors, so classifying inside
+## _draw_fx() left the under-pass reading the PREVIOUS frame's index lists (empty
+## on frame 1, so no explosion body would draw at all until frame 2).
+func _classify_fx() -> void:
+	_fx_alpha_idx.clear()
+	_fx_glow_idx.clear()
+	for i in _fx.size():
+		if _GLOW_KINDS.has(_fx[i]["kind"]):
+			_fx_glow_idx.append(i)
+		else:
+			_fx_alpha_idx.append(i)
+
+
+## a3-31 — the OPAQUE explosion body, drawn UNDER the actors.
+##
+## gpt-6.1-sol's #3 item on the road to a 10/10: "The foundry's enormous black
+## disks consume valuable combat space and obscure what occupies it. Done means
+## an explosion can look violent while the player, live projectiles and damaging
+## boundaries remain visible through its aftermath."
+##
+## The whole fx pass ran after _draw_projectiles()/_draw_players(), so the blast
+## card sat on top of the soldier it had just hit and the bullets still in flight
+## — a blast could hide the exact things a player needs to read to survive it.
+##
+## Only the BODY moves. The white-hot core, the debris, the smoke and the whole
+## additive _draw_glow layer (its own _glow_root at z=20) stay above: a flash is
+## light, light belongs on top, and moving them would cost more than it bought.
+func _draw_fx_under() -> void:
+	for idx in _fx_alpha_idx:
+		var fx := _fx[idx]
+		if fx["kind"] != "explosion":
+			continue
+		var pos := _to_screen(fx["x"], fx["y"])
+		if pos.y < -80.0 or pos.y > 440.0 or pos.x < -80.0 or pos.x > 720.0:
+			continue   # same cull the alpha pass uses — the body is world-anchored
+		var t: float = fx["t"]
+		var frame := mini(3, int(t * 4.0))
+		_spr(_EXPLO_NAMES[frame], pos, t * 2.0, 0.45 + t * 0.5,
+			Color(1, 1, 1, pow(1.0 - t, 1.5)))
+
+
 func _draw_fx() -> void:
 	# opt-loop review panel (5-reviewer consensus): _draw_fx/_draw_glow used to
 	# both walk the WHOLE _fx array (up to 400 entries) and each pay a
@@ -13333,13 +13501,7 @@ func _draw_fx() -> void:
 	# separate draw-signal callback on _glow_root that only fires after _draw()
 	# finishes, so it always sees this tick's fresh classification) into two
 	# reused index lists, so each draw pass only touches its own subset.
-	_fx_alpha_idx.clear()
-	_fx_glow_idx.clear()
-	for i in _fx.size():
-		if _GLOW_KINDS.has(_fx[i]["kind"]):
-			_fx_glow_idx.append(i)
-		else:
-			_fx_alpha_idx.append(i)
+	_classify_fx()
 	# Toast slots already taken this frame: (x, y, half-width) of every floattext DRAWN so far.
 	# A toast that would land on one of them drops an 11px row until it doesn't. Positions, not
 	# anchors — see the stacking block below; the old anchor-proximity test let toasts that
@@ -13376,7 +13538,9 @@ func _draw_fx() -> void:
 			var frame := mini(3, int(t * 4.0))
 			# Ease to zero alpha before removal — 1.0-t*0.7 left the last frame at
 			# ~0.3 alpha and it blinked out instead of fading (gib already fades to 0).
-			_spr(_EXPLO_NAMES[frame], pos, t * 2.0, 0.45 + t * 0.5, Color(1, 1, 1, pow(1.0 - t, 1.5)))
+			# a3-31: the body card moved to _draw_fx_under (beneath the actors). This
+			# branch now draws ONLY the white-hot core, which is light and belongs on
+			# top of whatever the blast is cooking.
 			if t < EXPLO_WHITE_T:
 				# a1-08 WHITE-HOT lead: the blast flashes a bright near-white core for the
 				# first EXPLO_WHITE_T of its life, then cools to the orange fireball — a
