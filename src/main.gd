@@ -7600,10 +7600,27 @@ func _draw_hazard_telegraphs() -> void:
 				continue
 			if hz["y"] >= top_wy - 80 * Fixed.ONE and hz["y"] < top_wy + 20 * Fixed.ONE:
 				var ap := _to_screen(hz["x"], hz["y"] + 80 * Fixed.ONE)
+				# a3-34 THE HAZARD APRON WEARS THE LETHAL LANGUAGE.
+				#
+				# gpt-6.1-sol's #3 for a 10/10: "Give active hazards and harmless
+				# effects unmistakably different appearances" -- and this apron is the
+				# clearest instance of the failure. It marked a hazard that WILL damage
+				# you, and it did it in ORANGE: the same orange as explosion flashes,
+				# banner text, the Foundry heat vents and the sky ramp. So the one
+				# element on screen whose entire job is "this is going to hurt" was
+				# indistinguishable from decoration.
+				#
+				# a3-28 already established the rule and this violates it: magenta is
+				# reserved for lethal. A round in flight and the GROUND that will kill
+				# you now speak the same colour, so "magenta = lethal" is one read
+				# across bullets and telegraphs instead of two vocabularies. The scuff
+				# keeps a dark base so the mark still sits IN the ground rather than
+				# glowing on top of it; the chevrons carry the hue.
 				draw_texture_rect(Art.tex("fx_softspot"), Rect2(ap - Vector2(12.0, 7.0), Vector2(24.0, 14.0)),
-					false, Color(0.14, 0.11, 0.07, 0.45 * pulse))
-				Art.line(self, ap + Vector2(-6.0, 3.0), ap + Vector2(0.0, -4.0), Color(1.0, 0.6, 0.2, 0.75 * pulse), 1.6)
-				Art.line(self, ap + Vector2(6.0, 3.0), ap + Vector2(0.0, -4.0), Color(1.0, 0.6, 0.2, 0.75 * pulse), 1.6)
+					false, Color(0.16, 0.04, 0.11, 0.50 * pulse))
+				var hz_col := Color(LETHAL_BOLT.r, LETHAL_BOLT.g, LETHAL_BOLT.b, 0.85 * pulse)
+				Art.line(self, ap + Vector2(-6.0, 3.0), ap + Vector2(0.0, -4.0), hz_col, 1.6)
+				Art.line(self, ap + Vector2(6.0, 3.0), ap + Vector2(0.0, -4.0), hz_col, 1.6)
 
 
 # 4 diagonal offsets cover both axes at once — visually ≈ the old 8-neighbor rim
