@@ -4917,6 +4917,10 @@ const WORLD_TEXT_SITES := {
 	"_draw_wheel|lbl": {"mode": "exempt-modal", "why": WHEEL_WHY},
 	"_draw_wheel|cost_txt": {"mode": "exempt-modal", "why": WHEEL_WHY},
 	"_draw_wheel|stock_txt": {"mode": "exempt-modal", "why": WHEEL_WHY},
+	# a3-35: the what-the-item-DOES card. Same modal as every other wheel string --
+	# the shop is a hold-to-open overlay that dims the world, so its text owns the
+	# frame by construction rather than arbitrating for space with live combat.
+	"_draw_wheel|card_txt": {"mode": "exempt-modal", "why": WHEEL_WHY},
 	"_draw_banners|trow[\"text\"]": {"mode": "screen", "why": BANNER_WHY},
 	"_draw_banners|btext": {"mode": "screen", "why": BANNER_WHY},
 	"_draw_banners|hrow[\"text\"]": {"mode": "screen", "why": BANNER_WHY},

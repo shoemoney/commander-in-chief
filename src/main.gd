@@ -490,12 +490,18 @@ func perks_maxed() -> bool:
 var _wheel: Array[Dictionary] = [{"open": false, "sel": -1}, {"open": false, "sel": -1}]
 var _wheel_aim := [Vector2.ZERO, Vector2.ZERO]   # aim latched while the wheel is open (sector flicks must not whip the sim aim)
 const WHEEL_ITEMS := [
-	{"kind": 0, "icon": "icon_ammo", "cost": SimWorld.SHOP_AMMO_COST, "label": "AMMO"},
-	{"kind": 1, "icon": "icon_grenade", "cost": SimWorld.SHOP_GRENADE_COST, "label": "GRENADES"},
-	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST, "label": "FLAK VEST"},
-	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST, "label": "AIRSTRIKE"},
-	{"kind": 4, "icon": "wall_sandbag", "cost": SimWorld.SHOP_SANDBAG_COST, "label": "SANDBAGS"},
-	{"kind": 5, "icon": "icon_medal", "cost": 0, "label": "CALL: AMMO/NADES/VEST/STRIKE"},
+	{"kind": 0, "icon": "icon_ammo", "cost": SimWorld.SHOP_AMMO_COST, "label": "AMMO",
+		"blurb": "REFILLS THE MAG"},
+	{"kind": 1, "icon": "icon_grenade", "cost": SimWorld.SHOP_GRENADE_COST, "label": "GRENADES",
+		"blurb": "ADDS A FRAG"},
+	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST, "label": "FLAK VEST",
+		"blurb": "EATS ONE HIT"},
+	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST, "label": "AIRSTRIKE",
+		"blurb": "CALLS FIRE ON A LINE"},
+	{"kind": 4, "icon": "wall_sandbag", "cost": SimWorld.SHOP_SANDBAG_COST, "label": "SANDBAGS",
+		"blurb": "PLANTS HARD COVER"},
+	{"kind": 5, "icon": "icon_medal", "cost": 0, "label": "CALL: AMMO/NADES/VEST/STRIKE",
+		"blurb": "SPENDS A COMMENDATION"},
 ]
 const BUY_FLOAT := ["+%d AMMO", "+%d GRENADES", "FLAK VEST ON", "AIRSTRIKE INBOUND", "SANDBAGS UP"]
 ## The SINGULAR count noun behind each quantity-bearing BUY_FLOAT entry, so buy_float_text can
@@ -514,7 +520,8 @@ const _SECTOR_TO_ITEM: Array[int] = [2, -1, 3, 4, 0, -1, 1, 5]   # E,SE,S,SW,W,N
 const WHEEL_ROW_WARN := -68.0    # revive-guard warning
 const WHEEL_ROW_LABEL := -56.0   # pick label + cost + stock (one row)
 const WHEEL_ROW_CUE := 52.0      # RELEASE TO BUY / CANCEL
-const WHEEL_TEXT_ROWS := [WHEEL_ROW_WARN, WHEEL_ROW_LABEL, WHEEL_ROW_CUE]
+const WHEEL_ROW_CARD := -84.0   # a3-35 what-the-item-DOES card (above the warn row)
+const WHEEL_TEXT_ROWS := [WHEEL_ROW_CARD, WHEEL_ROW_WARN, WHEEL_ROW_LABEL, WHEEL_ROW_CUE]
 
 ## What to CALL each thing a death takes, keyed by the sim's own field name. The sim ships the
 ## loss on the (checksum-excluded) player_down / revive payloads; this is the only place the
@@ -14758,6 +14765,32 @@ func _draw_wheel() -> void:
 		# fighting the cue/countdown rows below. The removed "NEXT WAVE IN %ds"
 		# duplicated the top-bar "SHOP OPEN %ds" chip (hud.gd) anyway — and drew
 		# twice in 2P, once per hub.
+		# a3-35 THE PURCHASE CARD. gpt-6.1-sol's #6: "The shop scatters icons,
+		# prices, currency, and status around a compact circle while compressing the
+		# selected purchase into a short label. Done means one readable card explains
+		# the selected item's benefit, cost, affordability, and resulting quantity
+		# before release commits the purchase."
+		#
+		# The hub label row below already carries label + cost + stock in ONE line,
+		# which is a real improvement it credited -- but it never said WHAT the item
+		# DOES. "SANDBAGS 400" tells you the price and the cap, not that it plants
+		# hard cover you can stand behind, which is the entire reason to buy it over
+		# the next socket round. So one plate ABOVE the hub states the benefit in
+		# plain language, and the label row below keeps the numbers. Card and
+		# numbers are split by job, not duplicated.
+		if sel >= 0:
+			var card_txt := "%s — %s" % [str(sel_item["label"]), str(sel_item.get("blurb", ""))]
+			var card_col := Color(0.95, 0.95, 0.88, 0.95) if sel_afford else Color(1.0, 0.7, 0.6, 0.95)
+			# Clamp to the frame. The hub latches wherever wheel_safe_center puts it
+			# (beside the player, clear of live hazards), so it can sit hard against
+			# an edge -- and this card is ~120px wide, far wider than the one-line
+			# label row it sits above, which is why that row never needed this and
+			# the card does. An un-clamped centre is fine for a 60px row and clips
+			# the card in half on the other side of the screen.
+			var cw2 := Art.tw(card_txt, 8)
+			var cxc := clampf(c.x, 4.0 + cw2 / 2.0, 636.0 - cw2 / 2.0)
+			_wheel_row_plate(cxc, c.y + WHEEL_ROW_CARD, cw2, 8)
+			Art.text_center(self, card_txt, cxc, c.y + WHEEL_ROW_CARD, 8, card_col)
 		if sel >= 0:
 			var lbl: String = sel_item["label"]
 			var cost_txt := ("%d*" % sel_cost) if sel_is_token else str(sel_cost)
