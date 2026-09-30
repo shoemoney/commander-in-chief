@@ -1455,7 +1455,17 @@ func _paint_bg(canvas: Node2D) -> void:
 		var row_wy_fp := int(float(base_iy + ty) * 64.0 * Fixed.ONE)
 		var row_march := _litter_march_prev if row_wy_fp >= _litter_cam_snap else march
 		row_ys[ty] = floor(oy + ty * 64.0)   # floor(): fractional origins shimmer the seam while scrolling
-		row_cols[ty] = _biome_ramp(row_march, dirt_stops)
+		# a3-28: the biome-1 dressing uses the wet-mud card. Its colour comes from a
+		# fixed NEUTRAL multiplier matched to the shaded base (GROUND_SHADE), not the
+		# desert dirt ramp — that ramp is authored bright+orange for sand and both
+		# re-browned the mud into a foreign stain and, at full strength, blew the
+		# paths out into pale hard-edged slabs. Alpha is still the ramp's, so the
+		# feathered halo/fill passes batch and fade exactly as before.
+		if _ground_biome == 1:
+			var ds := _biome_ramp(row_march, dirt_stops)
+			row_cols[ty] = Color(GROUND_SHADE, GROUND_SHADE, GROUND_SHADE, ds.a)
+		else:
+			row_cols[ty] = _biome_ramp(row_march, dirt_stops)
 	# The dressing GEOMETRY comes from one shipped generator (ground_dressing_cards),
 	# so the anti-lattice ratchet in tests/test_assets.gd measures the placement the
 	# player actually sees instead of a re-implementation of it. Here we only bind
@@ -1495,7 +1505,17 @@ func _paint_bg(canvas: Node2D) -> void:
 	for card in dirt_cards:
 		var dirt_col: Color = card[3]
 		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
-		canvas.draw_texture_rect(Art.tex("dirt"), Rect2(-card[2] / 2.0, card[2]), false, dirt_col)
+		# a3-28: the bare-earth cards are ONE shared 'dirt' texture tinted by the
+		# desert ramp. Over green turf that warm brown reads as a foreign angular
+		# polygon dropped on grass (gpt-6.1-sol's exact read: "scattered polygons
+		# rather than terrain ... add contrast without communicating cover or
+		# location"). The jungle dressing is the wet MUD card instead, so the same
+		# card geometry reads as a worn, churned path through the biome — a feature
+		# that communicates location, not a stain. The desert path is unchanged.
+		var dirt_tex := Art.tex("dirt")
+		if _ground_biome == 1:
+			dirt_tex = Art.tex("jungle_mud")
+		canvas.draw_texture_rect(dirt_tex, Rect2(-card[2] / 2.0, card[2]), false, dirt_col)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# MACRO MOTTLE (4v: the barren-lawn killer): 2-3 broad, soft value shifts
 	# per screen on a coarse 256px grid — trampled-earth patches, and the

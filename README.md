@@ -22,7 +22,7 @@
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-1.2%20%C2%B7%20gold-gold)
 ![Assets](https://img.shields.io/badge/assets-owned%20or%20CC0%20%C2%B7%20history%20purged-2ea44f)
-![Release](https://img.shields.io/badge/release-v1.3.3%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
+![Release](https://img.shields.io/badge/release-v1.3.4%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
 
 **A modern remake of the 1986 vertical run-and-gun** (*Ikari Warriors*, SNK) —
 twin-stick chaos, grenades-vs-armor, one-hit deaths, and the **War Chest 💰**:
@@ -76,7 +76,7 @@ posed sim states, no mockups, no concept art.</sub>
 
 ## 📥 Download & Play
 
-**[⬇️ Latest release — v1.3.3](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
+**[⬇️ Latest release — v1.3.4](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
 
 | 🖥️ Platform | 📦 File | 📏 | 📝 |
 |---|---|---|---|
