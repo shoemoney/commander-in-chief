@@ -7815,6 +7815,12 @@ const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a":
 # a3-16: resting CRT scanline strength, and how far it spikes on a hitstop.
 # 0.08 -> 0.04: see the _scan_mat comment in _physics_process for the measurement
 # that moved it (a 1-in-2 row alternation 8.48 luma apart, read as ground banding).
+# a3-26: the ONE colour in this game reserved exclusively for things that can
+# kill you on contact. Never reuse it for muzzle flash, debris, impact spark, a
+# pickup, or any other "bright" moment — its entire job is to be the one hue the
+# eye resolves instantly in a frame full of warm browns and white fireballs.
+const LETHAL_BOLT := Color(1.0, 0.22, 0.82)
+const LETHAL_BOLT_TINT := Color(1.15, 0.72, 1.05)
 const SCANLINE_BASE := 0.04
 const SCANLINE_SURGE := 0.12
 const GROUND_SHADE := 0.522
@@ -12517,15 +12523,31 @@ func _draw_projectiles() -> void:
 		if edir.length() > 0.5:
 			# Standard and sniper cards share the hostile crimson/white vocabulary;
 			# the fast sniper penetrator is materially longer and slimmer.
-			Art.line(self, bpos - edir * (etlen + 2.0) + Vector2(1, 1), bpos + Vector2(1, 1),
-				Color(0.01, 0.005, 0.005, 0.68), 3.0 if fast else 2.4)
+			Art.line(self, bpos - edir * (etlen + 2.0) + Vector2(1.5, 1.5), bpos + Vector2(1.5, 1.5),
+				Color(0.01, 0.005, 0.005, 0.86), 3.4 if fast else 2.8)
 			draw_set_transform(bpos, edir.angle(), Vector2.ONE)
 			draw_texture_rect(Art.tex("bullet_sniper" if fast else "bullet_enemy"),
-				Rect2(-etlen, -2.0, etlen, 4.0), false, Color.WHITE)
+				Rect2(-etlen, -2.0, etlen, 4.0), false, LETHAL_BOLT_TINT)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		# White-hot nose is the motion-direction read and keeps hostile ordnance
-		# distinct from red ground splats and stationary impact sparks.
-		Art.circle(self, bpos, 1.25 if fast else 1.0, Color(1.0, 1.0, 0.94, 0.95))
+		# a3-26: THE LETHAL BOLT GETS ITS OWN COLOUR, AND IT IS NOT WHITE.
+		#
+		# Two reviewers, working the same frames independently, put this at the top
+		# of DIFFICULTY and the top of nothing-else. GPT-6-Sol-Pro: "Give hostile
+		# shots one exclusive bright colour, a dark outer edge, and a consistent
+		# size; reserve that colour from debris and muzzle effects."
+		# Gemini-3.8-Flash: "Never use white-on-white or orange-on-red for lethal
+		# damage hitboxes."
+		#
+		# Both were describing a real collision. This nose was Color(1.0, 1.0, 0.94)
+		# — the same white as every explosion flash core, on a card over a
+		# warm-brown floor, in a game where one hit kills. The comment above it
+		# claimed the white "keeps hostile ordnance distinct" from ground splats
+		# and impact sparks; it is distinct from those and collides with the one
+		# thing it must never be mistaken for. Magenta is unused anywhere in this
+		# game: the floor is warm, the units are olive/maroon, the flashes are
+		# white and orange, and the friendly reticle is cyan.
+		Art.circle(self, bpos, 1.35 if fast else 1.1, Color(LETHAL_BOLT.r, LETHAL_BOLT.g,
+			LETHAL_BOLT.b, 0.98))
 
 
 static func _player_ident_color(slot: int, a := 1.0) -> Color:

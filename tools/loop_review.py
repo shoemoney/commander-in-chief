@@ -45,7 +45,8 @@ KEY = os.environ.get("OPENROUTER_API_KEY") or Path.home().joinpath(".openrouter"
 # a real completion. One per vendor family where possible — five opinions from
 # the same lab agree with each other, which is not evidence.
 ROTATION = [
-    "google/gemini-3-flash-preview",
+    "google/gemini-3.8-flash",
+    "openai/gpt-6-sol-pro",
     "x-ai/grok-4.7",
     "qwen/qwen3.8-omni-flash",
     "deepseek/deepseek-v4.1-flash",
@@ -59,41 +60,55 @@ ROTATION = [
     "x-ai/grok-4.6",
 ]
 
-PROMPT = """You are a harsh, senior VFX/art director reviewing a shipped 2D game.
+PROMPT = PROMPT = """You are a harsh, senior game director reviewing a shipped 2D game, mid-development.
 
 GAME: "Commander In Chief" — a vertical run-and-gun (a modern Ikari Warriors
-remake). It renders at a 640x360 internal resolution, integer-scaled to the
-window, so everything is seen small. Top-down camera, you play two soldiers
-marching north through six war zones, with a shared coin economy.
+remake), Godot 4.7 / GDScript, 640x360 internal resolution integer-scaled up.
+Top-down camera. Two soldiers march north through six war zones. A shared coin
+economy ("War Chest"): every kill mints, every revive spends. 4 modes, campaign
++ endless survival + boss rush + arcade, 1-2 player local co-op, Steam-shipped.
 
-The attached images are REAL CAPTURES of the real game, taken by
-tools/screenshots.gd, which stages authored sim states and renders them through
-the actual view layer. They are not concept art and not mockups.
+The attached images are REAL CAPTURES taken by tools/screenshots.gd, which stages
+authored sim states and renders them through the actual view layer. Not concept
+art, not mockups.
 
-Judge it against the bar for a GROUNDED 2D top-down shooter in 2026 — Metal Slug
-and Gunstar Heroes for the arcade lineage, Nuclear Throne and Hells Yeah for the
-modern indie bar.
+Review these FIVE areas in order. For each, give at most 3 findings, and for each
+finding: WHAT you can SEE (name the element in the specific image) -> WHY it reads
+wrong or fails the player -> THE FIX (concrete and implementable).
 
-Give me EXACTLY FIVE improvements. For each one:
-  1. WHAT you can SEE — name the specific element in the specific image. If you
-     cannot see it, do not invent it.
-  2. WHY it reads wrong — what the player's eye does with it.
-  3. THE FIX — concrete and implementable, not "improve the art".
+ 1. ASSETS TO IMPLEMENT. An operator has a private library of ~1,600 game-asset
+    archives (CraftPix 2D packs, Kenney CC0, ambientCG CC0 PBR, OpenGameArt).
+    CRITICAL LEGAL CONSTRAINT you must respect in any suggestion: the CraftPix
+    licence says "Distribution of source files is NOT permitted" and separately
+    forbids using the assets to train or improve any AI system. The repo is
+    PUBLIC and MIT. So CraftPix CANNOT be used and CANNOT be used as a generation
+    reference. Only CC0 is usable: Kenney (crosshair, UI, top-down tower-defense,
+    UI audio, impact, sci-fi) and ambientCG (2,000+ PBR ground/material tiles).
+    If you think a specific KIND of asset would lift the game, name the kind and
+    say which CC0 source. If the honest answer is "none", say none.
+
+ 2. GAMEPLAY MECHANICS. Is the core loop sound, is anything broken, over- or
+    under-tuned, or missing that a player would notice within 10 minutes?
+
+ 3. USER INTERFACE. Legibility at 640x360, information hierarchy, what is noise.
+
+ 4. USER EXPERIENCE. What does it FEEL like to pick up and play — onboarding,
+    feedback, control clarity, pacing, the first 60 seconds.
+
+ 5. DIFFICULTY LEVEL. Is it fair, is it readable where it needs to be, and is the
+    one-hit-death + paid-revive economy tuned or brutal?
 
 Rules:
 - Look at every image before answering. Do not generalise from the first.
 - Be harsh. The value of this review is entirely in its negativity. If you think
   it looks good you are not looking hard enough.
-- Rank by how much each one costs the image, not by how easy it is to fix.
-- If something is genuinely excellent, do not pad the list with it. Five real
-  findings, not five things.
-- Be specific enough that an engineer could act without re-deriving your
-  reasoning.
+- Do NOT pad. Fewer real findings beat a full list of filler.
+- Say when something is already good rather than inventing a problem for it.
+- Be specific enough that an engineer could act without re-deriving your reasoning.
 
-Then, separately and briefly: what is the ONE change that would most raise the
-perceived production value, and why is it worth more than the other four?
-
-End with a one-line verdict: Goty contender / solid indie / visibly amateur.
+End with: one line per area (ASSETS / MECHANICS / UI / UX / DIFFICULTY) giving a
+1-5 score and a single most valuable change, then a one-line verdict
+(Goty contender / solid indie / visibly amateur).
 """
 
 
@@ -126,7 +141,7 @@ def ask(model: str, shots: list[str]) -> None:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": content}],
-        "max_tokens": 4000,
+        "max_tokens": 9000,
         "temperature": 0.4,
     }
     req = urllib.request.Request(
