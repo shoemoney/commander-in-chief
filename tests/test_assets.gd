@@ -3052,8 +3052,20 @@ func test_ground_base_paints_more_than_one_source_variant() -> void:
 	Runner.T.ok(pstart >= 0, "found the _paint_bg body")
 	if pstart >= 0:
 		var body := src.substr(pstart, src.find("\nfunc ", pstart + 1) - pstart)
-		Runner.T.ok(body.contains("_ground_base_strip("),
+		# a3-28: the paint call is now _ground_band_strip(biome, v), which routes to
+		# the real _ground_base_strip(v) for the desert and to the jungle sibling
+		# for biome 1. The ratchet's INTENT is "the painter must not build a private
+		# copy of the strip" — so accept the wrapper too, but keep requiring that the
+		# real strip function is still what gets called, by checking the wrapper body
+		# reaches _ground_base_strip.
+		var band_strip_at := src.find("func _ground_band_strip(")
+		var band_strip_body := ""
+		if band_strip_at >= 0:
+			band_strip_body = src.substr(band_strip_at, src.find("\nfunc ", band_strip_at + 1) - band_strip_at)
+		Runner.T.ok(body.contains("_ground_base_strip(") or body.contains("_ground_band_strip("),
 			"_paint_bg paints the per-band strip this ratchet measures, not a private copy")
+		Runner.T.ok(band_strip_body.is_empty() or band_strip_body.contains("_ground_base_strip("),
+			"_ground_band_strip routes to the real strip builder, not a private copy")
 		Runner.T.ok(not body.contains("Art.tex(\"sand\")"),
 			"_paint_bg no longer paints the bare single sand tile — that IS the verbatim repeat")
 

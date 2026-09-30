@@ -344,7 +344,8 @@ AMBIENTCG_CREDITS_URL = "https://ambientcg.com/credits"
 # Search terms the candidate assetIds must be *discoverable* under. The script
 # re-runs these queries and asserts each chosen assetId comes back, so the
 # pipeline stays honest if ambientCG re-indexes.
-AMBIENTCG_SEARCHES = ("desert", "sand", "dirt", "gravel", "mud", "clay", "rocky ground")
+AMBIENTCG_SEARCHES = ("desert", "sand", "dirt", "gravel", "mud", "clay", "rocky ground",
+                       "grass", "forest")
 
 # The six candidates. `why` is the justification recorded in ASSETS.md.
 AMBIENTCG_PICKS = [
@@ -390,6 +391,42 @@ AMBIENTCG_PICKS = [
         "why": "The scorched/ash candidate: near-neutral dark grey with no vegetation. "
                "Reads as a burnt-out blast zone and is the tonal floor of the set, so it "
                "can carry scorched-earth decals under a light ground ramp.",
+    },
+    {
+        "assetId": "Grass005",
+        "slug": "grass-005-lush-dense-turf",
+        "why": "The JUNGLE biome's identity card. Bright, saturated, densely-turfed green "
+               "-- the only genuinely lush material in the set, and the one thing the "
+               "desert-only shortlist was missing. Every advisory review of the "
+               "jungle-named zone said the ground read as arid sand: the file is named "
+               "jungle-firefight but the floor was a flat muddy noise field, which looks "
+               "like a prototype or a palette swap. This is the material that makes zone 1 "
+               "look tropical instead of desert.",
+    },
+    {
+        "assetId": "Grass001",
+        "slug": "grass-001-deep-forest-floor",
+        "why": "Darker, cooler green than Grass005 with a soft mottle -- the jungle's "
+               "SHADOW sibling. Where Grass005 is the open clearing, this is the ground "
+               "under the canopy, and it is dark enough to hold the player's drop shadow "
+               "and the units' contact shadows without them disappearing into the turf.",
+    },
+    {
+        "assetId": "Ground037",
+        "slug": "ground-037-mossy-grass-mix",
+        "why": "The transition material between jungle floor and bare earth: a mottled "
+               "moss-and-grass mix that reads as the churned-up edge of a path. Gives the "
+               "jungle biome a third value so it is not a two-tone green field, and its "
+               "low-frequency blotching survives the 1K->128 downsample as variation "
+               "rather than dissolving into flat colour.",
+    },
+    {
+        "assetId": "Ground106",
+        "slug": "ground-106-wet-mud",
+        "why": "The jungle's mud: dark, wet, tracked earth with scattered grit. This is the "
+               "material for the rain-soaked ground under the treeline, and its strong "
+               "value contrast against Grass005 is what makes the two read as different "
+               "surfaces rather than the same green tinted darker.",
     },
 ]
 
@@ -1042,6 +1079,10 @@ _PICK_TITLE = {
     "Ground062S": "gritty dirt track",
     "Ground095A": "dry cracked earth",
     "Ground039": "scorched ash",
+    "Grass005": "lush dense turf",
+    "Grass001": "deep forest floor",
+    "Ground037": "mossy grass mix",
+    "Ground106": "wet mud",
 }
 
 

@@ -5368,6 +5368,16 @@ func _in_water(x: int, y: int) -> bool:
 
 # --- Camera & world streaming ---
 
+func current_sector() -> int:
+	## a3-28: the 0-based sector the player is currently IN, which is what the view
+	## asks to pick the biome's ground card (wet jungle vs arid sand). _gate_counter
+	## counts GATES OPENED, so it is already 0-based and is the exact index into
+	## ZONE_INFO for the stretch being played. Clamped to the table so a caller
+	## before the first gate or after the finale still gets a valid biome instead of
+	## an out-of-range ground lookup.
+	return clampi(_gate_counter, 0, ZONE_INFO.size() - 1)
+
+
 func gate_held() -> bool:
 	## The CLOSED-GATE clamp, ALONE — the only hold that may switch the economy off.
 	## A gate is a wall the player can open by fighting; the leash branch inside

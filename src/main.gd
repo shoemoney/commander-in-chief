@@ -1190,6 +1190,51 @@ static func ground_base_variant(band_index: int) -> int:
 
 
 ## Builds one 1024x128 base strip: eight 128px slots, each a different dihedral
+## a3-28: which base-ground card a SECTOR paints. 0 = the live sand set (the arid /
+## industrial back half), 1 = the CC0 jungle set (the wet front half).
+##
+## The zones are authored (SimWorld.ZONE_INFO) and their climates are not
+## negotiable fiction: 1 STAGING GROUND and 2 MARSH BASIN are wet, green, marshy;
+## 3 BRIDGE, 4 FOUNDRY, 5 CONVOY and 6 THE FOUNDRY CORE are dust, ironworks and
+## rock. Painting all six with one sand card is what made a `jungle-firefight`
+## screenshot read as desert, and every reviewer flagged it independently. So the
+## ground now follows the zone names the game already ships.
+static func ground_biome(sector: int) -> int:
+	# sectors 0 (STAGING) and 1 (MARSH) are the wet jungle; 2 (BRIDGE) is the
+	# transitional span; 3+ are arid/industrial.
+	return 1 if sector <= 1 else 0
+
+
+## a3-28: the source texture key for a biome's base strip. Static and pure so
+## tests/test_assets.gd can measure the pixels the player actually sees.
+static func ground_biome_source(biome: int) -> String:
+	match biome:
+		1: return "jungle_turf"
+		_: return "sand"
+
+
+## Strip source image for a given biome + variant. Same dihedral scheme and same
+## 8x8 layout as the sand path, only the source card differs.
+static func ground_biome_strip_image(biome: int, v: int) -> Image:
+	var src: Image = Art.tex(ground_biome_source(biome)).get_image()
+	if src.is_compressed():
+		src.decompress()   # a VRAM-compressed import has no raw pixels to blit
+	src.convert(Image.FORMAT_RGBA8)
+	var w := src.get_width()
+	var strip := Image.create_empty(w * GROUND_BASE_SLOTS, w, false, Image.FORMAT_RGBA8)
+	for s in GROUND_BASE_SLOTS:
+		var card := Image.create_from_data(w, w, false, Image.FORMAT_RGBA8, src.get_data())
+		var d: int = (int(GROUND_BASE_SLOT_DIHEDRAL[s]) + v) % 8
+		if d >= 4:
+			card.flip_x()
+		match d % 4:
+			1: card.rotate_90(CLOCKWISE)
+			2: card.rotate_180()
+			3: card.rotate_90(COUNTERCLOCKWISE)
+		strip.blit_rect(card, Rect2i(0, 0, w, w), Vector2i(s * w, 0))
+	return strip
+
+
 ## transform of sand.png (see GROUND_BASE_SLOT_DIHEDRAL). Static and pure so
 ## tests/test_assets.gd measures the PIXELS the player sees, not a description
 ## of them. Cached by _ground_base_strip; never called per frame.
@@ -1221,6 +1266,17 @@ func _ground_base_strip(v: int) -> Texture2D:
 		for i in GROUND_BASE_VARIANTS:
 			_sand_strips.append(ImageTexture.create_from_image(ground_base_strip_image(i)))
 	return _sand_strips[v % GROUND_BASE_VARIANTS]
+
+
+## a3-28: the biome-keyed base strip. The sand path above is kept byte-for-byte
+## (it is what tests/test_assets.gd measures) and this is the jungle sibling, with
+## its OWN cache so switching biomes never rebuilds or crosses streams. Built
+## lazily on first paint, same 64-blit cost as the sand strips.
+func _ground_biome_strip(biome: int, v: int) -> Texture2D:
+	if _jungle_strips.is_empty():
+		for i in GROUND_BASE_VARIANTS:
+			_jungle_strips.append(ImageTexture.create_from_image(ground_biome_strip_image(1, i)))
+	return _jungle_strips[v % GROUND_BASE_VARIANTS]
 
 
 ## THE ground-dressing generator: the bare-earth cards scattered over the base sand
@@ -1302,12 +1358,29 @@ static func ground_dressing_cards(base_iy: int, march: float) -> Array:
 	return out
 
 
+## a3-28: the biome this frame paints. Resolved ONCE per _paint_bg (it is a sim
+## read, and the ground is many bands) and handed to every band's strip lookup, so
+## a whole frame is never half sand and half grass.
+var _ground_biome := 0
+
+
+## Pick the right cached strip for a biome. Kept as a function (not inlined at the
+## draw site) so the desert path stays literally the old _ground_base_strip call.
+func _ground_band_strip(biome: int, v: int) -> Texture2D:
+	return _ground_biome_strip(biome, v) if biome == 1 else _ground_base_strip(v)
+
+
 func _paint_bg(canvas: Node2D) -> void:
 	# The opaque grass/dirt base, relocated verbatim from _draw_terrain so it can
 	# render on _bg_root (below the water). Drawn onto `canvas` (== _bg_root); the
 	# rest of the terrain decor (clouds, scrub, cacti, litter) stays in _draw().
 	if sim == null:
 		return
+	# a3-28: resolve the biome ONCE here. The ground used to be one global sand
+	# card, so the wet zones (STAGING GROUND, MARSH BASIN) rendered as arid desert
+	# under a `jungle-firefight` filename. current_sector() is a clamped sim read;
+	# the sector never changes mid-frame, so every band below agrees on the biome.
+	_ground_biome = ground_biome(sim.current_sector())
 	var cam_y := sim.camera_top * PX
 	var oy := -fposmod(cam_y, 64.0)
 	var base_iy := int(floor(cam_y / 64.0))
@@ -1361,11 +1434,20 @@ func _paint_bg(canvas: Node2D) -> void:
 		var band_wy: float = band[1]
 		var band_march := _litter_march_prev if int(band_wy * Fixed.ONE) >= _litter_cam_snap else march
 		var gt := _biome_ramp(band_march, desert_stops)
+		# a3-28: the desert ramp is a WARM tint authored for sand. Multiplying it
+		# onto the CC0 jungle cards turns green into olive mud — the exact thing the
+		# jungle biome is supposed to fix — so biome 1 keeps a NEUTRAL shade and lets
+		# the source's real green through, and biome 0 keeps the byte-identical old
+		# path.
+		var shade := GROUND_SHADE
+		var tint := Color(gt.r, gt.g, gt.b)
+		if _ground_biome == 1:
+			tint = Color.WHITE
 		canvas.draw_set_transform(Vector2(-32.0, band[0] as float), 0.0,
 			Vector2(band_scale, band_scale))
-		canvas.draw_texture_rect(_ground_base_strip(band[2] as int),
+		canvas.draw_texture_rect(_ground_band_strip(_ground_biome, band[2] as int),
 			Rect2(Vector2.ZERO, Vector2(1024, 128)), true,
-			Color(GROUND_SHADE * gt.r, GROUND_SHADE * gt.g, GROUND_SHADE * gt.b))
+			Color(shade * tint.r, shade * tint.g, shade * tint.b))
 		canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# The dressing still rides 64px rows (the cards' own cell), so the per-row
 	# bookkeeping the dirt pass reads is unchanged — only the paint moved.
@@ -7877,6 +7959,7 @@ const GROUND_BASE_SLOTS := 8        # 128px dihedral slots per 1024px strip
 # tests/test_assets.gd asserts all of this on the built pixels, not on the table.
 const GROUND_BASE_SLOT_DIHEDRAL := [0, 3, 6, 1, 4, 7, 2, 5]
 static var _sand_strips: Array[Texture2D] = []
+static var _jungle_strips: Array[Texture2D] = []   # a3-28: the CC0 jungle biome's own cache
 
 
 # a1-14 THE GROUND'S LIGHT DIRECTION. Everything above de-LATTICED the floor and

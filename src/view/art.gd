@@ -203,6 +203,16 @@ const TEX := {
 	# provenance and is still referenced by nothing that draws.
 	"sand": preload("res://assets/art/ground/sand_base.png"),
 	"sand_kenney_cc0": preload(KN + "sand.png"),
+	# a3-28 JUNGLE BIOME GROUND. The ground used to be ONE global sand card, so a
+	# file named `jungle-firefight` rendered an arid desert and every advisory review
+	# called it a prototype / palette swap. These four CC0 ambientCG cards (licence
+	# + provenance in ASSETS.md, verified by tools/fetch_cc0.py --check) give the wet
+	# sectors a real biome: lush turf, canopy floor, the mossy transition between
+	# them, and wet mud. The later arid/industrial sectors keep sand.
+	"jungle_turf": preload("res://assets/cc0_extra/ground/grass-005-lush-dense-turf.png"),
+	"jungle_floor": preload("res://assets/cc0_extra/ground/grass-001-deep-forest-floor.png"),
+	"jungle_moss": preload("res://assets/cc0_extra/ground/ground-037-mossy-grass-mix.png"),
+	"jungle_mud": preload("res://assets/cc0_extra/ground/ground-106-wet-mud.png"),
 	# bullet/enemy_bullet/grenade/smoke: Kenney keys RETIRED (files kept) — every
 	# live draw site moved on long ago: player rounds are procedural tracers +
 	# fx_bullettrail streaks, enemy fire is the red-streak orb, thrown frags wear
