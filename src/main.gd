@@ -7671,6 +7671,42 @@ const _LIGHT_RIM := {"rusher": true, "elite": true, "m_soldier2": true,
 	"enemy_smg": true, "enemy_assault": true, "enemy_shotgun": true, "enemy_lmg": true,
 	"enemy_sniper": true,
 	"m_pilot": true}   # sol-08: dropped m_insurgent3-5/m_contractor2 (retired with the enemy_* swap)
+
+# a3-33 ROLE-CODED HOSTILE CONTOUR.
+#
+# gpt-6.1-sol's #1 item for a 10/10, and it is the exact complement of the hero
+# rim (a3-30): the PLAYER got a cool light contour so he could never merge, and
+# then the reviewer's next line was that "every live soldier" still reads as
+# "similarly sized, mottled red-brown clusters."
+#
+# Every hostile shared ONE warm separator (1.0, 0.9, 0.62), so the rim told you
+# "this will kill you" and nothing else. Nine kinds in that palette are one
+# silhouette with nine tints: you could not tell the sniper who lines you up from
+# the sapper who seeds mines under you, which is the same reason #2 ("enemy
+# combinations that force different tactical responses") is unplayable -- you cannot
+# respond to a role you cannot identify at a glance.
+#
+# So the ROLE is carried by the contour colour, one hue per tactical job, held
+# clear of the two colours already spoken for: COOL = you (HERO_LIGHT_RIM), and
+# plain warm = the generic hostile separator. Red is reserved outright, because
+# red is this game's lethal-projectile colour (a3-28) and a red enemy contour
+# would collide with a round coming at you.
+const _ROLE_RIM := {
+	"rusher":       Color(1.00, 0.72, 0.30),   # amber  — closes distance
+	"elite":        Color(1.00, 0.58, 0.86),   # orchid — the upgraded rusher
+	"enemy_smg":    Color(0.98, 0.86, 0.36),   # yellow — suppressive fire
+	"enemy_assault":Color(1.00, 0.66, 0.24),   # orange — pushes, shoots
+	"enemy_shotgun":Color(1.00, 0.94, 0.48),   # pale   — cone, must be flanked
+	"enemy_lmg":    Color(0.62, 0.92, 0.44),   # green  — suppresses the lane
+	"enemy_sniper": Color(0.78, 0.66, 1.00),   # violet — the long lane
+	"sapper":       Color(0.60, 1.00, 0.86),   # aqua   — mines under you
+	"ghillie":      Color(0.52, 0.88, 0.52),   # moss   — cloak, reveals late
+	"courier":      Color(1.00, 0.84, 0.96),   # rose   — the running one
+	"frogman":      Color(0.46, 0.94, 0.94),   # teal   — the water lane
+	"m_soldier2":   Color(0.98, 0.86, 0.36),   # yellow — the water-line marksman
+	"m_bombsuit":   Color(0.60, 1.00, 0.86),   # aqua   — heavy, area denial
+	"m_pilot":      Color(0.78, 0.66, 1.00),   # violet — the air lane
+}
 # a3-13 THE KEY RIM — who wears a lit sunward edge. Units, vehicles and bosses
 # only: these are the bodies that have to read as SOLID, and they are also the
 # ones large enough for a 1px displacement to survive the downscale. Scenery
@@ -7845,6 +7881,12 @@ func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
 			# revealed the separator IS the read; the cloak alpha (tint.a) still hides it.
 			oc = Color(1.0, 0.9, 0.62, tint.a)
 			d = 2.2 / s
+			# a3-33: a known ROLE takes its own contour hue. The generic warm
+			# separator above stays the default for anything not in the map, so an
+			# unlisted kind can never render un-rimmed.
+			if _ROLE_RIM.has(style_key):
+				var rc: Color = _ROLE_RIM[style_key]
+				oc = Color(rc.r, rc.g, rc.b, tint.a)
 		# a2-05: tiny DECOR (sub-14px on screen) drops the rim — a 1px dark rim on a
 		# sub-16px prop swamps it into a black dead-pixel speck that reads as noise, not
 		# an object; without it the litter reads as a small object AND recedes into the
