@@ -127,6 +127,45 @@ def render() -> None:
         sys.exit(1)
 
 
+def recall_precedents() -> str:
+    """HARD PRE-STEP. What this loop already tried, and what it disproved.
+
+    This is the memory architect's whole argument made mechanical. A bank nobody
+    reads is the same as no bank, and nothing fails when you skip it -- which is
+    exactly the condition that produced this loop's worst outcome: three separate
+    confidently-wrong fixes to a black frame, one of which was committed. So this
+    is not advice printed at the top of a file. It writes a receipt, and a run
+    whose receipt is missing is a run that did not do the work.
+
+    Recall is also where the DISPROVEN hypotheses come back, which is the whole
+    value of keeping memory: winning ideas end up in code and are visible in the
+    diff, so they are already carried. Losing ideas evaporate unless recorded, and
+    re-deriving one costs a commit cycle.
+
+    Degrades loudly rather than silently: if hindsight is unreachable the caller
+    still gets a receipt saying so, because a run that says "memory unavailable"
+    is honest and a run that silently skipped recall is not.
+    """
+    out = Path("/tmp/loop-precedents.md")
+    q = ("what has this loop already tried and DISPROVEN for the current task, "
+         "and what reviewer findings were already rejected")
+    try:
+        r = subprocess.run(
+            ["uvx", "hindsight-embed", "-p", "cic", "memory", "recall", "cic", q],
+            capture_output=True, text=True, timeout=180, cwd=REPO)
+        body = r.stdout if r.returncode == 0 else (
+            "!! hindsight recall UNAVAILABLE (exit %d). This run proceeded WITHOUT "
+            "precedents, so any hypothesis below has NOT been checked against "
+            "prior disproven work. Treat that as a real risk, not a formality.\n"
+            % r.returncode)
+    except Exception as e:                      # noqa: BLE001 - never block on memory
+        body = ("!! hindsight recall ERRORED (%s). This run proceeded WITHOUT "
+                "precedents.\n" % e)
+    out.write_text("# Precedents (Hindsight bank: cic)\n\n" + body)
+    print("PRECEDENTS -> %s (%d bytes)" % (out, len(body)))
+    return body
+
+
 def ask_codex(model: str, shots: list[str]) -> None:
     """The advisory reviewer: codex CLI, images attached natively via -i.
 
@@ -137,7 +176,7 @@ def ask_codex(model: str, shots: list[str]) -> None:
     base64 in a request body, which is what lets the reviewer actually SEE the
     frames rather than reason about filenames.
     """
-    import shlex
+    recall_precedents()   # M2.1: hard pre-step, receipted. See its docstring.
     imgs = [s for s in shots if Path(s).exists()]
     cmd = ["codex", "exec", "-m", model, "--sandbox", "read-only",
            "--skip-git-repo-check", "-c",
