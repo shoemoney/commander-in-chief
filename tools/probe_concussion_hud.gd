@@ -171,6 +171,8 @@ func _run() -> void:
 	_main.set_physics_process(false)
 	await process_frame
 	var fail := false
+	if await _instrument_check():
+		fail = true
 	for px in SWEEP_X:
 		if await _pose(px):
 			fail = true
@@ -183,8 +185,79 @@ func _run() -> void:
 	quit(0)
 
 
-func _pose(player_x: float) -> bool:
-	## Drive the soldier to `player_x` (logical px == world px: there is no
+## THE CONTROL for the whole probe, and the reason its verdict can be trusted.
+##
+## Every pin in _pose is "keep >= N% of the strong edges". A gate phrased as a
+## floor is only worth anything if the instrument can report BELOW that floor —
+## otherwise "no HUD smear" and "this census cannot see a smear at all" are the
+## same PASS, and the second one is what a broken threshold silently becomes.
+## (That is not hypothetical here: this probe's raw band census had exactly that
+## property, reading a 2.1x vignette as blur for weeks while the centre box next
+## door carried an exposure match.)
+##
+## So: capture the CLEAN frame, blur it with the same instrument's own kernel,
+## and require the census to notice. No shader edit, no second boot — the smear
+## is manufactured in-image, which is strictly stronger than trusting that some
+## future shader change would trip the pin.
+##
+## It also pins the property the fix depends on: exposure-matching must NOT make
+## the instrument blind to a DARKENED blur. So the planted frame is darkened to
+## roughly the top band's real concussion gain as well as blurred. A census that
+## divides out exposure still has to report this as destroyed edges.
+func _instrument_check() -> bool:
+	_main._concussion = 0.0
+	await process_frame
+	await process_frame
+	var clean := await _capture()
+	var top1 := int(HUD_TOP_LOGICAL * (clean.get_height() / LOGICAL_H))
+	if top1 <= 1:
+		push_error("probe_concussion_hud: instrument control could not resolve the top HUD band (top1=%d)" % top1)
+		return true
+	var before := _band_edges(clean, 0, top1)
+	var smeared := _smeared_copy(clean, top1)
+	var ma := _band_mean_luma(clean, 0, top1)
+	var mb := _band_mean_luma(smeared, 0, top1)
+	var gain := 1.0 if mb < 0.001 else ma / mb
+	var after := _band_edges(smeared, 0, top1, gain)
+	var keep := 0.0 if before == 0 else float(after) / float(before)
+	print("INSTRUMENT CONTROL: planted 6px blur + %.2fx darkening on the top band — %d -> %d strong edges, keep %.3f (must fall below the %.2f floor the HUD pin uses)"
+		% [gain, before, after, keep, EDGE_KEEP_RATIO])
+	if before < MIN_CENTRE_EDGES:
+		push_error("probe_concussion_hud: instrument control found only %d strong edges in the top band (< %d) — there is no legible ink here to blur, so this control proves nothing" % [before, MIN_CENTRE_EDGES])
+		return true
+	if keep >= EDGE_KEEP_RATIO:
+		push_error("probe_concussion_hud: INSTRUMENT CONTROL FAILED — a planted blur + darkening still reads keep %.3f, at or above the %.2f floor. The census cannot detect smear, so every 'no HUD smear' verdict from this run is vacuous" % [keep, EDGE_KEEP_RATIO])
+		return true
+	print("INSTRUMENT CONTROL OK — the census reports a real smear as one, so a PASS here means something")
+	return false
+
+
+## A copy of `img` with its top band horizontally box-blurred and uniformly
+## darkened — the two halves of what the concussion pass does to that strip,
+## applied without touching the shader.
+func _smeared_copy(img: Image, band_h: int) -> Image:
+	var out := Image.create(img.get_width(), img.get_height(), false, img.get_format())
+	out.blit_rect(img, Rect2i(Vector2i.ZERO, img.get_size()), Vector2i.ZERO)
+	const R := 3   # half-width, so a 6px kernel — wider than HUD ink strokes
+	for y in range(0, mini(band_h, img.get_height())):
+		for x in img.get_width():
+			var r := 0.0
+			var g := 0.0
+			var b := 0.0
+			var n := 0
+			for k in range(-R, R + 1):
+				var sx := clampi(x + k, 0, img.get_width() - 1)
+				var px := out.get_pixel(sx, y)
+				r += px.r
+				g += px.g
+				b += px.b
+				n += 1
+			var m := Color(r / float(n), g / float(n), b / float(n), 1.0)
+			out.set_pixel(x, y, m.darkened(0.35))
+	return out
+
+
+func _pose(player_x: float) -> bool:	## Drive the soldier to `player_x` (logical px == world px: there is no
 	## horizontal camera), capture A/B/C around the peak, and run every check.
 	## Returns true on failure. Physics is already frozen, so the write sticks.
 	var p: Dictionary = _main.sim.players[0]
@@ -247,10 +320,54 @@ func _pose(player_x: float) -> bool:
 	# the HUD CANNOT fake is edge survival — smeared text loses its strong luma
 	# jumps, crisp text keeps them. So census strong edges per band and require
 	# the concussion frame to keep nearly all of them.
+	#
+	# EXPOSURE-MATCHED, and that qualifier is load-bearing (fixed 2026-10-01). The
+	# concussion pass GRADES as well as DISPLACES: screen_fx.gdshader multiplies
+	# the frame by `mix(1.0, vig * pulse, 0.55)` with vig = 1 - smoothstep(0.3,
+	# 0.75, |to_center|) — a ~2.1x exposure swing, ~0.945 at the middle down to
+	# ~0.45 in the corners. The centre box below was already matched for exactly
+	# this reason; these bands were left on a raw fixed-threshold census, so they
+	# read the vignette's darkening as blur. Measured on the shipped tree: the top
+	# band kept 922/1101 = 0.837 raw and FAILED the 0.85 floor, but with its own
+	# exposure divided back out it keeps 0.872. The top strip is worst-hit because
+	# the vignette anchors at SCREEN centre while the warp anchors at the SOLDIER
+	# (y~300), so the top corners take the full darkening while the bottom strip,
+	# nearer the bright middle, barely moves. Nothing about the blur changed; the
+	# instrument was grading its own threshold. This is why gl-capture has been red
+	# on every push since the ramp landed.
+	#
+	# NOT a loosened bar. 0.85 still bounds the REAL blur loss: after the match the
+	# top strip is genuinely down ~12.8% (the warp does reach the top ink by design
+	# — periph is 0.48..1.0 there), so the pin clears by only 2.2 points, and
+	# _instrument_check plants a smear to prove the gate can still go red.
+	#
+	# MEASURED SENSITIVITY — read this before trusting this pin. Two shader
+	# mutations, each reverted, on the shipped tree:
+	#   blur fold 0.5 -> 1.0 * periph ......... top keep 0.872 -> 0.879 (UP)
+	#   blur tap stride 0.018 -> 0.120 (6.7x) .. top keep 0.872 -> 0.860
+	#   periph forced to 1.0 (no ramp) ........ top keep 0.872 -> 0.872, but the
+	#     CENTRE pin fired 0.00/0.13/0.00 against its 0.70 floor and PROBE FAILED.
+	# So this band pin is a WEAK instrument against blur STRENGTH — the top band's
+	# strong edges are dominated by HUD plate borders and frame geometry, which no
+	# blur destroys, more than by text ink, which it would. It cannot be the thing
+	# that catches a stronger warp; the centre pin is, and it is excellent at it.
+	# What this pin is good for is catching a blur that genuinely DESTROYS the strip
+	# (a wrong layer, a wrong sample source, a full-frame wash), which is why the
+	# exposure match matters: unmeasured it fired on a 2.1x vignette for weeks.
 	var ea_top := _band_edges(a, top0, top1)
 	var eb_top := _band_edges(b, top0, top1)
 	var ea_bot := _band_edges(a, bot0, bot1)
 	var eb_bot := _band_edges(b, bot0, bot1)
+	var gta := _band_mean_luma(a, top0, top1)
+	var gtb := _band_mean_luma(b, top0, top1)
+	var gain_top := 1.0 if gtb < 0.001 else gta / gtb
+	var gba := _band_mean_luma(a, bot0, bot1)
+	var gbb := _band_mean_luma(b, bot0, bot1)
+	var gain_bot := 1.0 if gbb < 0.001 else gba / gbb
+	# The census that GATES is the matched one. The raw counts are kept for the log
+	# only: the raw-vs-matched spread IS the diagnostic that the confound is live.
+	var eb_top_gate := _band_edges(b, top0, top1, gain_top)
+	var eb_bot_gate := _band_edges(b, bot0, bot1, gain_bot)
 	# The CENTRE pin, same instrument aimed at the player's own patch of screen —
 	# but EXPOSURE-MATCHED first. The concussion pass has two distinguishable
 	# halves, and only one of them is the defect: it DISPLACES samples (the smear
@@ -274,6 +391,10 @@ func _pose(player_x: float) -> bool:
 	var world := _band_diff(a, b, wy0, wy1)
 	print("probe x=%.0f amt=%.2f: baseline motion %d/%d px, concussion motion %d/%d px, edges top %d->%d, bottom %d->%d, centre %d->%d (keep %.2f, floor %.2f; ungraded %d keep %.2f, vignette gain %.2f), world diff %d px"
 		% [player_x, PEAK, ac_top, ac_bot, ab_top, ab_bot, ea_top, eb_top, ea_bot, eb_bot, ea_mid, eb_mid, mid_ratio, CENTRE_KEEP_RATIO, eb_raw, raw_ratio, gain, world])
+	print("  HUD BANDS: top %d->%d keep %.3f (raw %.3f, gain %.3f) | bottom %d->%d keep %.3f (raw %.3f, gain %.3f) | floor %.2f"
+		% [ea_top, eb_top_gate, float(eb_top_gate) / float(ea_top), float(eb_top) / float(ea_top), gain_top,
+			ea_bot, eb_bot_gate, float(eb_bot_gate) / float(ea_bot), float(eb_bot) / float(ea_bot), gain_bot,
+			EDGE_KEEP_RATIO])
 	if ea_mid < MIN_CENTRE_EDGES:
 		push_error("probe_concussion_hud: at x=%.0f the player box only carried %d strong edges at baseline (< %d) — nothing legible was there to protect, so the centre check proves nothing" % [player_x, ea_mid, MIN_CENTRE_EDGES])
 		fail = true
@@ -281,8 +402,8 @@ func _pose(player_x: float) -> bool:
 		push_error("probe_concussion_hud: concussion %.2f smeared the PLAYER'S OWN PATCH of screen at x=%.0f (%d->%d strong-edge px, keep %.2f < %.2f) — the warp is hitting the soldier at full strength instead of ramping toward the periphery of HIS view"
 			% [PEAK, player_x, ea_mid, eb_mid, mid_ratio, CENTRE_KEEP_RATIO])
 		fail = true
-	if eb_top < int(ea_top * EDGE_KEEP_RATIO) or eb_bot < int(ea_bot * EDGE_KEEP_RATIO):
-		push_error("probe_concussion_hud: concussion %.2f destroyed HUD edge detail at x=%.0f (top %d->%d, bottom %d->%d strong-edge px) — the low-pass smears HUD chrome" % [PEAK, player_x, ea_top, eb_top, ea_bot, eb_bot])
+	if eb_top_gate < int(ea_top * EDGE_KEEP_RATIO) or eb_bot_gate < int(ea_bot * EDGE_KEEP_RATIO):
+		push_error("probe_concussion_hud: concussion %.2f destroyed HUD edge detail at x=%.0f (top %d->%d, bottom %d->%d strong-edge px, exposure-matched) — the low-pass smears HUD chrome" % [PEAK, player_x, ea_top, eb_top_gate, ea_bot, eb_bot_gate])
 		fail = true
 	if world < MIN_WORLD_DIFF_PIXELS:
 		push_error("probe_concussion_hud: at x=%.0f the world band changed only %d px under concussion %.2f (< %d) — the effect did not render, so the checks above prove nothing" % [player_x, world, PEAK, MIN_WORLD_DIFF_PIXELS])
@@ -350,7 +471,7 @@ func _box_mean_luma(img: Image, x0: int, x1: int, y0: int, y1: int) -> float:
 	return 0.0 if n == 0 else sum / float(n)
 
 
-func _band_edges(img: Image, y0: int, y1: int) -> int:
+func _band_edges(img: Image, y0: int, y1: int, gain: float = 1.0) -> int:
 	# Strong-edge census: pixels whose luma jumps hard against the right
 	# neighbour. Text ink on a plate is nothing BUT such edges; a radial blur
 	# over the ink destroys them, while a blur confined to the world behind a
@@ -358,9 +479,22 @@ func _band_edges(img: Image, y0: int, y1: int) -> int:
 	var n := 0
 	for y in range(y0, mini(y1, img.get_height())):
 		for x in img.get_width() - 1:
-			if absf(_luma(img.get_pixel(x, y)) - _luma(img.get_pixel(x + 1, y))) > EDGE_LUMA_JUMP:
+			if absf(_luma(img.get_pixel(x, y)) - _luma(img.get_pixel(x + 1, y))) * gain > EDGE_LUMA_JUMP:
 				n += 1
 	return n
+
+
+func _band_mean_luma(img: Image, y0: int, y1: int) -> float:
+	# Mean luma of a full-width band, y-windowed. The exposure the grade left
+	# that strip at, so a gain-matched census can undo it the way _box_mean_luma
+	# does for the centre box.
+	var sum := 0.0
+	var n := 0
+	for y in range(y0, mini(y1, img.get_height())):
+		for x in img.get_width():
+			sum += _luma(img.get_pixel(x, y))
+			n += 1
+	return 0.0 if n == 0 else sum / float(n)
 
 
 static func _luma(px: Color) -> float:
