@@ -60,9 +60,42 @@ func _initialize() -> void:
 ## A deliberately dumb bot: hold forward, sweep the aim, fire. It is not here to
 ## win — it is here to MOVE UP THE MAP so the capture sees new world. The point
 ## is the scenery and the layout, not the combat.
+## M1.1/M1.2 — ROLE_ROW mode. Six separate capture tools (tools/role_sheet.gd and
+## five throwaway probes) tried to reproduce this file's frame priming and EVERY one
+## produced a 0%-lit frame, including a minimal probe whose boot was a line-for-line
+## copy of this file's. Recreating the priming is the bug. So this mode injects the
+## one-of-each-kind row INTO the tool that already works, and inherits the priming
+## instead of guessing at it.
+const ROLE_KINDS := [
+	"rusher", "elite", "enemy_smg", "enemy_assault", "enemy_shotgun",
+	"enemy_lmg", "enemy_sniper", "sapper", "ghillie", "courier",
+]
+
+
+func _role_row() -> void:
+	if OS.get_environment("ROLE_ROW") != "1":
+		return
+	var sim = main.sim
+	if sim == null or sim.players.is_empty():
+		return
+	var cam: int = int(sim.camera_top)
+	var row_y: int = cam + int(190 * Fixed.ONE)
+	sim.enemies.clear()
+	for j in ROLE_KINDS.size():
+		sim.enemies.append({
+			"x": int((52 + j * 58) * Fixed.ONE), "y": row_y, "alive": true,
+			"elite": ROLE_KINDS[j] == "elite", "kind": ROLE_KINDS[j],
+			# Defensive superset: the draw path reads several of these with [] not
+			# .get(), so a field the SPAWNER happens not to set is still a hard error.
+			"windup": 999, "fire_cd": 999, "submerged": false,
+			"surface_ticks": 0, "lunge_ticks": 0, "hp": 40, "max_hp": 40,
+		})
+
+
 func _drive() -> void:
 	if main == null or main.sim == null or main.sim.players.is_empty():
 		return
+	_role_row()
 	# The sim reads PHYSICAL keys (main.gd _gather_inputs: is_physical_key_pressed
 	# on bind("move_up") etc.), NOT InputMap actions, so Input.action_press() does
 	# nothing here and the player stands still -- which is exactly what happened on
@@ -114,6 +147,20 @@ func _run() -> void:
 		var wy: int = main.sim.camera_top
 		var shot := "%s/cs-%02d-wy%05d.png" % [out_dir, taken, wy]
 		var img := root.get_texture().get_image()
+		# M1.1: a saved PNG is not a usable PNG. This tool's own ancestor printed
+		# SAVED on 0%-lit frames seven times. Count first, save second, and say so
+		# loudly when the frame is blank instead of writing a black file.
+		if img != null:
+			var litp := 0
+			for ly in range(0, img.get_height(), 8):
+				for lx in range(0, img.get_width(), 8):
+					if img.get_pixel(lx, ly).r + img.get_pixel(lx, ly).g + img.get_pixel(lx, ly).b > 96.0:
+						litp += 1
+			if litp <= 20:
+				print("BLANK FRAME at %d (lit %d) — not saving a black PNG" % [taken, litp])
+				taken += 1
+				await process_frame
+				continue
 		if img != null:
 			img.save_png(shot)
 			shots.append(shot)
