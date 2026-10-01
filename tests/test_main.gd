@@ -1636,8 +1636,8 @@ func test_victory_trophy_never_covers_a_result_row() -> void:
 						var boxes: Array = []
 						var title_sz := f.get_string_size("V I C T O R Y !", HORIZONTAL_ALIGNMENT_LEFT, -1, 24)
 						boxes.append(["TITLE", Rect2(320.0 - title_sz.x / 2.0,
-							150.0 - f.get_ascent(24), title_sz.x, title_sz.y)])
-						boxes.append(["DOC BAND", Rect2(panel_x + 4.0, 112.0 + 4.0, panel_w - 8.0, 15.0)])
+							float(ms.result_title_y(true)) - f.get_ascent(24), title_sz.x, title_sz.y)])
+						boxes.append(["DOC BAND", ms.result_doc_band_rect(panel_x, panel_w)])
 						for i in n:
 							var row: Dictionary = vrows[i]
 							var row_text: String = row["text"]
@@ -1683,6 +1683,207 @@ func test_victory_trophy_never_covers_a_result_row() -> void:
 		var pbody := src.substr(pstart, src.find("\nfunc ", pstart) - pstart)
 		Runner.T.ok(pbody.contains("RESULT_PANEL_TOP"),
 			"_draw_result_panel() reads its top from RESULT_PANEL_TOP")
+
+
+func _result_card_rows(card: String, n: int) -> Array:
+	## Row sets for both end cards, shaped like the real builders. Victory comes off the
+	## REAL static row builders (the trophy test's set); K.I.A. is RANK (15px medal, the
+	## real rows.insert(0, …)) · DOWNED BY · fillers · VP (14px trophy) · REDEPLOY (14px glyph).
+	var ms: Script = load("res://src/main.gd")
+	if card == "victory":
+		var vrows: Array = [
+			{"text": "RANK  S — EXTERMINATOR", "size": 13, "icon": "mi_medal_5", "icon_size": 15.0},
+			{"text": "SCORE  %s" % Art.group_digits(72540), "size": 13, "icon": "icon_medal", "icon_size": 16.0},
+			{"text": "%d¢ WAR CHEST BANKED  → +%s" % [58850, Art.group_digits(588500)],
+				"icon": "icon_coin", "icon_size": 14.0},
+			{"text": "%dm OF JUNGLE PUSHED" % 361},
+		]
+		if n >= 1:
+			vrows.insert(2, {"text": "PILOTS RESCUED  %d" % 2})
+		for cr in ms._continue_ledger_rows(3 if n >= 2 else 0, 700):
+			vrows.append(cr)
+		for sr in ms._victory_story_rows(213, 17, {"rusher": 37}):
+			vrows.append(sr)
+		for vr in ms._victory_extra_rows(72540, 60000, 1.0):
+			vrows.append(vr)
+		return vrows
+	var rows: Array = [
+		{"text": "RANK  S  —  EXTERMINATOR", "icon": "mi_medal_5", "icon_size": 15.0},
+		{"text": "DOWNED BY  ARMORED GUNSHIP"},
+	]
+	var filler := ["WAVE 14 REACHED", "SCORE 72,540   KILLS 213", "LONGEST STREAK  x17",
+		"58850¢ CHEST SALVAGED  → +117,700", "TOP PREY  RUSHER x37", "PILOTS RESCUED  2",
+		"BEST 143095   NEW BEST!", "3 WAVES SHORT OF YOUR BEST"]
+	var fi := 0
+	while rows.size() < n - 2:
+		rows.append({"text": filler[fi % filler.size()]})
+		fi += 1
+	if n >= 4:
+		rows.append({"text": "412 VP BANKED  (+36)", "icon": "mi_trophy", "icon_size": 14.0})
+	rows.append({"text": "REDEPLOY", "icon": "glyph_key_enter", "icon_size": 14.0})
+	return rows
+
+
+func test_result_card_title_clears_its_document_band() -> void:
+	## The end-card title was seated at a hard-coded y150 tuned against a plate that had
+	## NO header. The debrief document band arrived later (y116..131 + a rule at y133) and
+	## nothing moved the title: PixelOperator8 at 24px has ascent 21, so the title's box is
+	## y129..153 — its top 2 rows sit inside the band and the rule runs through the cap
+	## tops. Both cards tint the band the SAME colour as the title (victory gold, defeat
+	## red), so the overlapping ink merges into the band and the title reads as sliced.
+	## Measured through the real text seam (Art.text_capture) for every caller, every row
+	## count, and both text scales; the pairwise sweep covers every box the helper lays out.
+	var ms: Script = load("res://src/main.gd")
+	var has_title_y: bool = ms.has_method("result_title_y")
+	var has_band: bool = ms.has_method("result_doc_band_rect")
+	var has_rule: bool = ms.has_method("result_doc_rule_rect")
+	Runner.T.ok(has_title_y and has_band and has_rule,
+		"result_title_y / result_doc_band_rect / result_doc_rule_rect are the card's geometry sources")
+	var top: float = _consts().get("RESULT_PANEL_TOP", 112.0)
+	var reserve: float = _consts().get("RESULT_DOC_RESERVE", 20.0)
+	# Titles scraped from the two shipped call sites, not re-typed.
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	Runner.T.ok(src.contains('_draw_result_panel("V I C T O R Y !"'), "victory files its title literally")
+	Runner.T.ok(src.contains("_draw_result_panel(_defeat_title(sim.last_stand)"),
+		"the defeat card titles itself through _defeat_title()")
+	var cards := [
+		["victory", "V I C T O R Y !", "AFTER-ACTION REPORT", "FORM AAR-7 // EYES ONLY"],
+		["kia", ms._defeat_title(true), "CASUALTY REPORT", "FORM KIA-1 // EYES ONLY"],
+		["kia", ms._defeat_title(false), "CASUALTY REPORT", "FORM KIA-1 // EYES ONLY"],
+	]
+	var f := Art.font()
+	var prev_scale := Art.text_scale
+	var prev_cap = Art.text_capture
+	var worst_rule_gap := INF
+	var worst_rule_id := ""
+	var worst_band_overlap := 0.0
+	var worst_rule_overlap := 0.0
+	var worst_row_gap := INF
+	var worst_row_id := ""
+	var pair_fail := 0
+	var pair_first := ""
+	var row_pair_fail := 0
+	var row_pair_first := ""
+	var label_escapes := 0
+	var configs := 0
+	for scale in [1.0, 2.0]:
+		Art.text_scale = scale
+		for card in cards:
+			var variants: Array = range(0, 3) if card[0] == "victory" else range(4, RESULT_ROWS_MAX + 1)
+			for v in variants:
+				var rows := _result_card_rows(card[0], v)
+				var n := rows.size()
+				var row_h: float = ms.result_row_pitch(n, reserve)
+				var max_w: float = Art.tw(card[1], 24)
+				for row in rows:
+					var rw: float = Art.tw(String(row["text"]), int(row.get("size", 11)))
+					if not String(row.get("icon", "")).is_empty():
+						rw += float(row.get("icon_size", 14.0)) + 6.0
+					max_w = maxf(max_w, rw)
+				var panel_w := clampf(max_w + 44.0, 300.0, 620.0)
+				var panel_x := 320.0 - panel_w / 2.0
+				var panel_h := (RESULT_ROW_Y - top) + float(maxi(n, 1)) * row_h + RESULT_PAD + reserve
+				var title_y: float = ms.call("result_title_y", true) if has_title_y else 150.0
+				var band: Rect2 = ms.call("result_doc_band_rect", panel_x, panel_w) if has_band \
+					else Rect2(panel_x + 4.0, top + 4.0, panel_w - 8.0, 15.0)
+				var rule: Rect2 = ms.call("result_doc_rule_rect", panel_x, panel_w) if has_rule \
+					else Rect2(panel_x + 4.0, top + 21.0, panel_w - 8.0, 1.0)
+				var cap: Array = []
+				Art.text_capture = cap
+				Art.text_center(null, card[2], 320, top + 15.0, 8, Color.BLACK)
+				Art.text_center(null, card[1], 320, title_y, 24, Color.WHITE)
+				var boxes: Array = [["DOC BAND", band], ["DOC RULE", rule],
+					["BAND LABEL", cap[0]["box"]], ["TITLE", cap[1]["box"]]]
+				var row0_top := INF
+				for i in n:
+					var row: Dictionary = rows[i]
+					var row_text: String = row["text"]
+					var row_size: int = row.get("size", 11)
+					var icon: String = row.get("icon", "")
+					var icon_size: float = row.get("icon_size", 14.0)
+					var y := RESULT_ROW_Y + i * row_h
+					var total_w := Art.tw(row_text, row_size) + (icon_size + 6.0 if not icon.is_empty() else 0.0)
+					var x := 320.0 - total_w / 2.0
+					if not icon.is_empty():
+						var ir := Rect2(x, y - icon_size + 3.0, icon_size, icon_size)
+						boxes.append(["row %d ICON" % i, ir])
+						if i == 0:
+							row0_top = minf(row0_top, ir.position.y)
+						x += icon_size + 6.0
+					cap.clear()
+					Art.text(null, row_text, Vector2(x, y), row_size, Color.WHITE)
+					boxes.append(["row %d '%s'" % [i, row_text.substr(0, 24)], cap[0]["box"]])
+					if i == 0:
+						row0_top = minf(row0_top, cap[0]["box"].position.y)
+				cap.clear()
+				Art.text_center(null, card[3], 320, top + panel_h - 7.0, 7, Color.WHITE)
+				boxes.append(["FORM", cap[0]["box"]])
+				Art.text_capture = prev_cap
+				configs += 1
+				var id := "%s '%s' rows%d scale%.0f" % [card[0], card[1], n, scale]
+				var tbox: Rect2 = boxes[3][1]
+				var rule_gap := tbox.position.y - rule.end.y
+				if rule_gap < worst_rule_gap:
+					worst_rule_gap = rule_gap
+					worst_rule_id = "%s: title %s vs rule %s" % [id, str(tbox), str(rule)]
+				var bo: Rect2 = band.intersection(tbox.grow(-0.5))
+				worst_band_overlap = maxf(worst_band_overlap, bo.size.x * bo.size.y)
+				var ro: Rect2 = rule.intersection(tbox.grow(-0.5))
+				worst_rule_overlap = maxf(worst_rule_overlap, ro.size.x * ro.size.y)
+				var row_gap := row0_top - tbox.end.y
+				if row_gap < worst_row_gap:
+					worst_row_gap = row_gap
+					worst_row_id = "%s: row0 top %.1f vs title bottom %.1f" % [id, row0_top, tbox.end.y]
+				if not band.encloses(boxes[2][1]):
+					label_escapes += 1
+				# Pairwise over the WHOLE layout set — any future string/icon added to the
+				# helper is checked against every other. The band label is the one box that
+				# is MEANT to sit on another (it is the band's own lettering).
+				for a in boxes.size():
+					for b in range(a + 1, boxes.size()):
+						var na: String = boxes[a][0]
+						var nb: String = boxes[b][0]
+						if (na == "DOC BAND" and nb == "BAND LABEL") or (nb == "DOC BAND" and na == "BAND LABEL"):
+							continue
+						var ov: Rect2 = (boxes[a][1] as Rect2).grow(-0.5).intersection((boxes[b][1] as Rect2).grow(-0.5))
+						if ov.size.x > 0.0 and ov.size.y > 0.0:
+							var desc := "%s: %s %s ∩ %s %s" % [id, na, str(boxes[a][1]), nb, str(boxes[b][1])]
+							if na.begins_with("row ") and nb.begins_with("row "):
+								row_pair_fail += 1
+								if row_pair_first == "":
+									row_pair_first = desc
+							else:
+								pair_fail += 1
+								if pair_first == "":
+									pair_first = desc
+	Art.text_scale = prev_scale
+	Art.text_capture = prev_cap
+	Runner.T.ok(configs >= 15, "swept %d card configurations (3 titles × row sets × 2 text scales)" % configs)
+	Runner.T.ok(worst_rule_gap >= 3.0,
+		"the title clears the header rule by >= 3px — worst %.1fpx (%s)" % [worst_rule_gap, worst_rule_id])
+	Runner.T.ok(worst_band_overlap <= 0.0,
+		"the title shares no pixel with the document band — worst %.1fpx²" % worst_band_overlap)
+	Runner.T.ok(worst_rule_overlap <= 0.0,
+		"the title shares no pixel with the header rule — worst %.1fpx²" % worst_rule_overlap)
+	Runner.T.ok(worst_row_gap >= 3.0,
+		"row 0's medal/text clears the title by >= 3px — worst %.1fpx (%s)" % [worst_row_gap, worst_row_id])
+	Runner.T.eq(label_escapes, 0, "the band label sits inside its band on every card")
+	Runner.T.eq(pair_fail, 0, "no laid-out box overlaps the title, band, rule, band label or form line%s" % [
+		"" if pair_fail == 0 else " — %d overlaps, first: %s" % [pair_fail, pair_first]])
+	# KNOWN PRE-EXISTING GAP, ratcheted (not part of the title fix): at the 13-row K.I.A.
+	# maximum the compressed 11.4px pitch is shorter than a 14..15px icon or the 14px-tall
+	# "¢ … →" row, so neighbouring ROWS overlap by 1..2px — measured identical before and
+	# after the title move (3 pairs per card: RANK medal ∩ row 1, CHEST SALVAGED ∩ row 6,
+	# VP row ∩ the REDEPLOY glyph; ×2 titles ×2 text scales = 12). It may only shrink.
+	Runner.T.ok(row_pair_fail <= 12, "row-vs-row overlaps on the max K.I.A. card do not grow past the 12 measured%s"
+		% ["" if row_pair_fail == 0 else " — %d, first: %s" % [row_pair_fail, row_pair_first]])
+	# Routing pin: the draw reads the same helpers this test measures.
+	var pstart := src.find("func _draw_result_panel(")
+	var pbody := src.substr(pstart, src.find("\nfunc ", pstart) - pstart)
+	for sym in ["result_title_y(", "result_doc_band_rect(", "result_doc_rule_rect("]:
+		Runner.T.ok(pbody.contains(sym), "_draw_result_panel() routes through %s)" % sym)
+	Runner.T.ok(not pbody.contains("title_y := 150.0"),
+		"_draw_result_panel() carries no hard-coded title_y literal")
 
 
 # --- drain-view: RUN-TEARDOWN LEAKS. These are view-side caches that _reset() forgot, so run 2
@@ -3424,7 +3625,7 @@ func test_result_card_ink_lands_on_whole_pixels_through_the_entrance() -> void:
 		var panel_h := (RESULT_ROW_Y - panel_top) + float(maxi(n, 1)) * pitch + RESULT_PAD + reserve
 		# Every string _draw_result_panel puts inside the entrance matrix: the doc
 		# header band, the title, each tally row, and the form microline.
-		var locals: Array[float] = [panel_top + 15.0, 150.0]
+		var locals: Array[float] = [panel_top + 15.0, float(ms.result_title_y(true))]
 		for i in n:
 			locals.append(RESULT_ROW_Y + float(i) * pitch)
 		locals.append(panel_top + panel_h - 7.0)

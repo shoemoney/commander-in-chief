@@ -206,6 +206,9 @@ const PILOT_RESCUE_RADIUS := 14 * F_ONE
 # Landmines: deterministic field hazards. Any grounded unit (player on foot, or
 # an enemy) that steps within the trigger radius detonates them via _explode() —
 # herd rushers onto them, or respect them yourself. Rolling clears them safely.
+# A mine an ENEMY laid (the sapper's, tagged "hostile") mints no coin on any
+# trigger — the barrel rule (_detonate_barrel): its kills still score, but the
+# chest only pays for hazards the player or the map authored.
 const MINE_TRIGGER_RADIUS := 9 * F_ONE
 const MINE_SPACING := 340 * F_ONE
 const BARREL_SPACING := 420 * F_ONE
@@ -4273,6 +4276,10 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 		# advertised trail never existed, and what the player actually got was a
 		# free suicide plus the blast's coin. Behind the sapper is also up-screen
 		# of it — the ground the player is pushing into, which is the trail.
+		# "hostile": the mine shares the authored array and detonation, so without
+		# an owner tag _step_mines paid it out like a herding field mine — every
+		# rusher that walked onto an ENEMY's mine banked COIN_RUSHER. A hostile mine
+		# mints no coin on any trigger, the same as barrels; kills still score.
 		var mx: int = e["x"]
 		var my: int = e["y"]
 		if dlen > F_ONE:
@@ -4280,7 +4287,7 @@ func _step_sapper(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
 			my -= Fixed.mul(Fixed.div(dy, dlen), CLAYMORE_PLANT_OFFSET)
 		else:
 			my -= CLAYMORE_PLANT_OFFSET   # standing on the target: no direction to read
-		mines.append({"x": mx, "y": my, "armed": true, "grace": 0})
+		mines.append({"x": mx, "y": my, "armed": true, "grace": 0, "hostile": true})
 		events.append({"t": "mine_lay", "x": mx, "y": my})
 	# Moves through the shared mover step, so the sapper respects the cover the
 	# player PAID for: hand-rolled movement here phased straight through sandbags,
@@ -4477,7 +4484,8 @@ func _step_mines() -> void:
 				if p["alive"] and _exposed(p) and not p["roll_iframe"] \
 						and _dist_lte(p["x"], p["y"], m["x"], m["y"], GRENADE_RADIUS):
 					_hurt_player(p)
-			_explode(m["x"], m["y"])
+			# A hostile (enemy-laid) mine is no_coin whoever trips it — the barrel rule.
+			_explode(m["x"], m["y"], m.get("hostile", false))
 	# Foundry vents: phase is DERIVED from the global tick (no per-vent timer,
 	# no new state) — the 7*x term staggers neighbors so a chunk never jets in
 	# unison. Warn event fires VENT_WARN_TICKS before the jet; the jet holds
@@ -7725,6 +7733,8 @@ func checksum() -> int:
 		h = feed.call(m["y"], h)
 		h = feed.call(int(m["armed"]), h)
 		h = feed.call(m.get("grace", 0), h)
+		if m.get("hostile", false):
+			h = feed.call(1, h)   # conditional (flush_cd/sandbags precedent): decides coin, so it is gameplay; untagged mines hash as before
 	h = feed.call(barrels.size(), h)
 	for bl in barrels:
 		h = feed.call(bl["x"], h)

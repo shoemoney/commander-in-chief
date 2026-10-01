@@ -1064,13 +1064,19 @@ const ENDLESS_GOLDEN: Array[int] = [
 ## below are live state again on the new seed.
 const SURVIVOR_SEED := 27
 
+## RE-RECORDED (2026-10-01, sapper mines tagged "hostile" + no_coin): sample 5 ONLY. The
+## seed-27 window lays 10 sapper mines; a live one sits in mines[] at t = 3600 and the new
+## conditional hostile feed hashes it. Samples 0-4 are byte-identical, and the arm's run is
+## otherwise unchanged — measured on both trees: still alive, 2 gates open, war_chest 76,
+## score 9050 (no enemy-tripped sapper blast paid coin inside this window). GOLDEN and
+## ENDLESS_GOLDEN lay 0 sapper mines and are verified unchanged.
 const SURVIVOR_GOLDEN: Array[int] = [
 	5580572498201628541,
 	6685256996799405269,
 	3419981169107357818,
 	7776205666322119258,
 	6573060156485709325,
-	6823932995817026483,
+	3030480318250173924,
 ]
 
 

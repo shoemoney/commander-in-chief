@@ -15652,6 +15652,23 @@ func _metal_plate(r: Rect2, a: float) -> void:
 const RESULT_DOC_RESERVE := 20.0
 const RESULT_PANEL_TOP := 112.0   # the end-card plate's top edge — hoisted so the victory trophy can seat flush ABOVE it instead of guessing at "blank panel space"
 
+## The debrief document's header band and the rule under it — one geometry source for
+## the draw and the layout test.
+static func result_doc_band_rect(panel_x: float, panel_w: float) -> Rect2:
+	return Rect2(panel_x + 4.0, RESULT_PANEL_TOP + 4.0, panel_w - 8.0, 15.0)
+
+static func result_doc_rule_rect(panel_x: float, panel_w: float) -> Rect2:
+	return Rect2(panel_x + 4.0, RESULT_PANEL_TOP + 21.0, panel_w - 8.0, 1.0)
+
+## The end-card title's baseline. y150 was tuned against a plate with NO header; once the
+## document band (y116..131) and its rule (y133..134) arrived, the 24px title's box
+## (ascent 21: y129..153) put its top 2 rows inside the band and ran the rule through the
+## cap tops — and both cards tint the band the title's own colour, so the caps merged into
+## it and read as sliced. With a doc the baseline drops 9px into the 150->178 gap: box
+## y138..162, 4px under the rule and 4px over row 0's medal (y166).
+static func result_title_y(has_doc: bool) -> float:
+	return RESULT_PANEL_TOP + 47.0 if has_doc else 150.0
+
 ## The end card's modal SCRIM. The run is OVER — the only live inputs are REDEPLOY and
 ## TITLE — so the card is at least as modal as the PAUSE menu, and it wears the SAME
 ## backdrop language: GameMenu.SCRIM_BASE at GameMenu._scrim_alpha(Mode.PAUSE). One
@@ -15737,7 +15754,7 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 	draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H),
 		Color(RESULT_SCRIM_BASE, result_scrim_alpha(_result_t, _motion)))
 	var panel_top := RESULT_PANEL_TOP
-	var title_y := 150.0
+	var title_y := result_title_y(not doc.is_empty())
 	var row_start_y := 178.0
 	var doc_h: float = RESULT_DOC_RESERVE if not doc.is_empty() else 0.0
 	var row_h := result_row_pitch(rows.size(), doc_h)
@@ -15777,12 +15794,10 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 	draw_texture_rect(Art.tex("ui_panel"), Rect2(panel_x, panel_top, panel_w, panel_h), false, accent)
 	if not doc.is_empty():
 		var band_col: Color = doc.get("band_col", title_col)
-		draw_rect(Rect2(panel_x + 4.0, panel_top + 4.0, panel_w - 8.0, 15.0),
-			Color(band_col, 0.85 * accent.a))
+		draw_rect(result_doc_band_rect(panel_x, panel_w), Color(band_col, 0.85 * accent.a))
 		Art.text_center(self, doc["band"], 320, panel_top + 15.0, 8,
 			Color(0.06, 0.06, 0.05, accent.a))
-		draw_rect(Rect2(panel_x + 4.0, panel_top + 21.0, panel_w - 8.0, 1.0),
-			Color(band_col, 0.4 * accent.a))
+		draw_rect(result_doc_rule_rect(panel_x, panel_w), Color(band_col, 0.4 * accent.a))
 	Art.text_center(self, title, 320, title_y, 24, title_col)
 	if shine and _motion >= 0.5:
 		# a1-11 VFX#10: a soft warm glint sweeps across the title on a slow loop (with

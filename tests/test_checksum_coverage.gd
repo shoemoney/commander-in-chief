@@ -54,7 +54,9 @@ const KNOWN := {
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
 	# `grace` = planter-immunity countdown on a player-planted claymore. HASHED: it decides
 	# whether a player takes the hit, so it is gameplay, not presentation.
-	"mine": ["x", "y", "armed", "friendly", "grace"],
+	# `hostile` = laid by an enemy (sapper): decides whether its blast mints coin
+	# (war_chest), so it is HASHED — conditionally, only when set.
+	"mine": ["x", "y", "armed", "friendly", "grace", "hostile"],
 	# player marks segments that consume the shared purchase cap; vertical swaps
 	# collision axes for cardinalized nests; nest makes paid pairs break atomically.
 	# All three affect gameplay and are hashed.

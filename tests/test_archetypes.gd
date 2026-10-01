@@ -343,6 +343,137 @@ func test_sapper_does_not_detonate_its_own_mine_the_tick_it_lays_it() -> void:
 	Runner.T.ok(sap["alive"], "the sapper did not blow itself up")
 
 
+func _mine_payout(mine_src: String, tripper: String) -> Dictionary:
+	## One mine, one rusher inside its blast, one trip — and what the blast PAID.
+	## mine_src: "sapper" (laid by the REAL _step_sapper), "authored" (a field-mine
+	## literal, the _step_camera shape) or "claymore" (the player's friendly literal).
+	## tripper: "enemy" (the rusher stands on it) or "player" (the player does, with
+	## the rusher 20px off inside the blast).
+	var sim := SimWorld.new(3, 1)
+	var p := sim.players[0]
+	p["x"] = 300 * Fixed.ONE
+	p["y"] = sim.camera_top + 40 * Fixed.ONE
+	sim.enemies.clear()
+	sim.mines.clear()
+	sim.sandbags.clear()
+	sim.rocks.clear()
+	sim.barrels.clear()
+	var mx: int = 300 * Fixed.ONE
+	var my: int = sim.camera_top + 180 * Fixed.ONE
+	if mine_src == "sapper":
+		sim._spawn_special(300 * Fixed.ONE, sim.camera_top + 200 * Fixed.ONE, "sapper")
+		var sap := sim.enemies[sim.enemies.size() - 1]
+		sap["fire_cd"] = 0
+		var dx: int = p["x"] - sap["x"]
+		var dy: int = p["y"] - sap["y"]
+		sim._step_sapper(sap, dx, dy, Fixed.length(dx, dy))
+		# The sapper stands ~20px from its own mine — inside BLAST_KILL_RADIUS — and
+		# would pay its own bounty into the measurement. Only the rusher may die here.
+		sim.enemies.clear()
+		mx = sim.mines[0]["x"]
+		my = sim.mines[0]["y"]
+	elif mine_src == "authored":
+		sim.mines.append({"x": mx, "y": my, "armed": true, "grace": 0})
+	else:
+		sim.mines.append({"x": mx, "y": my, "armed": true, "friendly": true, "grace": 0})
+	var ry: int = my if tripper == "enemy" else my + 20 * Fixed.ONE
+	sim._spawn_enemy(mx, ry, false)
+	var r := sim.enemies[sim.enemies.size() - 1]
+	r["x"] = mx
+	r["y"] = ry
+	if tripper == "player":
+		p["x"] = mx
+		p["y"] = my
+	var chest0: int = sim.war_chest
+	var score0: int = sim.score
+	sim.events.clear()
+	var held := sim.gate_held()
+	sim._step_mines()
+	var kill_coin := -1
+	for ev in sim.events:
+		if ev["t"] == "kill":
+			kill_coin = ev["coin"]
+	return {"mines": sim.mines.size(), "chest": sim.war_chest - chest0, "score": sim.score - score0,
+		"kill_coin": kill_coin, "rusher_dead": not r["alive"], "held": held,
+		"armed": sim.mines.size() > 0 and sim.mines[0]["armed"]}
+
+
+func test_enemy_tripped_sapper_mine_mints_no_coin() -> void:
+	## The Sapper's mine reused the authored landmine array AND its detonation, so it
+	## carried no owner and _step_mines paid it out like a field mine laid for herding:
+	## every rusher that walked onto an ENEMY's mine banked COIN_RUSHER for the player.
+	## Barrels — the other world hazard enemies set off — mint no coin on all four
+	## triggers (_detonate_barrel). A hostile mine now follows the barrel rule: kills
+	## still score (and feed the streak / frag bonus), but the chest stays shut.
+	var hostile := _mine_payout("sapper", "enemy")
+	Runner.T.ok(not hostile["held"], "precondition: no closed gate is throttling the payout")
+	Runner.T.ok(hostile["rusher_dead"], "the rusher that stepped on the sapper's mine died in the blast")
+	Runner.T.ok(not hostile["armed"] or hostile["mines"] == 0, "the mine went off")
+	Runner.T.eq(hostile["chest"], 0, "an enemy-tripped SAPPER mine banks no war chest")
+	Runner.T.eq(hostile["kill_coin"], 0, "…and its kill event reports 0 coin")
+	var authored := _mine_payout("authored", "enemy")
+	Runner.T.ok(hostile["score"] > 0 and hostile["score"] == authored["score"],
+		"the kill still SCORES, at the same rate as a field mine (barrel parity) — %d vs %d"
+			% [hostile["score"], authored["score"]])
+	var by_player := _mine_payout("sapper", "player")
+	Runner.T.ok(by_player["rusher_dead"], "a player tripping a sapper mine still kills the rusher beside it")
+	Runner.T.eq(by_player["chest"], 0, "a PLAYER-tripped sapper mine mints no coin either (barrels: all triggers)")
+	# Controls: these pay on HEAD and after, and go red if every mine is made no-coin.
+	Runner.T.ok(authored["rusher_dead"], "control: an authored field mine kills the rusher")
+	Runner.T.eq(authored["chest"], SimWorld.COIN_RUSHER,
+		"control: an authored field mine still pays the herding bounty")
+	var clay := _mine_payout("claymore", "enemy")
+	Runner.T.ok(clay["rusher_dead"], "control: the player's claymore kills the rusher")
+	Runner.T.eq(clay["chest"], SimWorld.COIN_RUSHER, "control: the player's claymore still pays")
+
+
+func test_every_enemy_laid_mine_is_tagged_hostile() -> void:
+	## The whole producer set, read from the source: every mines.append(...) inside an
+	## ENEMY stepper (any `_step_*(e: Dictionary` func, so a future mine-laying enemy is
+	## covered the day it lands) must carry "hostile": true, and no other producer may.
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var chunks := src.split("\nfunc ")
+	var re := RegEx.create_from_string("^_step_\\w+\\(e: Dictionary")
+	var total := 0
+	var in_enemy := 0
+	var offenders: Array = []
+	for chunk in chunks:
+		var head: String = chunk.substr(0, chunk.find("("))
+		var enemy := re.search(chunk) != null
+		var at := chunk.find("mines.append(")
+		while at >= 0:
+			var depth := 0
+			var end := at + "mines.append".length()
+			while end < chunk.length():
+				var c := chunk[end]
+				if c == "(":
+					depth += 1
+				elif c == ")":
+					depth -= 1
+					if depth == 0:
+						break
+				end += 1
+			var lit := chunk.substr(at, end - at + 1)
+			total += 1
+			var tagged := lit.contains('"hostile": true')
+			if enemy:
+				in_enemy += 1
+				if not tagged:
+					offenders.append("%s: %s" % [head, lit])
+			elif lit.contains("hostile"):
+				offenders.append("%s (not an enemy stepper): %s" % [head, lit])
+			at = chunk.find("mines.append(", end)
+	Runner.T.ok(total >= 8, "the scan found every mine producer (%d append sites, >= 8)" % total)
+	Runner.T.ok(in_enemy >= 1, "at least one producer is an enemy stepper (%d)" % in_enemy)
+	Runner.T.eq(offenders.size(), 0, "every enemy-laid mine is tagged hostile, and nothing else is%s"
+		% ["" if offenders.is_empty() else " — " + str(offenders)])
+	# Pin: the detonation reads the tag (no_coin), so the tag is not decoration.
+	var ms := src.find("func _step_mines(")
+	var body := src.substr(ms, src.find("\nfunc ", ms + 5) - ms)
+	Runner.T.ok(body.contains('_explode(m["x"], m["y"], m.get("hostile"'),
+		"_step_mines detonates with no_coin = the mine's hostile tag")
+
+
 # --- Per-sector rosters -------------------------------------------------------
 # The campaign used to run ONE flat ["grenadier","sniper","shield"]+mg_nest roll
 # from sector 2 all the way to the finale, while ZONE_INFO promised six distinct
