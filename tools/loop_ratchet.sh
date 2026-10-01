@@ -40,14 +40,22 @@ fi
 
 fail=0
 
-# 1. the loop advanced
+# 1. the loop is ADVANCING IN TIME
+# The first version of this check compared the version against the stamp, which
+# is wrong: --stamp records the version an iteration just COMPLETED, so a clean
+# iteration always equals its own stamp and the gate failed on success. A stall
+# is about elapsed time since the last completed iteration, not version equality.
 if [ -f "$STAMP" ]; then
   prev=$(cat "$STAMP")
-  if [ "$VERSION" = "$prev" ]; then
-    echo "FAIL  loop stalled: still v$VERSION, unchanged since the last stamp"
+  age=$(( $(date +%s) - $(stat -f %m "$STAMP" 2>/dev/null || echo 0) ))
+  mins=$(( age / 60 ))
+  if [ "$VERSION" != "$prev" ]; then
+    echo "ok    work in flight: stamped v$prev, now at v$VERSION"
+  elif [ "$mins" -gt 240 ]; then
+    echo "FAIL  loop stalled: still v$VERSION, ${mins}min since the last completed iteration"
     fail=1
   else
-    echo "ok    loop advanced: v$prev -> v$VERSION"
+    echo "ok    v$VERSION stamped ${mins}min ago (stall threshold 240min)"
   fi
 else
   echo "ok    first stamp (baseline v$VERSION)"
