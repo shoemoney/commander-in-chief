@@ -601,10 +601,34 @@ answer; 50–52 are the ground-tint questions the rejected attempt raised before
 
 ## 2. Sim / gameplay defects — player-facing
 
-### RECOVERY (2026-08-24) — accepted work stranded off HEAD, not yet landed
+### RECOVERY (2026-08-24) — RESOLVED 2026-10-01: the fix is ALREADY ON MAIN. Do not re-extract.
+
+**RESOLVED — no recovery needed.** The extraction was attempted on 2026-10-01 and
+established that this beacon is STALE: the accepted diff is not stranded, it landed.
+`main` carries `b9fdf034 feat: knockdown no longer smears the soldier you are squinting at`,
+and main's copies are the *refactored* versions — `concussion_spare()` and
+`concussion_focus_uv()` as documented pure statics with their own headless tests,
+versus the inline `clampf` on the rescue branch. Diffing main against the branch gives
+15 insertions / 39 deletions in the branch's disfavour: the branch is the OLDER tree.
+
+So the recovery instruction below ("extract, re-gate, do not re-derive") is satisfied
+already, and following it verbatim would have been destructive — applying 11 stale
+hunks over a main that had moved on produced 7 conflicts and would have REGRESSED the
+pure statics to inline arithmetic. The branch is kept for its 4 scratch probes and its
+rejected lane-seal / trench-tint work, which are still unlanded and still unwanted.
+
+Lesson worth keeping: a RECOVERY beacon is a CLAIM about git state, and a claim about
+git state goes stale exactly like any other. Verify `git log main -- <file>` before
+extracting anything. The preflight `rescue/*` check is right to BLOCK a launch over
+this — it just needed the follow-up check to say "nothing to recover".
+
+<details><summary>original 2026-08-24 beacon (superseded)</summary>
+
 
 
 - **Knockdown smear fix was ACCEPTED (gate perfect, closeness 96) but its commit died on API 529 — the blessed diff is stranded on branch rescue/wf122-smear-mix.** Run wf_a7d3399b-122 cycle 1 (2026-08-24): gate verdict 'perfect: true, closeness: 96' on the peripheral-ramp screen_fx.gdshader fix — 'The knockdown smear is gone from the thing the player is looking at' — 5 tracked files, +444/-32 vs 21290ee. commit:1 and ledger:1 then died on API 529, cycle 3's revert also died, and the tree ended as a MIXTURE of this accepted work and cycle 3's REJECTED attempt-1 (lane-seal SEALED contrast -88%, trench tint -61% — do not cherry-pick blindly). Whole mixture preserved on branch rescue/wf122-smear-mix (be20537); the 4 scratch probes (probe_two/probe_ammo_econ/probe_bash_rate/probe_offscreen_fire) ride along there. RECOVERY: extract the smear fix from that branch (screen_fx.gdshader + its main.gd application + probe_concussion_hud.gd centre-readability ratchet + tests), re-gate it, and re-check the gate's four banked residuals before calling it done. Do NOT re-derive from scratch — the accepted diff exists.
+
+</details>
 
 
 ### New 2026-08-24 — from the `wf_a7d3399b-122` run (recovered from `.aaa/ledger.json`)
