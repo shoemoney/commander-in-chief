@@ -3097,6 +3097,9 @@ func test_c3_trench_conceals() -> void:
 	p["smoke_ticks"] = 0
 	p["x"] = tx
 	p["y"] = wy
+	# Frame the trench: the elite below shares the player's row, so it must sit inside the
+	# fire band or the "does NOT wind up" half passes for the wrong reason (off-band hold).
+	sim.camera_top = wy - 180 * SimWorld.F_ONE
 	Runner.T.ok(sim._concealed(p), "a player in the trench is concealed")
 	var e := {"x": tx + 80 * SimWorld.F_ONE, "y": wy, "alive": true, "elite": true,
 		"kind": "elite", "hp": 2, "fire_cd": 0, "windup": 0, "lunge_ticks": 0,
@@ -4157,3 +4160,192 @@ func test_every_mode_can_lose_the_run_before_its_finale() -> void:
 		"every stand-up path is either god-mode or gated on the rally/budget predicate (%d unguarded%s)"
 			% [unguarded, "" if worst == "" else " — " + worst])
 	print("STANDUP BUDGET: " + " | ".join(report))
+
+
+# --- FIRE BAND (2026-10-01) ------------------------------------------------------------------
+# A gun may only open fire from where the player could stand: the reachable band
+# [camera_top+16, camera_top+CAMERA_BAND_BOTTOM] that _clamp_actor holds every player inside.
+# Before this, no ranged stepper checked it, so riflemen/elites/snipers opened up from the
+# spawn row ABOVE the drawn frame (endless) and passed MG nests kept raking the player's back
+# from BELOW it (campaign).
+
+## Every hostile that may start a windup. A kind that starts one and is not listed here is a
+## NEW gun, and the staged test below fails until it is named (and therefore gated).
+const _FIRE_KINDS := ["rusher", "elite", "grenadier", "sniper", "drone", "technical",
+	"mg_nest", "ghillie"]
+
+## kind -> how to put exactly one of it on the field. Keyed exhaustively against the kinds
+## _step_enemies actually branches on (scraped below), so a new kind fails until it is staged.
+const _KIND_STAGE := {
+	"rusher": "_spawn_enemy", "elite": "_spawn_enemy_elite",
+	"grenadier": "_spawn_special", "sniper": "_spawn_special", "drone": "_spawn_special",
+	"technical": "_spawn_special", "shield": "_spawn_special", "sapper": "_spawn_special",
+	"ghillie": "_spawn_special", "mg_nest": "_spawn_mg_nest", "broadcast": "_spawn_broadcast",
+	"frogman": "_spawn_frogman", "courier": "_spawn_courier", "pilot": "direct",
+}
+
+
+static func _fn_body(src: String, fname: String) -> String:
+	var at := src.find("\nfunc %s(" % fname)
+	if at < 0:
+		return ""
+	var end := src.find("\nfunc ", at + 1)
+	return src.substr(at, (end if end > 0 else src.length()) - at)
+
+
+func _stage_kind(sim: SimWorld, kind: String, x: int, y: int) -> Dictionary:
+	match String(_KIND_STAGE[kind]):
+		"_spawn_enemy":
+			sim._spawn_enemy(x, y, false)
+		"_spawn_enemy_elite":
+			sim._spawn_enemy(x, y, true)
+		"_spawn_special":
+			sim._spawn_special(x, y, kind)
+		"_spawn_mg_nest":
+			sim._spawn_mg_nest(x, y)
+		"_spawn_broadcast":
+			sim._spawn_broadcast(x, y)
+		"_spawn_frogman":
+			sim._spawn_frogman(x, y)
+		"_spawn_courier":
+			sim._spawn_courier()
+			sim.enemies[-1]["x"] = x
+			sim.enemies[-1]["y"] = y
+		"direct":
+			sim.enemies.append({"x": x, "y": y, "alive": true, "elite": false, "kind": kind,
+				"surface_ticks": 0, "submerged": false})
+	var e: Dictionary = sim.enemies[-1]
+	e["fire_cd"] = 0
+	return e
+
+
+## Stage one `kind` at screen row `sy` (offset `dx` from the player), park the player at
+## screen row `py`, and run 240 neutral ticks. Returns [fire starts, fire starts outside band].
+func _staged_fire(kind: String, sy: int, dx: int, py: int) -> Array:
+	var F := Fixed.ONE
+	var sim := SimWorld.new(0xF12E, 1, "endless")
+	sim.god_mode = true
+	sim.enemies.clear()
+	sim.rocks.clear()
+	sim.sandbags.clear()
+	var p: Dictionary = sim.players[0]
+	p["x"] = 320 * F
+	p["y"] = sim.camera_top + py * F
+	var e := _stage_kind(sim, kind, 320 * F + dx * F, sim.camera_top + sy * F)
+	var starts := 0
+	var outside := 0
+	var prev: int = int(e.get("windup", 0))
+	for _t in 240:
+		var ct: int = sim.camera_top
+		sim.step([_idle()] as Array[SimInput])
+		var w: int = int(e.get("windup", 0))
+		if prev == 0 and w > 0 and e["alive"]:
+			starts += 1
+			if e["y"] < ct + SimWorld.ACTOR_BAND_TOP or e["y"] > ct + SimWorld.CAMERA_BAND_BOTTOM:
+				outside += 1
+		prev = w
+		if not e["alive"]:
+			break
+	return [starts, outside]
+
+
+func test_no_hostile_opens_fire_outside_the_playable_band() -> void:
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var body := _fn_body(src, "_step_enemies")
+	var rx := RegEx.create_from_string("e\\[\"kind\"\\] == \"(\\w+)\"")
+	var kinds: Array[String] = ["rusher", "elite"]
+	for m in rx.search_all(body):
+		if not kinds.has(m.get_string(1)):
+			kinds.append(m.get_string(1))
+	Runner.T.ok(kinds.size() >= 12, "scraped the kinds _step_enemies branches on (%d): %s"
+		% [kinds.size(), str(kinds)])
+	var unstaged: Array[String] = []
+	for k in kinds:
+		if not _KIND_STAGE.has(k):
+			unstaged.append(k)
+	Runner.T.eq(unstaged.size(), 0,
+		"every hostile kind has a staging recipe — a new kind must be staged here: %s" % str(unstaged))
+	# Off-band rows: the spawn row above the frame, the 16px ceiling strip, just under the
+	# bottom clamp, and well below it (a passed emplacement). The player stands at the nearest
+	# band edge, so every kind is inside its own standoff / notice range.
+	var rows := [[-24, 16], [8, 16], [352, 344], [400, 344]]
+	var off_band := {}
+	for k in kinds:
+		if not _KIND_STAGE.has(k):
+			continue
+		for row in rows:
+			for dx in [0, 60]:
+				var r := _staged_fire(k, row[0], dx, row[1])
+				if r[1] > 0:
+					off_band[k] = off_band.get(k, 0) + int(r[1])
+	Runner.T.eq(off_band.size(), 0,
+		"no hostile starts a windup from outside [camera_top+16, camera_top+344] — offenders %s"
+			% str(off_band))
+	# Liveness control: the same staging, INSIDE the band, must see every gun fire, or the
+	# zero above could just mean the gate silenced the gun (or the harness cannot see a shot).
+	var silent: Array[String] = []
+	var new_guns: Array[String] = []
+	for k in kinds:
+		if not _KIND_STAGE.has(k):
+			continue
+		var r := _staged_fire(k, 120, 60, 180)
+		if _FIRE_KINDS.has(k) and r[0] == 0:
+			silent.append(k)
+		if not _FIRE_KINDS.has(k) and r[0] > 0:
+			new_guns.append(k)
+	Runner.T.eq(silent.size(), 0,
+		"every gun staged inside the band opens fire within 240 ticks (silent: %s)" % str(silent))
+	Runner.T.eq(new_guns.size(), 0,
+		"a kind that starts a windup is listed in _FIRE_KINDS (unlisted: %s)" % str(new_guns))
+
+
+## The fire-start event names, scraped from the steppers _step_enemies dispatches to: an
+## events.append whose name follows a windup START (a `["windup"] = <CONST>_TICKS` write).
+static func _fire_start_events(src: String) -> Array[String]:
+	var names: Array[String] = []
+	var call_rx := RegEx.create_from_string("(_step_\\w+)\\(")
+	var steppers: Array[String] = []
+	for m in call_rx.search_all(_fn_body(src, "_step_enemies")):
+		if not steppers.has(m.get_string(1)):
+			steppers.append(m.get_string(1))
+	var start_rx := RegEx.create_from_string("\\[\"windup\"\\] = [A-Z_]+_TICKS")
+	var ev_rx := RegEx.create_from_string("events\\.append\\(\\{\"t\": \"(\\w+)\"")
+	for fname in steppers:
+		var lines := _fn_body(src, fname).split("\n")
+		for i in lines.size():
+			if start_rx.search(lines[i]) == null:
+				continue
+			for j in range(i + 1, mini(i + 7, lines.size())):
+				var m := ev_rx.search(lines[j])
+				if m != null:
+					if not names.has(m.get_string(1)):
+						names.append(m.get_string(1))
+					break
+	return names
+
+
+func test_torture_inputs_never_fire_from_outside_the_band() -> void:
+	var D: Script = load("res://tests/test_determinism.gd")
+	var src := FileAccess.get_file_as_string("res://src/sim/sim_world.gd")
+	var fire_events := _fire_start_events(src)
+	Runner.T.ok(fire_events.size() >= 7,
+		"scraped the fire-start events (%d): %s" % [fire_events.size(), str(fire_events)])
+	for mode in ["campaign", "endless"]:
+		var sim := SimWorld.new(D.SEED, 2, mode)
+		var outside := 0
+		var first := -1
+		var starts := 0
+		for t in D.TICKS:
+			var ct: int = sim.camera_top   # the band the enemy stepper saw this tick
+			sim.step([D.scripted_input(t, 0), D.scripted_input(t, 1)] as Array[SimInput])
+			for ev in sim.events:
+				if not fire_events.has(String(ev.get("t", ""))):
+					continue
+				starts += 1
+				if ev["y"] < ct + SimWorld.ACTOR_BAND_TOP or ev["y"] > ct + SimWorld.CAMERA_BAND_BOTTOM:
+					outside += 1
+					if first < 0:
+						first = t
+		Runner.T.ok(starts > 0, "%s torture starts real fire (%d) — the census can see a shot" % [mode, starts])
+		Runner.T.eq(outside, 0, "%s torture: %d of %d fire starts came from outside the band (first at tick %d)"
+			% [mode, outside, starts, first])

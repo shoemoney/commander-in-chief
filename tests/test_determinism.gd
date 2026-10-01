@@ -788,13 +788,23 @@ const SEED := 0xDEADBEEF
 ## stands up with a different clip. Measured on this tree: it now wipes at TICK 3140 (was
 ## 2384, 9 revives vs 7, 200 coin paid either way), so samples 0-4 are live state and only
 ## sample 5 is post-wipe. probe_torture_gates.gd: gates 1 and 2 stream (gate 2 @ tick 937).
+## RE-RECORDED (2026-10-01 — FIRE BAND): a hostile may only START a windup from inside the
+## band a player can stand in, [camera_top + ACTOR_BAND_TOP, camera_top + CAMERA_BAND_BOTTOM]
+## (SimWorld._in_fire_band). An out-of-band mover walks on screen instead of holding standoff
+## off it; rooted kinds (mg_nest, ghillie) and the technical's rev just hold. No new field —
+## the predicate reads hashed y + camera_top. Attributed by per-tick A/B against the pre-fix
+## tree (.aaa/offtop/probe_diverge.gd): the FIRST divergence is TICK 1144, the same tick a
+## rusher sits 13px above the band inside its standoff — so sample 0 (t = 600) is
+## BYTE-IDENTICAL and 1-5 move. ⚠️ Coverage cost, measured: this torture now wipes at TICK
+## 2057 (was 3140; 8 knockdowns, 0 gates either way), so samples 3-5 are frozen post-wipe
+## state (was only 5). SURVIVOR_GOLDEN is still the live-state arm for that back half.
 const GOLDEN: Array[int] = [
 	4946374995361956892,
-	5562342822777607429,
-	1104131837497669269,
-	1312124083481148531,
-	4003179914404577603,
-	8013086924652145724,
+	2882873412615601156,
+	4212473115369938232,
+	8934249832053349751,
+	7419367325045136095,
+	6204860958298409479,
 ]
 
 
@@ -1027,13 +1037,20 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## back a different clip and the wave-3+ revive floor is depth-scaled (50 -> 62). That
 ## split is the proof the change is confined to the death/revive seam. Still no wipe in
 ## the window (4 revives; reaches wave 3, was wave 4).
+## RE-RECORDED (2026-10-01 — FIRE BAND, same change as GOLDEN): ALL SIX samples move. The
+## first out-of-band FIRE START is tick 652, but the first DIVERGENCE is TICK 590: an elite
+## 4px above the band, inside its standoff and waiting on fire_cd (63), used to stand still
+## off-frame and now walks down into the band. The gate changes movement before it changes
+## any shot, so sample 0 (t = 600) moves too — measured, not assumed. The torture now WIPES at
+## TICK 3123 (was alive at 3600; 4 knockdowns either way, still wave 3), so sample 5 is
+## frozen post-wipe state.
 const ENDLESS_GOLDEN: Array[int] = [
-	7401991113274299542,
-	1983442463399721855,
-	8142144403442108663,
-	5898425355712429572,
-	2129676405791300265,
-	1628953895948592483,
+	2690452510761397110,
+	8359227894364836834,
+	6697781869985125928,
+	2863856926012775250,
+	3072235456289054715,
+	2496037070296672176,
 ]
 
 
@@ -1070,13 +1087,18 @@ const SURVIVOR_SEED := 27
 ## otherwise unchanged — measured on both trees: still alive, 2 gates open, war_chest 76,
 ## score 9050 (no enemy-tripped sapper blast paid coin inside this window). GOLDEN and
 ## ENDLESS_GOLDEN lay 0 sapper mines and are verified unchanged.
+## RE-RECORDED (2026-10-01 — FIRE BAND, same change as GOLDEN): all six samples move. First
+## divergence TICK 414: a rusher a fraction of a px BELOW the band bottom (screen y 344.x —
+## a unit the ratchet had just left behind), inside standoff, now walks back up instead of
+## holding. The arm still does its job, measured: ALIVE at t = 3600 (13 knockdowns, was 11),
+## but it opens ONE gate now (was 2; score 14661, chest 268). All six samples are live state.
 const SURVIVOR_GOLDEN: Array[int] = [
-	5580572498201628541,
-	6685256996799405269,
-	3419981169107357818,
-	7776205666322119258,
-	6573060156485709325,
-	3030480318250173924,
+	5237620441672197736,
+	7033708846459431453,
+	7009908576559667704,
+	7102171874154285119,
+	6036103179099983411,
+	8209868053795792201,
 ]
 
 

@@ -315,6 +315,9 @@ const CAMERA_LEAD := 260 * F_ONE
 # _step_camera leashes on the same number so the camera can never shove a player
 # into it; keep the two in step if either ever moves.
 const CAMERA_BAND_BOTTOM := 344 * F_ONE
+# Top of the same band (camera_top + 16): the player's ceiling in _clamp_actor AND the
+# fire band's top edge in _in_fire_band. One constant, so the two can never drift apart.
+const ACTOR_BAND_TOP := 16 * F_ONE
 # Ratchet speed limit. A gate opening drops its camera hold in ONE tick, and an
 # unlimited ratchet then took the whole backlog (50-186px) in that tick: the view
 # snapped, and in 2P the trailing player -- clamped to the band on the NEXT tick --
@@ -2039,11 +2042,21 @@ func _near_stream_bunker(x: int, y: int) -> bool:
 func _clamp_actor(p: Dictionary) -> void:
 	var cb := _choke_bounds(p["y"])
 	p["x"] = clampi(p["x"], cb[0], cb[1])
-	p["y"] = clampi(p["y"], camera_top + 16 * F_ONE, camera_top + CAMERA_BAND_BOTTOM)
+	p["y"] = clampi(p["y"], camera_top + ACTOR_BAND_TOP, camera_top + CAMERA_BAND_BOTTOM)
 	# Closed gates are a hard wall to the north.
 	for g in gates:
 		if not g["open"] and p["y"] < g["y"] + GATE_BLOCK_PAD:
 			p["y"] = g["y"] + GATE_BLOCK_PAD
+
+
+func _in_fire_band(e: Dictionary) -> bool:
+	## A gun may only OPEN fire from where the player could stand: the band _clamp_actor
+	## holds every player inside. Without it riflemen/elites/snipers wound up from the
+	## spawn row above the drawn frame, and passed MG nests raked the player's back from
+	## below it. Pure read of hashed state (y, camera_top): no new field, checksum unchanged.
+	## A windup already in progress is never cancelled — a drawn line is a committed shot.
+	var top: int = camera_top + ACTOR_BAND_TOP
+	return e["y"] >= top and e["y"] <= camera_top + CAMERA_BAND_BOTTOM
 
 
 func _collect_pickups(p: Dictionary, i: int) -> void:
@@ -3988,8 +4001,11 @@ func _step_rifleman(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: i
 				_spawn_enemy_bullet(e["x"], e["y"], lx, ly, llen)
 		return
 	e["fire_cd"] = maxi(0, int(e.get("fire_cd", 0)) - 1)
-	if dlen > RIFLEMAN_STANDOFF:
-		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
+	if dlen > RIFLEMAN_STANDOFF or not _in_fire_band(e):
+		# Out of the band: walk on screen first (the target is a player, clamped inside
+		# the band, so this vector always points back into it).
+		if dlen > F_ONE:
+			_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 	elif e["fire_cd"] == 0 and not _concealed(target):
 		e["fire_cd"] = RIFLEMAN_FIRE_CD_TICKS
 		e["windup"] = RIFLEMAN_WINDUP_TICKS
@@ -4050,8 +4066,9 @@ func _step_elite(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 				_spawn_enemy_bullet(e["x"], e["y"], lx, ly, llen)
 		return   # rooted while winding up
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
-	if dlen > ELITE_STANDOFF:
-		_advance_toward(e, dx, dy, dlen, ELITE_SPEED)
+	if dlen > ELITE_STANDOFF or not _in_fire_band(e):
+		if dlen > F_ONE:
+			_advance_toward(e, dx, dy, dlen, ELITE_SPEED)
 	elif e["fire_cd"] == 0 and not _concealed(target):   # can't aim into smoke
 		e["fire_cd"] = ELITE_FIRE_CD_TICKS
 		e["windup"] = ELITE_WINDUP_TICKS
@@ -4088,8 +4105,9 @@ func _step_grenadier(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 			_add_strike(cx + px, cy + py)
 		return
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
-	if dlen > GRENADIER_STANDOFF:
-		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
+	if dlen > GRENADIER_STANDOFF or not _in_fire_band(e):
+		if dlen > F_ONE:
+			_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 	elif e["fire_cd"] == 0:   # AREA fire: smoke scatters the lobs, it does not stop them
 		e["fire_cd"] = GRENADIER_FIRE_CD_TICKS
 		e["windup"] = GRENADIER_WINDUP_TICKS
@@ -4114,8 +4132,9 @@ func _step_sniper(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int
 		return
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	# Keeps to the back — only closes if the target runs far away.
-	if dlen > SNIPER_STANDOFF:
-		_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
+	if dlen > SNIPER_STANDOFF or not _in_fire_band(e):
+		if dlen > F_ONE:
+			_advance_toward(e, dx, dy, dlen, ENEMY_SPEED)
 	elif e["fire_cd"] == 0 and not _concealed(target):   # can't paint into smoke
 		e["fire_cd"] = SNIPER_FIRE_CD_TICKS
 		e["windup"] = SNIPER_WINDUP_TICKS
@@ -4138,9 +4157,10 @@ func _step_drone(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: int)
 			_add_strike(target["x"] + sc[0], target["y"] + sc[1])
 		return   # holds position while painting
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
-	if dlen > DRONE_STANDOFF:
-		e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), DRONE_SPEED)
-		e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), DRONE_SPEED)
+	if dlen > DRONE_STANDOFF or not _in_fire_band(e):
+		if dlen > F_ONE:   # out of the band: fly on screen before painting
+			e["x"] = e["x"] + Fixed.mul(Fixed.div(dx, dlen), DRONE_SPEED)
+			e["y"] = e["y"] + Fixed.mul(Fixed.div(dy, dlen), DRONE_SPEED)
 	elif e["fire_cd"] == 0:   # AREA fire: smoke scatters the paint, it does not stop it
 		e["fire_cd"] = DRONE_FIRE_CD_TICKS
 		e["windup"] = DRONE_WINDUP_TICKS
@@ -4211,7 +4231,8 @@ func _step_technical(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: 
 	e["fire_cd"] = maxi(0, e["fire_cd"] - 1)
 	# Rev only when the charge can actually arrive: cooldown spent, target inside
 	# TECHNICAL_CHARGE_RANGE, and not smoked (can't line up a charge into smoke).
-	if e["fire_cd"] == 0 and dlen <= TECHNICAL_CHARGE_RANGE and not _concealed(target):
+	if e["fire_cd"] == 0 and dlen <= TECHNICAL_CHARGE_RANGE and not _concealed(target) \
+			and _in_fire_band(e):
 		e["fire_cd"] = TECHNICAL_LOCK_CD_TICKS
 		e["windup"] = TECHNICAL_REV_TICKS
 		events.append({"t": "technical_rev", "x": e["x"], "y": e["y"]})
@@ -4340,7 +4361,8 @@ func _step_ghillie(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: in
 	if dlen > GHILLIE_NOTICE_RADIUS:
 		e["submerged"] = true   # you slipped out of range — re-cloak and wait
 		return
-	if e["fire_cd"] == 0 and not _concealed(target):   # can't paint into smoke
+	# Rooted: off the band it simply holds the paint until the camera brings it in.
+	if e["fire_cd"] == 0 and not _concealed(target) and _in_fire_band(e):   # can't paint into smoke
 		e["windup"] = SNIPER_WINDUP_TICKS   # fire_cd is the CLOAK timer here, not a reload
 		e["aim_lx"] = dx   # lock the shot vector at paint start (view draws the line)
 		e["aim_ly"] = dy
@@ -4983,7 +5005,9 @@ func _step_mg_nest(e: Dictionary, target: Dictionary, dx: int, dy: int, dlen: in
 	# `alive` and not _concealed: the nest is the one shooter with NO concealment
 	# gate (suppressing through smoke is its whole identity), so the corpse rule has
 	# to be said here explicitly. A burst already committed still finishes.
-	if e["fire_cd"] == 0 and dlen > F_ONE and target["alive"]:
+	# Rooted: a nest the player has walked past (below the band) or not yet reached (above
+	# it) holds fire instead of raking a back it is not on screen to threaten.
+	if e["fire_cd"] == 0 and dlen > F_ONE and target["alive"] and _in_fire_band(e):
 		# Lock the aim on the target NOW and open a 3-round burst down that line.
 		e["aim_lx"] = dx
 		e["aim_ly"] = dy
