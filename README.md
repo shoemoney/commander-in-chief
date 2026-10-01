@@ -17,12 +17,12 @@
 
 ![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-1249%20methods%20%C2%B7%2038.5k%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1256%20methods%20%C2%B7%2039.2k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-1.2%20%C2%B7%20gold-gold)
 ![Assets](https://img.shields.io/badge/assets-owned%20or%20CC0%20%C2%B7%20history%20purged-2ea44f)
-![Release](https://img.shields.io/badge/release-v1.4.3%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
+![Release](https://img.shields.io/badge/release-v1.4.4%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
 
 **A modern remake of the 1986 vertical run-and-gun** (*Ikari Warriors*, SNK) —
 twin-stick chaos, grenades-vs-armor, one-hit deaths, and the **War Chest 💰**:
@@ -76,7 +76,7 @@ posed sim states, no mockups, no concept art.</sub>
 
 ## 📥 Download & Play
 
-**[⬇️ Latest release — v1.4.3](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
+**[⬇️ Latest release — v1.4.4](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
 
 | 🖥️ Platform | 📦 File | 📏 | 📝 |
 |---|---|---|---|
@@ -341,7 +341,7 @@ the engine-error gate fail a perfectly clean diff with *"no log carried this run
 
 </details>
 
-**1,249 test methods / 39,000+ assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
+**1,256 test methods / 39,200+ assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
 grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus, every archetype's behavior
 contract (nest armor, technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop,
 lockstep loopback, replay integrity, checksum coverage classification, and the campaign+endless **golden
