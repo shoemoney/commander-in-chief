@@ -214,7 +214,8 @@ func test_ally_revive_lands_the_partner_at_the_reviver_and_restores_ammo() -> vo
 	Runner.T.eq(p1["x"], p2["x"], "...and to their X — a rescue puts you at their SIDE, not just their row")
 	Runner.T.ok(p1["x"] != x1_before or p2["x"] == x1_before,
 		"the corpse's x is genuinely abandoned (guards against a vacuous pass when both happen to match)")
-	Runner.T.eq(p1["grenade_ammo"], 4, "death/revive restores a PARTIAL 4 grenades")
+	Runner.T.eq(p1["grenade_ammo"], maxi(0, SimWorld.RESPAWN_GRENADE_FLOOR),   # maxi(pre-death 0, floor)
+		"death/revive tops an empty grenade pouch (0 at death) up to the floor, no further")
 	Runner.T.ok(p1["hurt_iframes"] > 0, "revive grants a post-spawn mercy window")
 
 

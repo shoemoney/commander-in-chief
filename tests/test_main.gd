@@ -1233,6 +1233,47 @@ func test_attract_bot_still_finishes_the_campaign_on_the_shipped_seed() -> void:
 		"the attract bot reaches VICTORY on seed 0xC0FFEE (tick %d of 15,000)" % t)
 
 
+func test_attract_bot_does_not_march_the_title_reel_with_an_empty_gun() -> void:
+	## The god-mode ratchet above structurally cannot see ammo: god-restore refills the clip
+	## every life. The REAL title loop runs non-god, and the respawn used to hand back a 49/4
+	## kit, which was the attract bot's only resupply (demo_input bought exactly once, at
+	## tick 880). When the respawn became a top-up to SimWorld.RESPAWN_MG_FLOOR the bot spent
+	## a median 36% of its alive ticks dry — a third of the game's own sales reel walking
+	## north with an empty gun. demo_input now shops like a player does.
+	## Replays _physics_process's TITLE branch exactly: solo campaign, non-god, reset on
+	## victory / wipe / _down_frames > 150. The shipped loop reseeds with randi(); a fixed
+	## reseed keeps this deterministic. Window: the first 3,600 ticks (one minute of reel)
+	## per seed, 12 seeds, MEDIAN dry share — one pathological seed must not own the verdict.
+	var ms: Script = load("res://src/main.gd")
+	var shares: Array[float] = []
+	for s in range(1, 13):
+		var sim := SimWorld.new(s, 1, "campaign")
+		var resets := 0
+		var down := 0
+		var alive := 0
+		var dry := 0
+		for _t in 3600:
+			if sim.victory or sim.wiped or down > 150:
+				resets += 1
+				sim = SimWorld.new(s + 7919 * resets, 1, "campaign")
+				down = 0
+			sim.step([ms.demo_input(sim.tick_count, sim)] as Array[SimInput])
+			down = 0 if not sim._all_players_down() else down + 1
+			var p: Dictionary = sim.players[0]
+			if p["alive"]:
+				alive += 1
+				if p["mg_ammo"] == 0:
+					dry += 1
+		shares.append(float(dry) / float(maxi(alive, 1)))
+	var sorted := shares.duplicate()
+	sorted.sort()
+	var median: float = (sorted[5] + sorted[6]) / 2.0
+	print("    attract dry share per seed: %s  median %.3f" % [
+		", ".join(shares.map(func(v): return "%.3f" % v)), median])
+	Runner.T.ok(median <= 0.15,
+		"the non-god title reel spends <= 15%% of alive ticks with mg_ammo == 0 (median %.3f over 12 seeds)" % median)
+
+
 # ==========================================================================================
 # FULL-FRAME THREAT WASHES — the play field is seen THROUGH these, and nothing used to cap
 # the stack. Three producers painted the play CENTRE (two flat rects + a spatter atlas), so

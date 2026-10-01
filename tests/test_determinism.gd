@@ -777,13 +777,24 @@ const SEED := 0xDEADBEEF
 ## rally_is_free()'s endless arm is byte-identical (`_all_players_down() and (mode ==
 ## "endless" or ...)` short-circuits exactly as before) and endless returns -1 from
 ## standups_left(), so the budget never engages there.
+## RE-RECORDED (2026-10-01, dying stops being the cheapest resupply): two sim changes.
+##   1. _respawn TOPS UP to RESPAWN_MG_FLOOR (8) / RESPAWN_GRENADE_FLOOR (2) instead of
+##      ASSIGNING the old 49/4 kit. The kit was worth 79 coin at shop prices against a
+##      25-coin solo revive at depth 0 (12.6x by depth 12), and the assignment confiscated
+##      anything a player carried above 49/4.
+##   2. revive_cost rides _econ_scale (campaign/arcade/boss_rush price AND every mode's
+##      floor) — it was the one coin sink that ignored the depth scale.
+## No new field. Every sample moves: the torture first dies at tick 446 (< sample 0) and
+## stands up with a different clip. Measured on this tree: it now wipes at TICK 3140 (was
+## 2384, 9 revives vs 7, 200 coin paid either way), so samples 0-4 are live state and only
+## sample 5 is post-wipe. probe_torture_gates.gd: gates 1 and 2 stream (gate 2 @ tick 937).
 const GOLDEN: Array[int] = [
-	6044423000615395277,
-	2139797004594887183,
-	1608768388581761891,
-	5499881388938480621,
-	2091554856139180245,
-	4066974192190555357,
+	4946374995361956892,
+	5562342822777607429,
+	1104131837497669269,
+	1312124083481148531,
+	4003179914404577603,
+	8013086924652145724,
 ]
 
 
@@ -1010,13 +1021,19 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-08-24, free roll gate — same reason as GOLDEN
 ## above). Endless torture also presses roll, so all six samples move from
 ## the same 1.25->1.105 trajectory delta; no new field.
+## RE-RECORDED (2026-10-01, respawn top-up floor + revive on _econ_scale — same two
+## changes as GOLDEN). Samples 0-2 BYTE-IDENTICAL, 3-5 move: the endless torture's first
+## knockdown is TICK 1813, just past sample 2 (t = 1800), and from there the stand-up hands
+## back a different clip and the wave-3+ revive floor is depth-scaled (50 -> 62). That
+## split is the proof the change is confined to the death/revive seam. Still no wipe in
+## the window (4 revives; reaches wave 3, was wave 4).
 const ENDLESS_GOLDEN: Array[int] = [
 	7401991113274299542,
 	1983442463399721855,
 	8142144403442108663,
-	8999974687396709673,
-	1517746335345395172,
-	3109521952156665276,
+	5898425355712429572,
+	2129676405791300265,
+	1628953895948592483,
 ]
 
 
@@ -1038,15 +1055,22 @@ const ENDLESS_GOLDEN: Array[int] = [
 ##
 ## If a future change makes this seed wipe inside 3,600 ticks, do NOT just re-record: the
 ## arm has stopped doing its job and needs a new measured seed.
-const SURVIVOR_SEED := 2
+##
+## RE-SEEDED (2026-10-01, respawn top-up floor + revive on _econ_scale): that is exactly
+## what happened. Seed 2 now wipes at tick 2713 (9 knockdowns, 1 gate). Re-measured over
+## seeds {0..39, 0xBEEF} with the same 3,600-tick script: survivors went 6/41 -> 2/41
+## (27 and 0xBEEF; median wipe tick 2652 -> 2568). Seed 27 is the one that still OPENS TWO
+## GATES (11 knockdowns, 76 coin left at t = 3600); 0xBEEF opens one. So all six samples
+## below are live state again on the new seed.
+const SURVIVOR_SEED := 27
 
 const SURVIVOR_GOLDEN: Array[int] = [
-	7449142217846026843,
-	1552270895264212174,
-	909812820081486267,
-	5854500623987812469,
-	7654712912715878751,
-	5724322050536523911,
+	5580572498201628541,
+	6685256996799405269,
+	3419981169107357818,
+	7776205666322119258,
+	6573060156485709325,
+	6823932995817026483,
 ]
 
 

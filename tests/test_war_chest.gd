@@ -404,3 +404,76 @@ func test_spending_stays_dominant() -> void:
 			% [SimWorld.WIPE_SCORE_MULT, SimWorld.SPEND_SCORE_MULT])
 	Runner.T.ok(SimWorld.SPEND_SCORE_MULT < SimWorld.VICTORY_SCORE_MULT,
 		"spend stays under the victory bank rate — winning is still the best exit")
+
+
+func _shop_price_of(sim: SimWorld, p: Dictionary, kind: int, units: int) -> int:
+	## What the REAL shop charges to deliver `units` of supply `kind` to an empty-enough
+	## pocket: repeated supply_price() quotes, one pack at a time, exactly as a player
+	## buying at the wheel would pay. Never reads a price constant.
+	var key := "mg_ammo" if kind == 0 else "grenade_ammo"
+	var cap: int = SimWorld.MG_AMMO_MAX if kind == 0 else SimWorld.GRENADE_AMMO_MAX
+	var pack := 30 if kind == 0 else 4
+	p[key] = cap - units
+	var total := 0
+	while p[key] < cap:
+		total += sim.supply_price(p, kind)
+		p[key] = mini(cap, int(p[key]) + pack)
+	return total
+
+
+func test_a_paid_stand_up_never_out_resupplies_the_shop() -> void:
+	# THE CLASS: a death must never be the cheapest resupply in the game. Two halves:
+	# (A) revive_cost was the one coin sink that ignored _econ_scale, so it fell further
+	# behind the shop every gate; (B) the respawn kit (49 rounds + 4 grenades) was worth
+	# more than the cheapest revive at EVERY depth, in EVERY mode. Exhaustive over
+	# mode x seats x deaths(1..4, past the 3-cap) x depth(0..12). The deepest depth a
+	# revive can exist at is 5 (FINAL_GATE_INDEX 6 latches last_stand); 12 is >2x that.
+	var bad := 0
+	var cells := 0
+	var worst := ""
+	var worst_ratio := 0.0
+	for mode in ["campaign", "arcade", "endless", "boss_rush"]:
+		var max_d := 0 if mode == "boss_rush" else 12
+		for n in [1, 2]:
+			for d in range(0, max_d + 1):
+				var sim := SimWorld.new(7, n, mode)
+				if mode == "endless":
+					sim.wave = 3 * d
+				elif mode != "boss_rush":
+					sim._gate_counter = d + 1
+				Runner.T.eq(sim._econ_depth(), d,
+					"%s depth setter really lands at depth %d (never measure depth 0 forever)" % [mode, d])
+				var p := sim.players[0]
+				# Measure the kit the sim ACTUALLY grants an empty-handed body.
+				p["mg_ammo"] = 0
+				p["grenade_ammo"] = 0
+				sim._kill_player(p)
+				sim._respawn(p, p["y"], 0)
+				var r: int = p["mg_ammo"]
+				var g: int = p["grenade_ammo"]
+				var kit := _shop_price_of(sim, p, 0, r) + _shop_price_of(sim, p, 1, g)
+				for k in [1, 2, 3, 4]:
+					p["deaths"] = k
+					var rev := sim.revive_cost(p)
+					cells += 1
+					var ratio := float(kit) / float(maxi(rev, 1))
+					if ratio > worst_ratio:
+						worst_ratio = ratio
+						worst = "%s n=%d k=%d d=%d: kit %d (%d rds + %d gren) vs revive %d" \
+							% [mode, n, k, d, kit, r, g, rev]
+					if kit > rev:
+						bad += 1
+	print("    [war_chest] stand-up vs shop: %d/%d cells where the kit out-prices the revive; worst %.3f (%s)"
+		% [bad, cells, worst_ratio, worst])
+	Runner.T.eq(bad, 0, "a paid stand-up hands back no more gear than its own price buys at the shop (worst: %s)" % worst)
+
+	# Second arm: the respawn is a TOP-UP, never a confiscation. DEATH_LOSS_KEYS calls
+	# mg_ammo/grenade_ammo RESTOCKS, not losses — an assignment silently took the excess.
+	var s2 := SimWorld.new(7, 1, "campaign")
+	var q := s2.players[0]
+	q["mg_ammo"] = 80
+	q["grenade_ammo"] = 10
+	s2._kill_player(q)
+	s2._respawn(q, q["y"], 0)
+	Runner.T.ok(int(q["mg_ammo"]) >= 80, "a death keeps the rounds you carried (80 -> %d)" % q["mg_ammo"])
+	Runner.T.ok(int(q["grenade_ammo"]) >= 10, "...and the grenades (10 -> %d)" % q["grenade_ammo"])

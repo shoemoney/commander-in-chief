@@ -296,9 +296,11 @@ const SHOP_ANIM_EPS := 0.01    # c2-09: the shop cross-fade is "settled" within 
 # MG ammo escalation tiers, in ABSOLUTE rounds. The numeral and the segmented mag bar sit side by
 # side on the same row showing the same value, and they used to tier on different scales: the
 # numeral on these counts, the bar on a fraction of MG_AMMO_MAX. At 99 max that put the bar's amber
-# at <= 44 while a respawn hands back MG_AMMO_MAX/2 == 49 — five shots into every life the bar (and
-# its dark warning tray) went permanently cautionary while the numeral beside it stayed plain white.
-# Both readouts now share these, so they escalate together and the amber still means something.
+# at <= 44 while a respawn then handed back MG_AMMO_MAX/2 == 49 — five shots into every life the bar
+# (and its dark warning tray) went permanently cautionary while the numeral beside it stayed plain
+# white. Both readouts now share these, so they escalate together and the amber still means
+# something. (A respawn now only tops up to SimWorld.RESPAWN_MG_FLOOR, so an empty-handed stand-up
+# honestly opens in the critical tier on both readouts at once.)
 const MG_AMMO_CAUTION := 20    # amber at or below
 const MG_AMMO_CRITICAL := 10   # red at or below
 const MAG_ADV := 8.0 * 3.6 + 4.0  # _mag_bar's x-advance (8 segments * 3.6 + trailing gap). Hoisted
@@ -3354,10 +3356,11 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 	var filled := int(ceil(frac * segs))
 	# Tiers are ABSOLUTE rounds — the same MG_AMMO_CAUTION/CRITICAL the ammo numeral drawn right
 	# beside this bar uses. They used to be fractions of `maxa` (0.45 / 0.2), which at
-	# MG_AMMO_MAX == 99 put the amber tier at <= 44 while a respawn hands back MG_AMMO_MAX/2 == 49:
+	# MG_AMMO_MAX == 99 put the amber tier at <= 44 while a respawn then handed back 49 rounds:
 	# five shots into every life the bar cried wolf for the rest of that life while the numeral
-	# next to it was still plain white. `maxa` still sets the FILL (that is a real proportion);
-	# only the urgency is absolute, so the two readouts escalate together.
+	# next to it was still plain white. (A respawn now only tops up to SimWorld.RESPAWN_MG_FLOOR,
+	# which both readouts read as critical, together.) `maxa` still sets the FILL (that is a real
+	# proportion); only the urgency is absolute, so the two readouts escalate together.
 	var lit := Art.safe(Color(0.5, 0.85, 0.45))
 	var warn := ammo <= MG_AMMO_CAUTION
 	if ammo <= MG_AMMO_CRITICAL:

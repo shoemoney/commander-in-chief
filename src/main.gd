@@ -1370,6 +1370,54 @@ func _ground_biome_strip(biome: int, v: int) -> Texture2D:
 	return _jungle_strips[v % GROUND_BASE_VARIANTS]
 
 
+## The bare-earth dressing FILL texture for a biome: a 2x2 atlas of four soft, organic
+## patches cut from the biome's source card (desert `dirt`, jungle `jungle_mud`). Static
+## and pure so tests/test_view_honesty.gd measures the exact pixels _paint_bg binds.
+## View-only: floats and trig are fine here, the sim never sees this.
+static func ground_dressing_patch_image(biome: int) -> Image:
+	var src: Image = Art.tex("jungle_mud" if biome == 1 else "dirt").get_image()
+	if src.is_compressed():
+		src.decompress()   # a VRAM-compressed import has no raw pixels to read
+	src.convert(Image.FORMAT_RGBA8)
+	if src.get_width() != 128 or src.get_height() != 128:
+		src.resize(128, 128, Image.INTERPOLATE_BILINEAR)
+	var out := Image.create_empty(256, 256, false, Image.FORMAT_RGBA8)
+	var rim: float = DIRT_PATCH["rim"]
+	var wob: float = DIRT_PATCH["wobble"]
+	var fea: float = DIRT_PATCH["feather"]
+	for v in 4:
+		var ph: Array = DIRT_PATCH_PHASES[v]
+		var o := Vector2i((v % 2) * 128, (v / 2) * 128)
+		for y in 128:
+			for x in 128:
+				var u := (float(x) + 0.5 - 64.0) / 64.0
+				var w := (float(y) + 0.5 - 64.0) / 64.0
+				var d := sqrt(u * u + w * w)
+				var th := atan2(w, u)
+				var rb := rim + wob * (0.5 * sin(3.0 * th + ph[0]) + 0.3 * sin(5.0 * th + ph[1])
+					+ 0.2 * sin(7.0 * th + ph[2]))
+				var c := src.get_pixel(x, y)
+				c.a *= 1.0 - smoothstep(rb - fea, rb, d)
+				out.set_pixel(o.x + x, o.y + y, c)
+	return out
+
+
+## The atlas quadrant for dressing-patch variant `i` (0..3).
+static func ground_dressing_patch_region(i: int) -> Rect2:
+	var v := posmod(i, 4)
+	return Rect2(float((v % 2) * 128), float((v / 2) * 128), 128.0, 128.0)
+
+
+## Cached soft-patch atlas for a biome (0 desert, 1 jungle). Built lazily on the first
+## ground paint, same static-cache idiom as _sand_strips. One texture per biome, so the
+## fill pass keeps its single texture switch.
+static func ground_dressing_tex(biome: int) -> Texture2D:
+	if _dirt_patch_tex.is_empty():
+		for b in 2:
+			_dirt_patch_tex.append(ImageTexture.create_from_image(ground_dressing_patch_image(b)))
+	return _dirt_patch_tex[1 if biome == 1 else 0]
+
+
 ## THE ground-dressing generator: the bare-earth cards scattered over the base sand
 ## tile, as pure geometry — [local_pos, rot, size, row_index], no colour, no camera,
 ## no draw. Split out of _paint_bg so tests/test_assets.gd's anti-lattice ratchet
@@ -1593,20 +1641,18 @@ func _paint_bg(canvas: Node2D) -> void:
 		var halo: Vector2 = card[2] * DIRT_FEATHER["in_scale"]
 		canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-halo / 2.0, halo), false,
 			Color(dirt_col.r, dirt_col.g, dirt_col.b, dirt_col.a * DIRT_FEATHER["in_a"]))
+	# a3-28: the jungle dressing is cut from the wet MUD card, the desert from `dirt`,
+	# so the same card geometry reads as a worn path through the biome, not a stain.
+	# Both are now SOFT patches (ground_dressing_tex): the raw cards were opaque
+	# squares, so this pass painted a hard rotated rectangle over its own feathers.
+	# One atlas per biome, bound once: still a single texture switch for the pass.
+	var dirt_tex := ground_dressing_tex(_ground_biome)
 	for card in dirt_cards:
 		var dirt_col: Color = card[3]
 		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
-		# a3-28: the bare-earth cards are ONE shared 'dirt' texture tinted by the
-		# desert ramp. Over green turf that warm brown reads as a foreign angular
-		# polygon dropped on grass (gpt-6.1-sol's exact read: "scattered polygons
-		# rather than terrain ... add contrast without communicating cover or
-		# location"). The jungle dressing is the wet MUD card instead, so the same
-		# card geometry reads as a worn, churned path through the biome — a feature
-		# that communicates location, not a stain. The desert path is unchanged.
-		var dirt_tex := Art.tex("dirt")
-		if _ground_biome == 1:
-			dirt_tex = Art.tex("jungle_mud")
-		canvas.draw_texture_rect(dirt_tex, Rect2(-card[2] / 2.0, card[2]), false, dirt_col)
+		var psz: Vector2 = card[2] * DIRT_PATCH_SCALE
+		canvas.draw_texture_rect_region(dirt_tex, Rect2(-psz / 2.0, psz),
+			ground_dressing_patch_region(int(card[1] * 100.0) % 4), dirt_col)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# MACRO MOTTLE (4v: the barren-lawn killer): 2-3 broad, soft value shifts
 	# per screen on a coarse 256px grid — trampled-earth patches, and the
@@ -7054,6 +7100,17 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 	inp.buy = 2 if tick == 880 else 0   # the grenade-buy float moment
 	inp.revive = (tick % 90) == 0       # downed: feed the coin reader
 	var p := dsim.players[0]
+	# RESTOCK like a player. The respawn used to hand back a 49/4 kit, and that was this
+	# bot's only ammo supply; it is now a top-up to SimWorld.RESPAWN_MG_FLOOR /
+	# RESPAWN_GRENADE_FLOOR, and the non-god title reel went from 12% to 38% of its alive
+	# ticks dry (median, 12 seeds — test_main.gd pins it). A buy fires on the EDGE of
+	# `buy` (SimInput.buy is wheel kind + 1), so pulse it rather than hold it.
+	if p["alive"] and (tick % 4) == 0 and inp.buy == 0:
+		if p["mg_ammo"] <= HudIcons.MG_AMMO_CAUTION and dsim.war_chest >= dsim.supply_price(p, 0):
+			inp.buy = 1
+		elif p["grenade_ammo"] < SimWorld.RESPAWN_GRENADE_FLOOR \
+				and dsim.war_chest >= dsim.supply_price(p, 1):
+			inp.buy = 2
 	# LOCK ON to whatever is actually holding the run. The open-loop sweep above
 	# cannot land on a 20px gunship disc drifting laterally at 2px/tick, so the bot
 	# used to burn ~6,200 ticks and ~35 knockdowns on ONE 40 HP boss that a player
@@ -8128,6 +8185,18 @@ static func _ground_stops(mode: String) -> Array:
 # a3-05: the two feather rings that grade a bare-earth patch into the turf. Outer wide
 # faint ring + a stronger inner halo, both scaled off the card size and dirt alpha.
 const DIRT_FEATHER := {"out_scale": 2.4, "out_a": 0.16, "in_scale": 1.6, "in_a": 0.52}
+# The bare-earth FILL's own edge. Its source cards (dirt / jungle_mud) are 100% opaque
+# 128px squares, so every card ended in a hard 90-degree corner on the NEAREST-filtered
+# bg root, and the feather rings above sat UNDER that edge and could not soften it.
+# ground_dressing_patch_image() masks each card to a wobbly, feathered patch whose
+# whole border is clear. Fractions of the 64-texel half-size: the boundary radius is
+# rim + wobble*(...), and alpha ramps to zero across `feather` inside it. rim+wobble
+# stays <= 0.92 so no border texel carries ink. DIRT_PATCH_SCALE grows the drawn rect
+# so the visible core keeps roughly the old card's footprint.
+# tests/test_view_honesty.gd::test_ground_dressing_cards_have_no_hard_texture_edge
+const DIRT_PATCH := {"rim": 0.84, "wobble": 0.08, "feather": 0.48}
+const DIRT_PATCH_SCALE := 1.4
+const DIRT_PATCH_PHASES := [[0.0, 1.3, 2.9], [2.1, 0.4, 4.4], [4.0, 3.1, 0.7], [5.5, 2.2, 3.6]]
 # a-seam: the flat ground-base modulate. 0.522 == the OLD per-tile average
 # (0.49 + mean(h%7)*0.012 - 1/3*0.012), so removing the per-cell tint hash
 # changes the grid, not the exposure — every alpha tuned against this ground
@@ -8198,6 +8267,7 @@ const GROUND_BASE_SLOTS := 8        # 128px dihedral slots per 1024px strip
 const GROUND_BASE_SLOT_DIHEDRAL := [0, 3, 6, 1, 4, 7, 2, 5]
 static var _sand_strips: Array[Texture2D] = []
 static var _jungle_strips: Array[Texture2D] = []   # a3-28: the CC0 jungle biome's own cache
+static var _dirt_patch_tex: Array[Texture2D] = []   # [desert, jungle] soft dressing-patch atlases
 
 
 # a1-14 THE GROUND'S LIGHT DIRECTION. Everything above de-LATTICED the floor and
@@ -9386,8 +9456,11 @@ func _draw_terrain() -> void:
 							desert_flora_col.lerp(Color(0.8, 0.72, 0.5), float((ch >> 7) % 5) / 8.0))
 
 	# Dirt-patch scrub fringing (7-vote de-checkerboard, part e): 1-2 scrub tufts on
-	# the border of each 64px dirt cell (same hash predicate as _paint_bg) so
-	# no 90-degree patch corner survives naked.
+	# the border of 1-in-6 64px cells. NOT the dressing's own predicate any more — the
+	# cards fire on h % maxi(3, 7 - march*4) since a1-06, and the 96px lattice has no
+	# fringing at all — so this never covered every card corner. The corners are now
+	# removed at the card itself (ground_dressing_tex: feathered, clear-bordered patches);
+	# this is scrub dressing, nothing more.
 	var doy := -fposmod(cam_y, 64.0)
 	var dbase_iy := int(floor(cam_y / 64.0))
 	for ty in 8:

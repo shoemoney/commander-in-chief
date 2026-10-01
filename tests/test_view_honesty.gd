@@ -4929,6 +4929,232 @@ const WORLD_TEXT_SITES := {
 }
 
 
+# GROUND DRESSING HARD EDGES — the textured sibling of the slab ratchet above.
+#
+# That ratchet counts FILLED draw_rect, over the functions _draw() calls. The bare-earth
+# dressing fill escaped both filters: it is a TEXTURED rect, and it is painted by
+# _paint_bg onto _bg_root, not inside _draw(). Its source cards (`dirt`, `jungle_mud`)
+# are 100% opaque 128x128 squares, drawn as rotated 22-50px rects at fill alpha
+# 0.70-0.82 on a NEAREST-filtered root — up to 104 cards per screen, each ending in a
+# hard 90-degree corner the two feather rings underneath it cannot soften. Same read
+# as a raw quad: a pasted rectangle.
+
+const OPAQUE_GROUND_ALLOW := {
+	# MUD_BANK_H half-speed bands: full 640px wide, no corners on screen, and the edge
+	# IS the sim's wading boundary (with a deliberate lip) — art == collision.
+	"_draw_water:dirt": "mud-bank band edge is the half-speed sim boundary",
+	# Shore polygon + ford dry rects from ford_visual: the hard edge is where the
+	# water collision starts and stops — art == collision.
+	"_draw_water:sand": "shore / ford dry ground edge is the water collision edge",
+}
+
+
+func _fn_src(src: String, fn: String) -> String:
+	var s := src.find("\nfunc %s(" % fn)
+	if s < 0:
+		s = src.find("\nstatic func %s(" % fn)
+	if s < 0:
+		return ""
+	var e := src.find("\nfunc ", s + 1)
+	var e2 := src.find("\nstatic func ", s + 1)
+	if e2 > 0 and (e < 0 or e2 < e):
+		e = e2
+	return src.substr(s, (e if e > s else src.length()) - s)
+
+
+func _rgba8(img: Image) -> Image:
+	var out := img.duplicate() as Image
+	if out.is_compressed():
+		out.decompress()
+	out.convert(Image.FORMAT_RGBA8)
+	return out
+
+
+func _border_alpha(img: Image, r: Rect2i) -> Vector2:
+	## (min, max) alpha over the 1-texel border ring of region r.
+	var lo := 1.0
+	var hi := 0.0
+	for x in range(r.position.x, r.end.x):
+		for y in [r.position.y, r.end.y - 1]:
+			var a := img.get_pixel(x, y).a
+			lo = minf(lo, a)
+			hi = maxf(hi, a)
+	for y in range(r.position.y, r.end.y):
+		for x in [r.position.x, r.end.x - 1]:
+			var a := img.get_pixel(x, y).a
+			lo = minf(lo, a)
+			hi = maxf(hi, a)
+	return Vector2(lo, hi)
+
+
+func _patch_metrics(img: Image, r: Rect2i) -> Dictionary:
+	var w := r.size.x
+	var h := r.size.y
+	var ox := r.position.x
+	var oy := r.position.y
+	var ba := _border_alpha(img, r)
+	var corner := 0.0
+	for cx in [0, w - 12]:
+		for cy in [0, h - 12]:
+			for x in 12:
+				for y in 12:
+					corner = maxf(corner, img.get_pixel(ox + cx + x, oy + cy + y).a)
+	# Max 4-neighbour alpha step, with a 1-texel TRANSPARENT pad around the region
+	# (the region's own edge meets the clear turf outside the card).
+	var step := 0.0
+	var solid := 0
+	for x in range(-1, w + 1):
+		for y in range(-1, h + 1):
+			var a := 0.0
+			if x >= 0 and x < w and y >= 0 and y < h:
+				a = img.get_pixel(ox + x, oy + y).a
+				if a >= 0.5:
+					solid += 1
+			for nb in [Vector2i(1, 0), Vector2i(0, 1)]:
+				var nx: int = x + nb.x
+				var ny: int = y + nb.y
+				if nx > w or ny > h:
+					continue
+				var b := 0.0
+				if nx >= 0 and nx < w and ny >= 0 and ny < h:
+					b = img.get_pixel(ox + nx, oy + ny).a
+				step = maxf(step, absf(a - b))
+	# alpha = 0.5 contour radius over 64 angles, in half-size units.
+	var radii: Array[float] = []
+	var half := float(w) / 2.0
+	for i in 64:
+		var th := TAU * float(i) / 64.0
+		var rad := 0.0
+		var t := 0.0
+		while t < half * 1.42:
+			var px := int(floor(half + cos(th) * t))
+			var py := int(floor(half + sin(th) * t))
+			if px < 0 or py < 0 or px >= w or py >= h:
+				break
+			if img.get_pixel(ox + px, oy + py).a < 0.5:
+				break
+			rad = t
+			t += 0.5
+		radii.append(rad / half)
+	var rmin := 9.0
+	var rmax := 0.0
+	var rsum := 0.0
+	for v in radii:
+		rmin = minf(rmin, v)
+		rmax = maxf(rmax, v)
+		rsum += v
+	var rmean := rsum / 64.0
+	return {"border": ba.y, "corner": corner, "step": step,
+		"solid": float(solid) / float(w * h),
+		"spread": (rmax - rmin) / maxf(rmean, 0.0001), "radii": radii}
+
+
+func test_ground_dressing_cards_have_no_hard_texture_edge() -> void:
+	var ms: Script = load("res://src/main.gd")
+	var src := _view_src()
+	# --- ARM A: the CLASS. Every Art.tex("key") literal in the world-ground layer plus
+	# _paint_bg, resolved through Art.TEX, whose image has an opaque border, is either
+	# licensed (art == collision) or a defect.
+	var pb := _fn_src(src, "_paint_bg")
+	Runner.T.ok(pb != "" and pb.contains("canvas.draw_texture_rect"),
+		"_paint_bg exists and paints textured rects (a rename must fail loudly, not empty the set)")
+	var fns: Array = _world_ground_funcs(src)
+	fns.append("_paint_bg")
+	var key_re := RegEx.create_from_string("Art\\.tex\\(\"([a-z0-9_]+)\"\\)")
+	var opaque_cache := {}
+	var unlicensed: Array[String] = []
+	var seen_allow := {}
+	for f in fns:
+		var body := _fn_src(src, f)
+		var keys := {}
+		for line in body.split("\n"):
+			if line.strip_edges().begins_with("#"):
+				continue
+			for m in key_re.search_all(line):
+				keys[m.get_string(1)] = true
+		for key in keys:
+			if not opaque_cache.has(key):
+				var t: Variant = Art.TEX.get(key)
+				var opaque := false
+				if t is Texture2D:
+					var img := _rgba8((t as Texture2D).get_image())
+					opaque = _border_alpha(img, Rect2i(0, 0, img.get_width(), img.get_height())).x >= 0.99
+				opaque_cache[key] = opaque
+			if not opaque_cache[key]:
+				continue
+			var pair := "%s:%s" % [f, key]
+			if OPAQUE_GROUND_ALLOW.has(pair):
+				seen_allow[pair] = true
+			else:
+				unlicensed.append(pair)
+	print("    [view_honesty] opaque-bordered ground textures: unlicensed %s, licensed %s"
+		% [str(unlicensed), str(seen_allow.keys())])
+	Runner.T.eq(unlicensed.size(), 0,
+		"no opaque-edged texture is painted as ground dressing outside the art==collision allowlist %s"
+			% str(unlicensed))
+	for k in OPAQUE_GROUND_ALLOW:
+		Runner.T.ok(seen_allow.has(k), "allowlist entry %s still occurs (no dead licences)" % k)
+
+	# Smallest card edge the dressing ever draws, measured on the shipped generator over
+	# 800 rows x three march stops, and pinned to its closed form so the window is proven
+	# to have covered every hash residue.
+	var min_px := 1e9
+	for base_iy in range(0, 800, 8):
+		for march in [0.0, 0.5, 1.0]:
+			for c in ms.ground_dressing_cards(base_iy, march):
+				var sz: Vector2 = c[2]
+				min_px = minf(min_px, minf(sz.x, sz.y))
+	Runner.T.eq(int(min_px), 22, "smallest dressing card edge is the closed-form 22px (window covers every residue)")
+
+	# --- ARM B: the texture actually bound, per biome x variant.
+	var has := ms.has_method("ground_dressing_tex")
+	Runner.T.ok(has, "the dressing fill binds a named, testable patch atlas (ground_dressing_tex)")
+	var scale := 1.0
+	if has:
+		scale = float(ms.get_script_constant_map()["DIRT_PATCH_SCALE"])
+	var profiles: Array = []
+	for biome in [0, 1]:
+		var img: Image
+		var regions: Array = []
+		if has:
+			img = _rgba8((ms.ground_dressing_tex(biome) as Texture2D).get_image())
+			for v in 4:
+				var rr: Rect2 = ms.ground_dressing_patch_region(v)
+				regions.append(Rect2i(rr.position, rr.size))
+		else:
+			# HEAD: measure what the fill really binds, so the numbers print.
+			img = _rgba8(Art.tex("jungle_mud" if biome == 1 else "dirt").get_image())
+			regions.append(Rect2i(0, 0, img.get_width(), img.get_height()))
+		for v in regions.size():
+			var r: Rect2i = regions[v]
+			var m := _patch_metrics(img, r)
+			var ramp: float = float(m["step"]) * float(r.size.x) / (min_px * scale)
+			print("    [view_honesty] dressing biome %d v%d: border %.3f corner %.3f screen-ramp %.3f/px solid %.3f spread %.3f"
+				% [biome, v, m["border"], m["corner"], ramp, m["solid"], m["spread"]])
+			var tag := "biome %d variant %d" % [biome, v]
+			Runner.T.ok(float(m["border"]) <= 0.0, "%s: no texel on the card border carries ink (%.3f)" % [tag, m["border"]])
+			Runner.T.ok(float(m["corner"]) <= 0.0, "%s: the four 12x12 corners are clear (%.3f)" % [tag, m["corner"]])
+			Runner.T.ok(ramp <= 0.25, "%s: the edge takes >= 4 screen px to fade (%.3f alpha/px)" % [tag, ramp])
+			Runner.T.ok(float(m["solid"]) >= 0.20 and float(m["solid"]) <= 0.70,
+				"%s: a patch, not a square and not a 7%%-ink smudge (%.3f solid)" % [tag, m["solid"]])
+			Runner.T.ok(float(m["spread"]) >= 0.10,
+				"%s: non-regression — organic outline, not a stamped disc (%.3f)" % [tag, m["spread"]])
+			profiles.append(m["radii"])
+	if has:
+		var distinct := true
+		for i in 4:
+			for j in range(i + 1, 4):
+				var diff := 0.0
+				for a in 64:
+					diff = maxf(diff, absf(float(profiles[i][a]) - float(profiles[j][a])))
+				if diff < 0.02:
+					distinct = false
+		Runner.T.ok(distinct, "the four patch variants have different outlines")
+
+	# --- ARM C: wired, not just defined.
+	Runner.T.ok(pb.contains("ground_dressing_tex("), "_paint_bg actually binds the soft patch atlas")
+
+
 func _main_func_bodies() -> Dictionary:
 	## name -> body, comment-only lines stripped, for every top-level func (static or not).
 	var out: Dictionary = {}

@@ -124,8 +124,9 @@ func test_one_hit_death_and_ammo_restore() -> void:
 	revive.revive = true
 	sim.step(_inputs(_idle(), revive))
 	Runner.T.ok(p["alive"], "partner revive brings player back")
-	# PARTIAL resupply: a free full restock made dying cheaper than shopping.
-	Runner.T.eq(p["mg_ammo"], SimWorld.MG_AMMO_MAX / 2, "death restores HALF the MG ammo")
+	# A TOP-UP to a small floor: a free kit made dying cheaper than shopping. 5 rounds at
+	# death is under the floor, so the stand-up raises it to exactly the floor.
+	Runner.T.eq(p["mg_ammo"], SimWorld.RESPAWN_MG_FLOOR, "death tops 5 rounds up to the respawn floor, no more")
 
 
 func test_roll_press_buffered_through_cooldown() -> void:

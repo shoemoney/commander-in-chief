@@ -107,7 +107,11 @@ func test_revive_cost_endless_compounds_and_wave_multiplies() -> void:
 	var p := sim.players[0]
 	p["deaths"] = 1
 	sim.wave = 4
-	Runner.T.eq(sim.revive_cost(p), 50, "first death in the first band is still the base 50")
+	# 62, not 50: the floor rides _econ_scale like every coin sink, and wave 4 is
+	# econ depth 1 (50 + 50/4). Waves 0-2 still price at the bare base 50.
+	Runner.T.eq(sim.revive_cost(p), 62, "first death at wave 4 is the depth-scaled floor")
+	sim.wave = 2
+	Runner.T.eq(sim.revive_cost(p), 50, "first death in the first econ band is still the base 50")
 	sim.wave = 9
 	Runner.T.eq(sim.revive_cost(p), 100, "wave 9 doubles the price (1 + 9/5 = 2)")
 	sim.wave = 25

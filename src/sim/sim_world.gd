@@ -253,6 +253,10 @@ const OPENING_BUNKER_FIRST_SPAWN_TICKS := 180
 const BUNKER_SPAWN_INTERVAL_TICKS := 120
 const MAX_ENEMIES := 64
 const REVIVE_BASE_COST := 50
+# What a stand-up guarantees an empty-handed body: a top-up floor, not a kit.
+# Kept at or under the cheapest revive's shop value at every depth (see _respawn).
+const RESPAWN_MG_FLOOR := 8
+const RESPAWN_GRENADE_FLOOR := 2
 const BROKE_RESPAWN_TICKS := 300
 const BROKE_WAIT_MAX_MULT := 4      # ...and in ENDLESS it compounds to at most 4x that (20.0 s). See broke_wait_ticks().
 
@@ -1085,10 +1089,16 @@ func revive_cost(p: Dictionary) -> int:
 	else:
 		# Campaign keeps the soft cap at 3 deaths: with checkpoints and a finish
 		# line, a linear ramp against flat kill income is just a death spiral.
-		cost = REVIVE_BASE_COST * mini(p["deaths"], 3)
+		# It rides _econ_scale like every other coin sink: the shop creeps +25%
+		# per gate, and a revive that did not was the one price falling behind,
+		# so by gate 5 standing up cost a fraction of what its kit was worth.
+		cost = _econ_scale(REVIVE_BASE_COST * mini(p["deaths"], 3))
 	if is_solo():
 		cost = cost / 2
-	return maxi(cost, REVIVE_BASE_COST / (2 if is_solo() else 1))
+	# The floor scales too (endless included), so no mode's cheapest stand-up
+	# ever undercuts the shop it is supposed to be worse than.
+	# tests/test_war_chest.gd::test_a_paid_stand_up_never_out_resupplies_the_shop
+	return maxi(cost, _econ_scale(REVIVE_BASE_COST / (2 if is_solo() else 1)))
 
 
 func _latch_wipe(x: int, y: int) -> void:
@@ -2348,16 +2358,17 @@ func _respawn(p: Dictionary, at_y: int, cost := 0) -> void:
 	for k in DEATH_LOSS_KEYS:
 		before[k] = p[k]
 	p["alive"] = true
-	# PARTIAL resupply, not a full one. A free 99 rounds + 12 grenades cost ~190
-	# coins at shop rates (3x SHOP_AMMO_COST + 3x SHOP_GRENADE_COST), and the
-	# broke fallback respawns you for nothing — so once you carried no upgrades,
-	# dying strictly dominated buying and the whole supply economy was decorative.
-	# Half a clip and 4 grenades still ends the helplessness the 1986 rule was
-	# protecting, while leaving a restock DECISION on the table.
-	# Starting values (49/4); test: dying must be worse EV than one 30-coin ammo
-	# buy. If players now feel stranded on respawn, raise grenades to 6.
-	p["mg_ammo"] = MG_AMMO_MAX / 2
-	p["grenade_ammo"] = 4
+	# A TOP-UP to a small floor, never an assignment. Invariant (enforced by
+	# tests/test_war_chest.gd::test_a_paid_stand_up_never_out_resupplies_the_shop):
+	# what a stand-up hands an empty-handed body costs no more at the shop than
+	# the cheapest revive, in every mode, at every depth. The old 49-round /
+	# 4-grenade kit was worth 79 coin against a 25-coin solo revive at depth 0
+	# and 12.6x the revive by depth 12 — dying was the cheapest resupply. And as
+	# an assignment it CONFISCATED anything above 49/4, though DEATH_LOSS_KEYS
+	# calls ammo a restock, not a loss. 2 grenades = both bunkers of a gate (they
+	# die only to explosions), so even a broke death can still open the way.
+	p["mg_ammo"] = maxi(p["mg_ammo"], RESPAWN_MG_FLOOR)
+	p["grenade_ammo"] = maxi(p["grenade_ammo"], RESPAWN_GRENADE_FLOOR)
 	p["broke_timer"] = 0
 	p["roll_ticks"] = 0
 	p["boost_ticks"] = 0
