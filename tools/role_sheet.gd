@@ -161,13 +161,19 @@ func _run(main: Node2D, out_dir: String) -> void:
 		return
 
 	# --- ASSERT: whole frame vs band are different bugs ------------------------
+	# A GL viewport image is VRAM-compressed and/or non-RGBA8; get_pixel() returns
+	# 0s for it until both are handled. This is the same guard the repo already
+	# carries in ground_base_strip_image.
+	if img.is_compressed():
+		img.decompress()
+	img.convert(Image.FORMAT_RGBA8)
 	var lit_all := 0
 	var all_total := 0
 	for y in range(0, img.get_height(), 4):
 		for x in range(0, img.get_width(), 4):
 			all_total += 1
 			var c0 := img.get_pixel(x, y)
-			if c0.r + c0.g + c0.b > 96.0:
+			if c0.r + c0.g + c0.b > 0.37:   # 0..1 floats, not 0..255
 				lit_all += 1
 	print("DIAG whole-frame lit %d/%d (%.1f%%)  %dx%d" % [lit_all, all_total,
 		100.0 * lit_all / maxi(1, all_total), img.get_width(), img.get_height()])
@@ -191,7 +197,7 @@ func _run(main: Node2D, out_dir: String) -> void:
 		for x in range(0, band.get_width(), 2):
 			total += 1
 			var cb := band.get_pixel(x, y)
-			if cb.r + cb.g + cb.b > 96.0:
+			if cb.r + cb.g + cb.b > 0.37:   # 0..1 floats, not 0..255
 				lit += 1
 	print("band lit %d/%d (%.1f%%) crop_top=%d" % [lit, total,
 		100.0 * lit / maxi(1, total), top])
@@ -216,11 +222,11 @@ func _run(main: Node2D, out_dir: String) -> void:
 			for dx in range(-14, 15, 2):
 				var x: int = clampi(cx + dx, 0, band.get_width() - 1)
 				var c := band.get_pixel(x, y)
-				if c.r + c.g + c.b > 96.0:
+				if c.r + c.g + c.b > 0.37:   # 0..1 floats
 					col_lit += 1
 				# the rim is the most red-dominant bright pixel in the column
 				var sat := c.r - c.b
-				if c.r + c.g + c.b > 120.0 and sat > best:
+				if c.r + c.g + c.b > 0.46 and sat > best:
 					best = sat
 					br = c.r
 					bg = c.g

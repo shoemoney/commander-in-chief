@@ -151,10 +151,32 @@ func _run() -> void:
 		# SAVED on 0%-lit frames seven times. Count first, save second, and say so
 		# loudly when the frame is blank instead of writing a black file.
 		if img != null:
+			# THE WHOLE MYSTERY, in one line. A GL viewport image arrives
+			# VRAM-compressed: save_png() decompresses it on the way out, so the file
+			# is perfectly lit, but get_pixel() reads the COMPRESSED payload and
+			# returns 0 for every pixel. The gate therefore measured 0 on a frame
+			# that was 14,262/14,400 lit, and confidently declared a working
+			# capture BLANK. The same `if img.is_compressed(): img.decompress()`
+			# guard already appears wherever this codebase reads raw pixels --
+			# ground_base_strip_image, role_sheet -- and the gate was the one place
+			# that forgot it. A measurement that cannot see the thing it measures is
+			# worse than no measurement, and this one was actively wrong.
+			if img.is_compressed():
+				img.decompress()
+			img.convert(Image.FORMAT_RGBA8)
 			var litp := 0
 			for ly in range(0, img.get_height(), 8):
 				for lx in range(0, img.get_width(), 8):
-					if img.get_pixel(lx, ly).r + img.get_pixel(lx, ly).g + img.get_pixel(lx, ly).b > 96.0:
+					var pc2 := img.get_pixel(lx, ly)
+					# 0..1 floats, NOT 0..255. The gate's first version compared the
+					# float sum against 96.0, a threshold inherited from 8-bit reasoning.
+					# Every pixel of a perfectly rendered frame sums to at most 3.0, so
+					# the gate scored a lit frame 0 and called it blank -- while the very
+					# same frame saved by save_png was 14,262/14,400 lit. The gate was
+					# not measuring a blank frame; it was measuring a good one with a
+					# broken scale, and reporting a false failure with total confidence.
+					# A measurement that cannot see what it measures is worse than none.
+					if pc2.r + pc2.g + pc2.b > 0.37:
 						litp += 1
 			if litp <= 20:
 				print("BLANK FRAME at %d (lit %d) — not saving a black PNG" % [taken, litp])
