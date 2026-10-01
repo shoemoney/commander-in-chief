@@ -37,8 +37,21 @@ extends SceneTree
 ## whole-frame-vs-band diagnostic also separated two failure modes that had been
 ## conflated, and the per-kind hue-clash check is written and waiting.
 ##
-## To finish it: diff this against campaign_contact_sheet.gd line by line until
-## the frame is lit, THEN keep the row. Do not loosen the gate.
+## To finish it — and the state as of the last attempt, which changed the picture:
+## a MINIMAL probe (boot identical to campaign_contact_sheet.gd, then read
+## get_texture() and count lit pixels at +0/+30/+60/+120/+200 frames) is ALSO 0%
+## lit at every one of those points, while campaign_contact_sheet.gd is 99% lit in
+## the same environment, back to back. So the black frame is NOT caused by this
+## tool's row, its keys, its menu handling, its capture timing or its await seam —
+## a stripped tool with none of those still produces black. The difference lives
+## somewhere in how campaign_contact_sheet.gd's _warm()/_drive() sequence primes
+## the FIRST presented frame, which has not been isolated yet.
+##
+## Next: instrument campaign_contact_sheet.gd to print the SAME lit-pixel count at
+## each step of ITS _warm() and _drive(), and find the first point its frame goes
+## non-black. That is the experiment to run, and it is not a guess.
+##
+## Do not loosen the gate.
 ##
 ## Run: SHOT_DIR=/tmp/roles Godot --path . --rendering-method gl_compatibility \
 ##         -s res://tools/role_sheet.gd
@@ -79,15 +92,15 @@ func _key(code: Key, down: bool) -> void:
 
 func _run(main: Node2D, out_dir: String) -> void:
 	for i in 150:
-		await RenderingServer.frame_post_draw
+		await process_frame
 	main.start_game(false)
 	# Hold the menu down only while the boot splash can still re-assert TITLE, then
 	# leave it alone so the fade resolves.
 	for i in 90:
-		await RenderingServer.frame_post_draw
+		await process_frame
 		main._menu.mode = GameMenu.Mode.HIDDEN
 	for i in 90:
-		await RenderingServer.frame_post_draw
+		await process_frame
 	var sim = main.sim
 	if sim == null:
 		print("ROLE SHEET UNUSABLE — no sim")
@@ -106,7 +119,7 @@ func _run(main: Node2D, out_dir: String) -> void:
 	# paused/dark run and a useless one for this sheet. Same boot, same seam; the
 	# only difference was WHEN.
 	for i in 70:
-		await RenderingServer.frame_post_draw
+		await process_frame
 		main._menu.mode = GameMenu.Mode.HIDDEN
 		_key(KEY_W, true)      # march north so the sim keeps advancing
 		_key(KEY_UP, true)     # aim keys default to the arrows
