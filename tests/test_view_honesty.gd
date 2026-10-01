@@ -1483,7 +1483,16 @@ func test_the_victory_card_banked_row_reads_the_event_not_the_emptied_chest() ->
 		"the victory card still HAS a war-chest row (a negative grep alone would not notice)")
 	Runner.T.ok(view.contains('ev.get("banked"'),
 		"_ev_victory reads the banked amount off the checksum-excluded victory event")
-	Runner.T.ok(view.contains('WAR CHEST BANKED  → +%s" % [_victory_banked,'),
+	# Anchored on the two halves that carry the CLAIM — the row's label and the value
+	# it interpolates — deliberately NOT on the whole literal. It used to grep
+	# 'WAR CHEST BANKED  → +%s" % [_victory_banked,' verbatim, so changing the row's
+	# arrow glyph (U+2192 -> U+00BB, because the shipped font has no arrow and the
+	# fallback measured differently per platform) broke a test whose subject is the
+	# interpolation source, not the punctuation. A source-grep anchor should be as
+	# narrow as the claim and no wider.
+	Runner.T.ok(view.contains('WAR CHEST BANKED'),
+		"the victory card still draws a war-chest BANKED row")
+	Runner.T.ok(view.contains('+%s" % [_victory_banked,'),
 		"the drawn row interpolates the event payload, not the live (already-zeroed) sim.war_chest")
 
 

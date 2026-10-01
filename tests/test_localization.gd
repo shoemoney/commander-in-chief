@@ -194,3 +194,121 @@ func test_shipped_font_has_real_cjk_glyph_coverage() -> void:
 		var ch := sample.substr(i, 1)
 		var w: float = font.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, Hud.FONT_SIZE).x
 		Runner.T.ok(w > 1.0, "font renders a real (non-tofu) glyph for CJK character '%s' (advance=%.2f)" % [ch, w])
+
+
+## Every character the view can DRAW must exist in the shipped font — because a
+## character it does NOT have is not a tofu box, it is a SYSTEM FONT FALLBACK, and
+## a fallback measures differently on every platform.
+##
+## How this shipped: the K.I.A. card drew "...WAR CHEST BANKED  → +1,234" and
+## PixelOperator8.ttf has no U+2192. Nothing errored. The card simply measured wider
+## on Windows, where the 13-row maximum produced 20 row-vs-row overlaps against the
+## 12 ratcheted on macOS — and windows CI went red on a layout test that had never
+## been given a reason. The GATE SECURED banner's "⚡FAST" (U+26A1, also absent) was
+## worse: banner_fit_size steps the font size down until the string fits, so the
+## fallback's extra width silently rendered that banner at a different point size
+## per platform. Both now use U+00BB, which the face does carry.
+##
+## THE INSTRUMENT IS has_char, NOT get_string_size — and that is the whole point.
+## The CJK test above measures a width, which a fallback supplies perfectly well, so
+## it cannot see this class of bug at all. has_char asks the font what it actually
+## has. (Corollary, and the reason this is worth stating: a gate built on the wrong
+## instrument is not a weak gate, it is a gate that reports the opposite of the
+## truth.)
+##
+## SCOPE: every non-ASCII character in src/ with line comments stripped. Comments
+## are excluded because nobody draws them, and a `→` in a comment is documentation,
+## not a defect — including the ones in this file. Non-ASCII is the whole risk
+## surface: ASCII is present in any font that renders English, and GDScript
+## identifiers cannot be non-ASCII, so what survives comment-stripping is drawn
+## text, a label, or a glyph constant.
+func test_no_drawn_character_falls_back_to_a_system_font() -> void:
+	var font := Art.font()
+	# --- CONTROLS. A gate that cannot fail is not a gate, and an empty sweep is a
+	# BLIND gate — both are checked here so neither can ship wearing a pass.
+	Runner.T.ok(not font.has_char(0x2192),
+		"CONTROL: the shipped font genuinely lacks U+2192 '→', so this census CAN report a fallback")
+	Runner.T.ok(font.has_char(0x00BB),
+		"CONTROL: the substitute U+00BB '»' is present, so the fix is not trading one fallback for another")
+	var scanned_files := 0
+	var scanned_chars := 0
+	var missing: Array[String] = []
+	var seen: Dictionary = {}
+	var dir := DirAccess.open("res://src")
+	Runner.T.ok(dir != null, "src/ is readable for the drawn-glyph census")
+	if dir == null:
+		return
+	for f in _gd_files(dir):
+		scanned_files += 1
+		for line in FileAccess.get_file_as_string("res://src/" + f).split("\n"):
+			var code := _strip_line_comment(line)
+			for i in code.length():
+				var cp := code.unicode_at(i)
+				# ASCII is present in any font that renders English; GDScript
+				# identifiers cannot be non-ASCII. Only the rest can fall back.
+				if cp < 0xA0:
+					continue
+				scanned_chars += 1
+				if font.has_char(cp):
+					continue
+				var key := "U+%04X" % cp
+				if seen.has(key):
+					continue
+				seen[key] = true
+				missing.append("%s (%s) — first at src/%s" % [key, _chr(cp), f])
+	Runner.T.ok(scanned_files >= 8,
+		"the census walked the view source, not two files (%d .gd under src/)" % scanned_files)
+	Runner.T.ok(scanned_chars > 20,
+		"the census actually examined non-ASCII characters (%d) — an empty sweep would pass vacuously"
+			% scanned_chars)
+	Runner.T.eq(missing.size(), 0,
+		"every non-ASCII character in src/ (comments stripped) exists in the shipped font, so no drawn string can fall back to a platform-dependent system font%s"
+			% ["" if missing.is_empty() else " — missing: " + ", ".join(missing)])
+
+
+## Every .gd path under `dir`, recursively, as posix-ish relative paths.
+func _gd_files(dir: DirAccess) -> Array[String]:
+	var out: Array[String] = []
+	for name in dir.get_files():
+		if name.ends_with(".gd"):
+			out.append(name)
+	for sub in dir.get_directories():
+		var d2 := DirAccess.open("res://src/" + sub)
+		if d2 == null:
+			continue
+		for f in _gd_files(d2):
+			out.append(sub + "/" + f)
+	return out
+
+
+## The line with its `#` comment removed, respecting string literals so a `#`
+## inside "..." is not mistaken for the start of a comment. Unterminated quotes
+## are treated as running to end of line, which is the safe direction: it can only
+## over-report, and over-reporting here means a suspicious char gets looked at.
+func _strip_line_comment(line: String) -> String:
+	var out := ""
+	var quote := ""
+	var i := 0
+	while i < line.length():
+		var c := line[i]
+		if quote != "":
+			out += c
+			if c == "\\" and i + 1 < line.length():
+				out += line[i + 1]
+				i += 2
+				continue
+			if c == quote:
+				quote = ""
+		elif c == "\"" or c == "'":
+			quote = c
+			out += c
+		elif c == "#":
+			break
+		else:
+			out += c
+		i += 1
+	return out
+
+
+static func _chr(cp: int) -> String:
+	return String.chr(cp)

@@ -1574,7 +1574,7 @@ func test_victory_trophy_never_covers_a_result_row() -> void:
 	## none), drawn at fixed center (196, 182) — x170..222, y156..208 at full pulse —
 	## on the stale comment "Trophy overlaps blank panel space only (no row text under
 	## it)". MEASURED at HEAD through the real row math: the widest row ("%d¢ WAR CHEST
-	## BANKED  → +%s", icon_coin 14 + gap 6 + text at 11) is 315..360px wide, so its
+	## BANKED  » +%s", icon_coin 14 + gap 6 + text at 11) is 315..360px wide, so its
 	## left end sits at x140..185 — ALWAYS under the trophy's right edge. Vertically
 	## (real result_row_pitch): the 8-row card (typical win) buries 3..4px of the
 	## row's glyph tops plus 4px of the coin icon; the 9-row card (win with
@@ -1606,7 +1606,7 @@ func test_victory_trophy_never_covers_a_result_row() -> void:
 								"icon": "mi_medal_5", "icon_size": 15.0},
 							{"text": "SCORE  %s" % Art.group_digits(72540), "size": 13,
 								"icon": "icon_medal", "icon_size": 16.0},
-							{"text": "%d¢ WAR CHEST BANKED  → +%s" % [banked, Art.group_digits(banked * 10)],
+							{"text": "%d¢ WAR CHEST BANKED  » +%s" % [banked, Art.group_digits(banked * 10)],
 								"icon": "icon_coin", "icon_size": 14.0},
 						]
 						if vmode == "boss_rush":
@@ -1694,7 +1694,7 @@ func _result_card_rows(card: String, n: int) -> Array:
 		var vrows: Array = [
 			{"text": "RANK  S — EXTERMINATOR", "size": 13, "icon": "mi_medal_5", "icon_size": 15.0},
 			{"text": "SCORE  %s" % Art.group_digits(72540), "size": 13, "icon": "icon_medal", "icon_size": 16.0},
-			{"text": "%d¢ WAR CHEST BANKED  → +%s" % [58850, Art.group_digits(588500)],
+			{"text": "%d¢ WAR CHEST BANKED  » +%s" % [58850, Art.group_digits(588500)],
 				"icon": "icon_coin", "icon_size": 14.0},
 			{"text": "%dm OF JUNGLE PUSHED" % 361},
 		]
@@ -1712,7 +1712,7 @@ func _result_card_rows(card: String, n: int) -> Array:
 		{"text": "DOWNED BY  ARMORED GUNSHIP"},
 	]
 	var filler := ["WAVE 14 REACHED", "SCORE 72,540   KILLS 213", "LONGEST STREAK  x17",
-		"58850¢ CHEST SALVAGED  → +117,700", "TOP PREY  RUSHER x37", "PILOTS RESCUED  2",
+		"58850¢ CHEST SALVAGED  » +117,700", "TOP PREY  RUSHER x37", "PILOTS RESCUED  2",
 		"BEST 143095   NEW BEST!", "3 WAVES SHORT OF YOUR BEST"]
 	var fi := 0
 	while rows.size() < n - 2:
@@ -1872,7 +1872,7 @@ func test_result_card_title_clears_its_document_band() -> void:
 		"" if pair_fail == 0 else " — %d overlaps, first: %s" % [pair_fail, pair_first]])
 	# KNOWN PRE-EXISTING GAP, ratcheted (not part of the title fix): at the 13-row K.I.A.
 	# maximum the compressed 11.4px pitch is shorter than a 14..15px icon or the 14px-tall
-	# "¢ … →" row, so neighbouring ROWS overlap by 1..2px — measured identical before and
+	# "¢ … »" row, so neighbouring ROWS overlap by 1..2px — measured identical before and
 	# after the title move (3 pairs per card: RANK medal ∩ row 1, CHEST SALVAGED ∩ row 6,
 	# VP row ∩ the REDEPLOY glyph; ×2 titles ×2 text scales = 12). It may only shrink.
 	Runner.T.ok(row_pair_fail <= 12, "row-vs-row overlaps on the max K.I.A. card do not grow past the 12 measured%s"

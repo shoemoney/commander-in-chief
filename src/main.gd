@@ -4512,7 +4512,13 @@ static func _wipe_chest_row(banked: int, banked_score: int) -> Array:
 	# no row, the card says nothing rather than "0¢ salvaged".
 	if banked <= 0:
 		return []
-	return [{"text": "%d¢ WAR CHEST SALVAGED  →  +%s" % [banked, Art.group_digits(banked_score)],
+	# "»" not "→" (U+2192): PixelOperator8.ttf has NO rightwards-arrow glyph, so the
+	# arrow silently fell back to a per-platform SYSTEM font — different advance width
+	# on Windows vs macOS/Linux, which is what drove the K.I.A. card to 20 row-vs-row
+	# overlaps there against the 12 ratcheted here (windows CI, 2026-10-01). U+00BB is
+	# in the shipped face, so this row now measures identically on every platform.
+	# See test_view_honesty's drawn-string glyph ratchet, which fails if this regresses.
+	return [{"text": "%d¢ WAR CHEST SALVAGED  »  +%s" % [banked, Art.group_digits(banked_score)],
 		"color": Color(1.0, 0.92, 0.55), "icon": "icon_coin", "icon_size": 14.0}]
 
 
@@ -4876,7 +4882,12 @@ func _ev_gate_open(ev: Dictionary) -> void:
 	_last_gate_tick = sim.tick_count
 	var tag := ""
 	if _best_gate_split > 0 and split < _best_gate_split:
-		tag = "  ⚡FAST"
+		tag = "  »FAST"   # "»" not "⚡": same missing-glyph trap as the K.I.A. card's
+		# arrow — U+26A1 is not in PixelOperator8.ttf, so it fell back to a system
+		# font and this banner's width became platform-dependent, which is worse
+		# here than a metric skew because banner_fit_size STEPS THE SIZE DOWN until
+		# the string fits, so a wider fallback silently rendered the banner at a
+		# different point size on Windows than on macOS/Linux.
 	if _best_gate_split == 0 or split < _best_gate_split:
 		_best_gate_split = split
 	show_banner("GATE SECURED — %.1fs%s" % [split / 60.0, tag])
@@ -15440,7 +15451,7 @@ func _draw_banners(top_msg: String) -> void:
 				"icon": "icon_medal", "icon_size": 16.0},
 			# The chest is CONVERTED at SimWorld.VICTORY_SCORE_MULT and zeroed on the victory
 			# tick, so a live `sim.war_chest` read here was 0 on every win. Say what it turned into.
-			{"text": "%d¢ WAR CHEST BANKED  → +%s" % [_victory_banked,
+			{"text": "%d¢ WAR CHEST BANKED  » +%s" % [_victory_banked,
 				Art.group_digits(_victory_banked_score)],
 				"color": Color(1.0, 0.92, 0.55), "icon": "icon_coin", "icon_size": 14.0},
 		]
@@ -15726,8 +15737,9 @@ static func result_entrance_offset(t: float, motion: float) -> Vector2:
 
 ## The victory trophy's draw rect. It used to sit at fixed center (196, 182) — x170..222,
 ## y156..208 at full pulse — on the comment's claim that only blank panel space lay under
-## it. FALSE for the card's widest row: "%d¢ WAR CHEST BANKED  → +%s" (icon 14 + gap 6 +
-## text at 11) is 315..360px wide, so its left end lands at x140..185, always under the
+## it. FALSE for the card's widest row: "%d¢ WAR CHEST BANKED  » +%s" (icon 14 + gap 6 +
+## text at 11) is 315..360px wide (re-measured 2026-10-01 after the arrow glyph became
+## U+00BB; the range is unchanged, and it is now the SAME on every platform), so its left end lands at x140..185, always under the
 ## trophy's right edge; the 8..9-row cards put the row's baseline at y210.9..215, so the
 ## trophy covered 3..8px of glyph tops and up to 4px of the coin icon (measured: 343.8px²
 ## worst, at banked 999999). Now the trophy seats its BOTTOM flush with the panel top
