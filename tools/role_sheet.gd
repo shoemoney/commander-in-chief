@@ -62,7 +62,20 @@ const KINDS := [
 ]
 const BAND_H := 44
 const ZOOM := 3
-const PX_PER_UNIT := 2.0   # Fixed.ONE -> screen px, the same seam main.PX uses
+# World units -> screen px. main.PX is 1.0 / Fixed.ONE and _to_screen takes RAW
+# fixed-point, so (fy - camera_top) * PX yields 1 screen px per world UNIT:
+# PX_PER_UNIT is Fixed.ONE * PX = 1.0.
+#
+# This was 2.0 (2026-10-01), which put the row's band at screen y 380 in a
+# 640x360 viewport — 20px BELOW the bottom edge. clampi() then slid the crop up
+# to y316, the bottom HUD strip, so the sheet saved the verb legend and a toast.
+# Every assertion still passed, because that strip is lit: the whole-frame check,
+# the band-lit check, and the per-column `col_lit` count were all satisfied by
+# GROUND and HUD CHROME. The hue census then returned "28 rim-hue clashes" by
+# measuring sand — on green ground c.r - c.b ~= 0 in every column, so all ten
+# kinds resolved to the same hue. A tool that reports a confident, specific, and
+# entirely fictional verdict is worse than one that refuses to save.
+const PX_PER_UNIT := 1.0
 
 
 func _initialize() -> void:
@@ -133,6 +146,15 @@ func _run(main: Node2D, out_dir: String) -> void:
 			pass
 		else:
 			sim.enemies.clear()
+		# The occluders. Clearing `enemies` alone is not a clean field: `tanks` is a
+		# SEPARATE array and the colossus a separate dict, and a live 128px vehicle
+		# sitting over the first three columns sampled VEHICLE PAINT for rusher /
+		# enemy_smg / enemy_assault / enemy_shotgun. The sheet's own per-column check
+		# could not tell — it only counts lit pixels, and a vehicle is lit.
+		sim.tanks.clear()
+		sim.colossus.clear()
+		var pl: Dictionary = sim.players[0]
+		pl["in_tank"] = -1
 		for j in (0 if OS.get_environment("ROLE_NO_ROW") == "1" else KINDS.size()):
 			sim.enemies.append({
 				"x": int((52 + j * 58) * Fixed.ONE), "y": row_y, "alive": true,
