@@ -601,6 +601,60 @@ answer; 50–52 are the ground-tint questions the rejected attempt raised before
 
 ## 2. Sim / gameplay defects — player-facing
 
+### c3 FIRE SACK + DELAYED FLANKER (2026-10-02) — PROVEN UNREACHABLE. Owner decision needed: fix the gate, or delete the feature.
+
+**The setpiece has never spawned in any mode.** Closed-form, no guesswork:
+
+`_stamp_stretch_setpieces()` (`sim_world.gd:6169`) returns early when
+`_gate_counter < 2`, when `_gate_counter in FORK_GATES = [2, 4]`, or on
+`_is_calm_band` (`CALM_BAND_SEG = 5`). Past those it composes only on
+`_mix(_gate_counter, 31) % 3 != 0` (`:6179`), with the FIRE SACK replacing the
+blockade on `_mix(_gate_counter, 47) % 3 == 0` (`:6185`).
+
+Gate counters satisfying both hash conditions: **2, 8, 10, 19, 26, 28, 29, 32, 34,
+37, 39, 44, 48, 49**. The campaign stops at `FINAL_GATE_INDEX = 6` (`:734`), and
+`_stamp_final_gate` sets `_world_ended` so nothing streams past (`:6140`).
+Only counter **2** is in range — and 2 is a **fork gate**, which returns first.
+
+⇒ Gates 3 and 6 are the only ones that compose, and **both field the blockade**. The
+sack's MG nest, the two world-bags, the leashed elite, the `flank_x` crossfire target
+and the leash release are all dead code. Only the campaign stream calls this stamp
+(`:5715` boss gates, `:5724` arena gates); endless and boss_rush return before it
+(`:5528-5529`), so there is no second route in.
+
+**Why this survived so long:** the test guarding it computed its predicate from a
+LITERAL gate `3` where the sim passes `_gate_counter`. `_mix` is a pure function of
+its arguments (`:1704`, zero rng draws), so `SimWorld._mix(3, 47) % 3 == 0` folded at
+parse time to a compile-time **FALSE** (measured: `%3 == 1`). The guard always ran,
+and `ok(true, "… flanker tested via the sack-seed path elsewhere")` reported success on
+every run. The same literal-vs-counter error sat in
+`test_c2_stretch_setpieces_restored`, where `blockade_fires` was a compile-time TRUE —
+so "the sack REPLACES the blockade, never both, never additive" was asserted **zero
+times**.
+
+**Shipped 2026-10-02** (`9b817b29`): the flanker MECHANISM is now unit-tested directly
+against a hand-built elite, so the leash/crossfire contract is still covered and
+non-vacuous; and the setpiece is pinned by a tripwire that goes **red** if
+`FINAL_GATE_INDEX`, `FORK_GATES` or the hash offsets change (verified by planting
+`FINAL_GATE_INDEX` 6 → 9: 13 named failures).
+
+**OWNER DECISION — two options, both one-line-ish, and they are not equivalent:**
+- **(a) Make it reachable.** Move a sack-eligible counter into range — retune the
+  hash offsets, or extend past gate 6. Cost: gates 8+ do not exist yet, so this
+  means new gate content, not a constant tweak. It also collides with the fork and
+  calm-band skips, which exist for playability reasons (a cover-free decision apron,
+  a pre-Foundry breath).
+- **(b) Delete it.** ~45 lines of sim plus its tests, and the c3/judge-r2 design work
+  it represents. Honest, but it removes an authored crossfire the design docs still
+  cite.
+- **(c) Leave as-is with the tripwire.** The code is unreachable and harmless; the
+  tripwire makes it visible if that ever changes. This is the default if no one
+  decides — it is what is on `main` now.
+
+Not actioned without a call because this is a DESIGN question about how many gates a
+campaign should have, and the two answers change the shape of the game rather than
+its correctness.
+
 ### RECOVERY (2026-08-24) — RESOLVED 2026-10-01: the fix is ALREADY ON MAIN. Do not re-extract.
 
 **RESOLVED — no recovery needed.** The extraction was attempted on 2026-10-01 and
@@ -2314,6 +2368,51 @@ before believing the frame**. Kept because the reviewer photographed real frames
 ---
 
 ## 6. Process / infrastructure
+
+- **NEW 2026-10-02 — The dominant failure mode of the last two weeks was one SHAPE,
+  appearing five times: a configuration row naming something the code that reads it
+  can never be handed.** `_ROLE_RIM` (4 dead hues), `_LIGHT_RIM` (`elite` never a
+  style_key, `m_bombsuit` absent), `_UNIT_RIM` (6), `BOSS_VERB_SUPPRESS` (asked
+  `sim.enemies` for kinds that live in three other containers), `_HINT_PAD`/`_HINT_KB`
+  (3 of 8), `Art.OUTLINE` (8 rows `_spr` never sees), `Art._PAD_LABELS` (12, deleted),
+  and the c3 fire sack (a gate counter that no campaign reaches).
+
+  **What let every one survive: the test beside it checked an ADJACENT fact.** A row
+  mirrors a live TEX key. A kind is a string. A suite is green. None asked whether the
+  value could be *reached*. So the standing instruction is: for any table, the
+  assertion is that every row is reachable from a call site — not that the row is
+  well-formed.
+
+  Related, and the reason a sweep finds these and a review does not: a row that names
+  REAL art and REAL strings is indistinguishable from a live row by reading it. Only
+  tracing the reader finds it.
+
+- **NEW 2026-10-02 — Verify a gate can FAIL before trusting it, and pin each rule
+  ALONE.** Two of this run's own ratchets were initially vacuous, and both were found
+  by planting rather than by reading:
+  - `test_role_rim`'s separation test built a dict keyed BY HUE and compared distinct
+    keys, so two roles on the *same* hue merged into one entry — blind to the exact
+    defect that shipped. Shares are now enumerated and matched to a documented reason.
+  - `loop_review.py selftest`'s five cases all asserted "this string is rejected", so
+    disabling ONE rule left all five green (the others still fired on the same strings).
+    Each rule is now pinned alone, with a control that a clean verdict is accepted.
+  A test that checks the OR of several conditions cannot tell you which one broke.
+
+- **NEW 2026-10-02 — Measure the PREMISE of a planned fix, not just the fix.** M2.1
+  said `screenshots.gd` was the source of phantom reviewer findings and should be
+  replaced. Measured: 3/3 runs, 14 real 300–400KB frames. The item was DROPPED rather
+  than completed. Separately, mid-loop I "fixed" the GL capture's flakiness by polling
+  the framebuffer and made it worse (2/5 → 0/5) — the original 2/5 was CPU contention
+  from my own concurrent test suite, the exact failure AGENTS.md documents. Reverting
+  was correct. A measurement taken on a busy machine, or of a premise assumed rather
+  than checked, is a measurement of nothing.
+
+- **NEW 2026-10-02 — A check that only ever ran on your machine is not a check.**
+  The CI step added to gate the reviewer harness failed on the runner with
+  `FileNotFoundError: ~/.openrouter`, because the module read the API key at import
+  even for a self-test that never calls the network. It had "passed" locally by
+  accident. Anything added to CI should first be run with the credential and the
+  environment it will *not* have.
 
 - **NEW 2026-08-23 — Turning `god_mode` OFF was the single highest-yield change this run made, and
   it should be the default for any behaviour lens from here on.** The 2026-08-21 snapshot
