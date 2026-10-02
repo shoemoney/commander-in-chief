@@ -35,7 +35,28 @@ REPO = Path(__file__).resolve().parent.parent
 SHOTS = Path("/tmp/loop-shots")
 LEDGER = Path("/tmp/loop-ledger.json")
 GODOT = "/Applications/Godot.app/Contents/MacOS/Godot"
-KEY = os.environ.get("OPENROUTER_API_KEY") or Path.home().joinpath(".openrouter").read_text().strip()
+
+def _api_key() -> str:
+    """Read the OpenRouter key LAZILY.
+
+    This used to be a module-level constant, which meant importing the module
+    required a key on disk. `selftest` — which never touches the network — then
+    failed on CI with `FileNotFoundError: ~/.openrouter`, because the CI runner has
+    no key: the gate that verifies the reviewer harness could not run on the one
+    machine that would have caught it breaking. A check that cannot run is not a
+    check, and this one was only "working" locally by accident.
+
+    Now the key is read when a request is actually built, so everything that does
+    not call the API (`render`, `next`, `selftest`) runs anywhere.
+    """
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if key:
+        return key.strip()
+    path = Path.home().joinpath(".openrouter")
+    if path.exists():
+        return path.read_text().strip()
+    raise SystemExit(
+        "no OpenRouter key: set OPENROUTER_API_KEY or write one to ~/.openrouter")
 
 # One model per vendor family, strongest first. Diversity is the point: five
 # opinions from the same lab agree with each other, which is not evidence.
@@ -252,7 +273,7 @@ def ask(model: str, shots: list[str]) -> None:
     req = urllib.request.Request(
         "https://openrouter.ai/api/v1/chat/completions",
         data=json.dumps(payload).encode(),
-        headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"})
+        headers={"Authorization": f"Bearer {_api_key()}", "Content-Type": "application/json"})
     t0 = time.time()
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
@@ -348,10 +369,46 @@ VERDICT: solid indie"""
             bad += 1
         detail = "accepted" if got_ok else f"rejected ({defect})"
         print(f"  [{mark}] {name:34s} -> {detail}")
+    # The loop above is the weak point in a self-test: if the gate stops rejecting
+    # for ONE reason but keeps rejecting for another, every case still says "rejected"
+    # and the suite stays green. Verified by planting — disabling the length check
+    # left all five cases passing, because the area-verdict and numbering checks were
+    # still firing on the same three strings. So each rejection rule is now pinned
+    # ALONE, against a string that is otherwise a perfect verdict.
+    verdict_ok = good
+    only_broilerplate = good + "\nUse whenever you need this skill; triggers on any image request."
+    only_short = good[:150]
+    # Strip numbering but KEEP the prose, so the length rule cannot fire first and
+    # mask the rule under test. Each line has to lose only its "1) " marker.
+    only_unnumbered = re.sub(r"^\s*1[.)]\s*", "", good, flags=re.M)
+    only_no_areas = "\n".join(l for l in good.split("\n")
+                             if not any(k in l.lower() for k in ("assets", "mechanics", "ui", "ux", "difficulty")))
+    rules = [
+        ("boilerplate rule fires ALONE", only_broilerplate, False, "use whenever"),
+        ("length rule fires ALONE", only_short, False, "too short"),
+        ("numbering rule fires ALONE", only_unnumbered, False, "no numbered finding"),
+        ("area-verdict rule fires ALONE", only_no_areas, False, "per-area verdict"),
+    ]
+    for name, text, want_ok, expect_in_defect in rules:
+        defect = verdict_defect(text)
+        got_ok = defect == ""
+        ok = (got_ok == want_ok) and (expect_in_defect in defect)
+        if not ok:
+            bad += 1
+        print(f"  [{'ok  ' if ok else 'FAIL'}] {name:34s} -> "
+            + ("accepted" if got_ok else f"rejected ({defect})"))
+    # And the control: a clean verdict must still be accepted, or a gate that
+    # rejects everything would satisfy every rule above.
+    if verdict_defect(verdict_ok) != "":
+        bad += 1
+        print("  [FAIL] control: a clean verdict must be ACCEPTED")
+    else:
+        print(f"  [ok  ] {'control: clean verdict accepted':34s} -> not vacuous")
+    total = len(cases) + len(rules) + 1
     if bad:
-        print(f"SELFTEST FAILED — {bad}/{len(cases)} case(s) wrong; the gate is wrong")
+        print(f"SELFTEST FAILED — {bad}/{total} case(s) wrong; the gate is wrong")
         sys.exit(1)
-    print(f"selftest PASS — {len(cases)}/{len(cases)} cases, and it CAN reject")
+    print(f"selftest PASS — {total}/{total} cases, and it CAN reject")
 
 
 if __name__ == "__main__":
