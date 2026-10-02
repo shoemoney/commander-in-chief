@@ -60,11 +60,39 @@ func test_a1_light_rim_is_a_subset_of_unit_rims() -> void:
 
 
 func test_a1_light_rim_excludes_friendlies_and_readable_units() -> void:
-	# Heroes carry a bright tint + green ID ring; frogman/observer/bombsuit already
-	# read — none may take the warm-light HOSTILE separator (it would misread as enemy).
+	# Heroes carry a bright tint + green ID ring; frogman/observer already read via
+	# their OWN non-hostile grammar (the diver's cool wet-threat tint + submerged
+	# ripples, the observer's arrival ring) — none may take the warm-light HOSTILE
+	# separator, which would misread as enemy.
+	#
+	# m_bombsuit was on this list until 2026-10-01 and the entry was WRONG. The
+	# justification was "bombsuit already reads", but it never did: sie-01 dropped
+	# it from Art.OUTLINE (correctly — it bakes its own black keyline, no double
+	# rim) and this separator branch sat INSIDE that gate, so the row's absence
+	# from _LIGHT_RIM was the CAUSE of no separator rather than a decision to
+	# withhold one. The heavy was simply un-rimmed and un-named for the life of
+	# the change.
+	#
+	# The evidence that it is a hostile and needs the separator, not a friendly to
+	# be shielded from it:
+	#   - sim kind "shield", in SECTOR_SPECIALS for sectors 4 and 6
+	#     (sim_world.gd:453, :455) — "armor down the vent lanes", "the throne
+	#     bombards";
+	#   - it BLOCKS the player: sim_world.gd:1534 `_shield_blocks(...)`;
+	#   - it is in the veteran-bulk armor roster at :1540;
+	#   - it counts toward _wave_hostiles_cleared like any other hostile, so it
+	#     must be shot to clear the wave;
+	#   - endless spawns it as a plain roster member (sim_world.gd:6439), so it
+	#     co-occurs with the very roles the a3-33 palette exists to tell apart.
+	# A unit that blocks you, soaks bullets and holds the wave open is the last
+	# one that should be the only hostile you cannot name. Carved back IN, the
+	# same fix review tell 2 already applied to m_soldier2.
 	var light: Dictionary = _consts()["_LIGHT_RIM"]
-	for k in ["player1", "player2", "frogman", "observer", "m_bombsuit"]:
+	for k in ["player1", "player2", "frogman", "observer"]:
 		Runner.T.ok(not light.has(k), "'%s' must keep the neutral rim, not the hostile separator" % k)
+	Runner.T.ok(light.has("m_bombsuit"),
+		"m_bombsuit takes the hostile separator — it is a blocking, wave-clearing "
+		+ "armored hostile (sim_world.gd:453/455/1534/1540), not a readable friendly")
 
 
 # --- a1-03: water body follows the 5-stop biome ramp ---

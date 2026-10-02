@@ -229,16 +229,72 @@ func _run(main: Node2D, out_dir: String) -> void:
 		quit(2)
 		return
 
-	# --- 2 + 3: per-kind pixels, then hue distinctness -----------------------
-	var hues := {}
-	var clashes := 0
+	# --- 2: THE HUE CENSUS IS NOT A PIXEL CENSUS. ------------------------
+	#
+	# It used to be. It sampled a 44px-tall band and took "the most red-dominant
+	# bright pixel" per column as the rim — which on a green-ground frame returns
+	# SAND every time, because ground outnumbers a 2.2px rim by two orders of
+	# magnitude. That is how the shipped version reported "28 rim-hue clashes"
+	# with total confidence while every assertion around it passed.
+	#
+	# Measured instability is the other half of the proof: the same binary, same
+	# seed, same frame content, returned 24 / 27 / 30 clashes across six runs.
+	# A measurement whose answer moves by 6 on identical inputs is not measuring
+	# the thing it names.
+	#
+	# So the distinctness question is answered from the TABLE, which is the actual
+	# source of what gets drawn, and the pixels below are kept for what pixels can
+	# answer honestly: is each column actually showing a sprite at all.
+	var cmap: Dictionary = (load("res://src/main.gd") as Script).get_script_constant_map()
+	var declared: Dictionary = cmap["_ROLE_RIM"]
+	var per_hue := {}
+	for k in declared:
+		var col: Color = declared[k]
+		var key := "%.2f/%.2f/%.2f" % [col.r, col.g, col.b]
+		if per_hue.has(key):
+			per_hue[key].append(k)
+		else:
+			per_hue[key] = [k]
+	var unique := 0
+	var declared_clashes := 0
+	var hk: Array = per_hue.keys()
+	for i in hk.size():
+		var group: Array = per_hue[hk[i]]
+		unique += 1
+		print("  hue %s  %d role(s): %s" % [hk[i], group.size(), ", ".join(group)])
+		# A shared hue is legitimate in exactly two documented cases, and each
+		# has to be named here or this tool reports a design decision as a bug:
+		#   - the rusher family's cosmetic skins, which the sim picks by POSITION
+		#     HASH (sim_world.gd:4725) and are one archetype wearing four outfits;
+		#   - sniper/pilot, who are co-present BY DESIGN (a pilot outlives the wave
+		#     that spawned it, sim_world.gd:6571-6577) and are told apart by the
+		#     non-hostile marker rather than the rim — giving the pilot its own hue
+		#     spent a slot that a real role needed.
+		var SHARED_OK := [
+			["rusher", "enemy_smg", "enemy_assault", "enemy_shotgun", "enemy_lmg"],
+			["enemy_sniper", "m_pilot"],
+		]
+		var excused := false
+		for ok in SHARED_OK:
+			if group.size() == ok.size():
+				var same := true
+				for k in group:
+					if not (k in ok):
+						same = false
+				if same:
+					excused = true
+		if group.size() > 1 and not excused:
+			declared_clashes += group.size() - 1
+			print("    ILLEGITIMATE SHARE — no documented reason for these to match")
+	print("DECLARED distinct hues: %d across %d rows (%d illegitimate shares)"
+		% [unique, declared.size(), declared_clashes])
+	print("  (the separation FLOOR is enforced statically in tests/test_role_rim.gd —")
+	print("   hue distance between two 2.2px rims cannot be measured off this band)")
+
+	# --- 3: per-column presence. What a pixel check CAN answer. ----------
 	var dark_cols: Array[String] = []
 	for i in KINDS.size():
 		var cx: int = int((52 + i * 58) * PX_PER_UNIT * ZOOM)
-		var best := -999.0
-		var br := 0.0
-		var bg := 0.0
-		var bb := 0.0
 		var col_lit := 0
 		for y in range(0, band.get_height(), 2):
 			for dx in range(-14, 15, 2):
@@ -246,21 +302,8 @@ func _run(main: Node2D, out_dir: String) -> void:
 				var c := band.get_pixel(x, y)
 				if c.r + c.g + c.b > 0.37:   # 0..1 floats
 					col_lit += 1
-				# the rim is the most red-dominant bright pixel in the column
-				var sat := c.r - c.b
-				if c.r + c.g + c.b > 0.46 and sat > best:
-					best = sat
-					br = c.r
-					bg = c.g
-					bb = c.b
 		if col_lit < 12:
 			dark_cols.append(KINDS[i])
-		var hue := Vector3(br, bg, bb).normalized()
-		hues[KINDS[i]] = hue
-		for j in range(i):
-			if hues[KINDS[j]].dot(hue) > 0.985:
-				clashes += 1
-				print("  DUPLICATE RIM: %s ~= %s" % [KINDS[i], KINDS[j]])
 
 	if dark_cols.size() > 0:
 		print("ROLE SHEET FAILED — no/too few lit pixels in the columns for: %s"
@@ -273,7 +316,6 @@ func _run(main: Node2D, out_dir: String) -> void:
 	band.save_png(path)
 	print("SAVED ", path)
 	print("kinds, left to right: ", ", ".join(KINDS))
-	print("RESULT: %d kinds, %d rim-hue clashes (0 == the a3-33 claim holds)"
-		% [KINDS.size(), clashes])
+	print("RESULT: %d kinds posed, %d illegitimate hue shares" % [KINDS.size(), declared_clashes])
 	await preload("res://tools/quiesce.gd").teardown(self, main)
-	quit(0 if clashes == 0 else 3)
+	quit(0 if declared_clashes == 0 else 3)

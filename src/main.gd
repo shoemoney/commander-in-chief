@@ -7755,14 +7755,29 @@ const HERO_LIGHT_RIM_COL := Color(0.72, 0.93, 1.0, 0.62)
 # a1-02 figure-ground: small dark-clad HOSTILES wore the near-black rim and
 # merged into dark litter/craters. These get a warm-LIGHT separator rim in _spr
 # instead (heroes/frogman/observer/bombsuit keep the neutral rim — they read fine).
-const _LIGHT_RIM := {"rusher": true, "elite": true, "m_soldier2": true,
+const _LIGHT_RIM := {"rusher": true, "m_soldier2": true,
 	"sapper": true, "courier": true, "ghillie": true,
 	# review tell 2: the a1-02 warm-light separator was built for exactly the failure the
 	# sol-08 red-team sprites reintroduced — small dark hostiles merging into dark litter.
 	# frogman/frogman_speargun stay OUT (sol-12 water read, pinned by the assets suite).
 	"enemy_smg": true, "enemy_assault": true, "enemy_shotgun": true, "enemy_lmg": true,
 	"enemy_sniper": true,
-	"m_pilot": true}   # sol-08: dropped m_insurgent3-5/m_contractor2 (retired with the enemy_* swap)
+	"m_pilot": true,   # sol-08: dropped m_insurgent3-5/m_contractor2 (retired with the enemy_* swap)
+	# review tell 2 (2026-10-01): m_bombsuit was MISSING here, so its separator was
+	# dead config — the same defect as the role rim next door, one table over, and
+	# for the same reason: sie-01 dropped it from Art.OUTLINE (it bakes its own
+	# black keyline, no double rim) and dropping it from OUTLINE also silently
+	# killed its light separator, because this branch used to sit INSIDE that gate.
+	# Nothing pinned the exclusion: test_assets.gd:1396 asserts m_bombsuit is out
+	# of OUTLINE (correct — baked keyline) and says nothing about the separator,
+	# so the row could vanish silently. m_soldier2 was already carved back IN by
+	# the same review tell; the heavy needs the same treatment.
+	"m_bombsuit": true}
+	# `elite` was HERE until 2026-10-01 and was dead: the elite draws as the
+	# `enemy_assault` sprite (main.gd:11931), so "elite" was never a style_key and
+	# the row could not execute. The same trap the role table fell into one block
+	# below — a table whose rows name things the draw path never emits. The
+	# elite's real differentiator is the a3-12 pulsing warm aura, not a hue.
 
 # a3-33 ROLE-CODED HOSTILE CONTOUR.
 #
@@ -7783,22 +7798,96 @@ const _LIGHT_RIM := {"rusher": true, "elite": true, "m_soldier2": true,
 # plain warm = the generic hostile separator. Red is reserved outright, because
 # red is this game's lethal-projectile colour (a3-28) and a red enemy contour
 # would collide with a round coming at you.
+#
+# ── RECOLOURED 2026-10-01. THE FIRST VERSION OF THIS TABLE WAS NEVER TRUE. ──
+#
+# It shipped 14 hues and claimed "nine kinds in that palette are one silhouette
+# with nine tints" was fixed. Measured, it was not, and the measurements are the
+# reason the table is smaller:
+#
+# 1. It gave FOUR HUES TO WHAT IS ONE JOB. `enemy_smg` / `enemy_assault` /
+#    `enemy_shotgun` / `enemy_lmg` are the four entries of _RUSHER_SKINS
+#    (main.gd:63) — one sim archetype (`rusher`), drawn with a cosmetic skin
+#    chosen by a position hash: `e["skin"] = (x/F_ONE + y/F_ONE) & 3`
+#    (sim_world.gd:4725). They are deliberately NOT different roles. Four hues
+#    on four arbitrary skins teaches the player a distinction that does not
+#    exist: it is a lie told in colour, and it costs the two hues that were
+#    doing real work. All four now wear ONE hue.
+# 2. `elite` was never a style_key. The elite draws as `enemy_assault`
+#    (main.gd:11821), so the "orchid" entry was unreachable — a 5th dead row.
+# 3. Of the hues that DID apply, the worst PAIR was 2.8 degrees apart:
+#    rusher (36.0) vs enemy_assault (33.2). A 2.2px rim on an 18px sprite at
+#    640x360 cannot carry a 2.8-degree difference. Three exact duplicates too:
+#    m_soldier2 == enemy_smg, m_bombsuit == sapper, m_pilot == enemy_sniper —
+#    and the last two are GUARANTEED co-present (a pilot outlives the wave that
+#    spawned it, sim_world.gd:6571-6577).
+#
+# ── THE HUES ARE DERIVED, NOT CHOSEN. ──
+# Every value below is the sim's own answer to "which roles can be on screen at
+# the same time", solved as a packing problem on the hue circle:
+#   - rusher family, grenadier, sapper, ghillie, sniper, shield all co-occur in
+#     a single ENDLESS miniboss wave (sim_world.gd:6435-6475, :6733-6734 forces
+#     wave_mod=0 so the full roll table is live);
+#   - campaign can additionally carry frogman and m_pilot, whose specials
+#     persist ACROSS sectors (sim_world.gd:4779-4791) so a sector roster is not
+#     a partition;
+#   - frogman is campaign/arcade only (:5994/6001/6009, inside the _step_camera
+#     appendix that returns early for every other mode at :5528-5529) and
+#     courier is endless only (single call site :6717 in _start_wave, reachable
+#     only via the endless dispatch at :1185) — they never co-occur, so they were
+#     never competing for one slot against each other;
+#   - the budget is genuinely tight, which is WHY the packing was solved rather
+#     than eyeballed: with red, the hero's cool contour and the generic separator
+#     all reserved, 7 hues at >=30 degrees is what the wheel actually holds.
+#     The first table's 14 rows were never going to separate at this size.
+# Result: minimum pairwise separation 34 degrees (was 2.8), 30 degrees clear of
+# the lethal red, 31 degrees clear of the hero's cool contour. The one soft
+# margin is 14 degrees from the generic warm separator, which is carried by
+# SATURATION instead: 0.80 here vs 0.38 there, a gap no hue-only test can see.
+# tools/role_sheet.gd measures the rendered result; the invariant lives in
+# tests/test_role_rim.gd, which fails if any row moves.
 const _ROLE_RIM := {
-	"rusher":       Color(1.00, 0.72, 0.30),   # amber  — closes distance
-	"elite":        Color(1.00, 0.58, 0.86),   # orchid — the upgraded rusher
-	"enemy_smg":    Color(0.98, 0.86, 0.36),   # yellow — suppressive fire
-	"enemy_assault":Color(1.00, 0.66, 0.24),   # orange — pushes, shoots
-	"enemy_shotgun":Color(1.00, 0.94, 0.48),   # pale   — cone, must be flanked
-	"enemy_lmg":    Color(0.62, 0.92, 0.44),   # green  — suppresses the lane
-	"enemy_sniper": Color(0.78, 0.66, 1.00),   # violet — the long lane
-	"sapper":       Color(0.60, 1.00, 0.86),   # aqua   — mines under you
-	"ghillie":      Color(0.52, 0.88, 0.52),   # moss   — cloak, reveals late
-	"courier":      Color(1.00, 0.84, 0.96),   # rose   — the running one
-	"frogman":      Color(0.46, 0.94, 0.94),   # teal   — the water lane
-	"m_soldier2":   Color(0.98, 0.86, 0.36),   # yellow — the water-line marksman
-	"m_bombsuit":   Color(0.60, 1.00, 0.86),   # aqua   — heavy, area denial
-	"m_pilot":      Color(0.78, 0.66, 1.00),   # violet — the air lane
+	# ── one hue for the whole rusher family, cosmetic skins and all ──
+	# They share it ON PURPOSE: a skin is chosen by a position hash, so a hue
+	# difference here would encode information the game does not have.
+	"rusher":        Color(1.00, 0.60, 0.20),   #  30 deg  amber   — closes distance
+	"enemy_smg":     Color(1.00, 0.60, 0.20),   #  30      same job, cosmetic skin
+	"enemy_assault": Color(1.00, 0.60, 0.20),   #  30      same job (and the elite's sprite)
+	"enemy_shotgun": Color(1.00, 0.60, 0.20),   #  30      same job, cosmetic skin
+	"enemy_lmg":     Color(1.00, 0.60, 0.20),   #  30      same job, cosmetic skin
+	"m_soldier2":    Color(0.95, 1.00, 0.20),   #  64      chartreuse — lobbed arc fire, stands off
+	"sapper":        Color(0.49, 1.00, 0.20),   #  98      lime    — mines under you
+	# 7 hues, not 8: the two campaign/endless-exclusive roles were 8 candidates
+	# and 7 fit, and frogman turned out to be excluded from the contour entirely
+	# (see the note below the table) — so courier keeps the spring hue alone.
+	"courier":       Color(0.20, 1.00, 0.36),   # 132      spring  — the running one
+	"ghillie":       Color(0.20, 0.39, 1.00),   # 226      azure   — cloak, reveals late
+	"enemy_sniper":  Color(0.48, 0.20, 1.00),   # 261      violet  — the long lane
+	"m_bombsuit":    Color(0.95, 0.20, 1.00),   # 296      magenta — heavy, area denial
+	"m_pilot":       Color(0.48, 0.20, 1.00),   # 261      same violet as the sniper DELIBERATELY:
+	#   a pilot is a rescue objective that walks alongside ground infantry for
+	#   the rest of the run; giving it its own hue spent a slot and implied a
+	#   difference between "the sniper who lines you up" and "the guy you walk
+	#   up to and touch", which is exactly the distinction that costs a player
+	#   a life. What tells them apart is the non-hostile marker, not the rim.
 }
+# NOT IN THE TABLE ON PURPOSE — and this is the honest bookkeeping, because the
+# first version of _ROLE_RIM listed a hue for the diver that could never be drawn:
+#
+#   frogman — the WATER lane, campaign/arcade only (sim_world.gd:5994/6001/6009).
+#     sol-12 deliberately keeps it out of _LIGHT_RIM: a warm-light HOSTILE
+#     separator would make the diver read as land infantry, and two tests pin the
+#     exclusion (test_assets.gd:1368, :1484). Since the role contour is gated on
+#     _LIGHT_RIM so it inherits that intent, the diver takes no role hue either.
+#     Its read is the cool wet-threat tint plus the submerged ripples.
+#   elite — never a style_key at all. The elite draws as `enemy_assault`
+#     (main.gd:11821), so an "elite" row could never execute. Its distinct
+#     signal is the a3-12 pulsing warm aura, which is far stronger than a hue.
+# The generic warm separator (1.0, 0.9, 0.62) stays the default for a kind that
+# is not in the map above, so an unlisted kind can never render un-rimmed. It is
+# LOW saturation (0.38) on purpose: every role hue is 0.80, so "a hostile I have
+# no name for" is dimmer and flatter than "a role I can act on".
+const _ROLE_RIM_DEFAULT := Color(1.0, 0.9, 0.62)
 # a3-13 THE KEY RIM — who wears a lit sunward edge. Units, vehicles and bosses
 # only: these are the bodies that have to read as SOLID, and they are also the
 # ones large enough for a 1px displacement to survive the downscale. Scenery
@@ -7920,6 +8009,28 @@ static func _tiny_decor_no_rim(tex_name: String, screen_w: float) -> bool:
 	return screen_w < 14.0 and not _UNIT_RIM.has(tex_name) and not _BOSS_RIM.has(tex_name)
 
 
+## THE ROLE CONTOUR DECISION, as a pure function so a test can observe it.
+##
+## This exists because a test that only reads _ROLE_RIM is VACUOUS for the defect
+## it is meant to catch: with the entire draw call removed, every table assertion
+## still passes. Verified — planted exactly that, and the suite stayed green. The
+## ratchet has to reach the DRAW PATH, so the gate and the colour live here and
+## _spr_texture calls this and nothing else decides them.
+##
+## Returns the contour colour to paint, or a fully transparent Color when this
+## sprite wears no role contour at all (the caller skips the draw).
+static func role_rim_color(style_key: String) -> Color:
+	# Deliberately NOT gated on Art.outlined(). See the a3-33 block in
+	# _spr_texture for the full account: gating there is what made four rows dead
+	# code for the life of the change.
+	if not _LIGHT_RIM.has(style_key):
+		return Color(0, 0, 0, 0)
+	var c: Color = _ROLE_RIM_DEFAULT
+	if _ROLE_RIM.has(style_key):
+		c = _ROLE_RIM[style_key]
+	return c
+
+
 func _spr(tex_name: String, pos: Vector2, angle := 0.0, spr_scale := 1.0, mod := Color.WHITE,
 		stretch := 1.0, with_rim := true) -> void:
 	_spr_texture(Art.tex(tex_name), tex_name, pos, angle, spr_scale, mod, stretch, 1.0, with_rim)
@@ -7941,6 +8052,26 @@ func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
 	var spr_rot := Art.facing_rotation(style_key, angle)
 	draw_set_transform(pos.round(), spr_rot, Vector2(s * x_stretch, s * stretch))
 	var origin := -t.get_size() / 2.0
+	# a3-33 THE ROLE CONTOUR — NOT gated on Art.OUTLINE.
+	#
+	# This block is deliberately a SIBLING of the dark contour below, not nested
+	# inside it, and that is the whole fix. The role hue used to be applied from
+	# INSIDE `if Art.outlined(style_key)`, so every role whose sprite bakes its
+	# own thick ink keyline — ghillie, sapper, m_bombsuit (art.gd:779-794,
+	# dropped by sie-01) — could never receive one. Four rows of the table were
+	# dead code, including two of the roles the change existed to tell apart.
+	# _KEY_RIM was un-gated from OUTLINE for exactly this reason
+	# (see the a3-13 comment below and tests/test_assets.gd:3596); the role
+	# contour needed the same treatment and never got it.
+	#
+	# The gate itself lives in role_rim_color() so a test can observe the DRAW
+	# PATH and not merely the table — a table-only test passes with this whole
+	# block deleted, which was verified by planting that deletion.
+	var rcol: Color = role_rim_color(style_key) if with_rim else Color(0, 0, 0, 0)
+	if rcol.a > 0.0:
+		var rwid := 2.2 / s
+		for o in _OUTLINE_OFFSETS:
+			draw_texture(t, origin + o * rwid, Color(rcol.r, rcol.g, rcol.b, tint.a))
 	if with_rim and Art.outlined(style_key):
 		# 1.4px screen-space dark rim so units/vehicles read on any ground.
 		# Boss authority (7v): boss-class sprites wear a thicker WARM rim that
@@ -7971,14 +8102,10 @@ func _spr_texture(t: Texture2D, style_key: String, pos: Vector2, angle := 0.0,
 			# small hostile actually reads as a threat, not a dark speck. This 2.2px
 			# INTENTIONALLY supersedes the ghillie/courier 1.9 above — when they are
 			# revealed the separator IS the read; the cloak alpha (tint.a) still hides it.
-			oc = Color(1.0, 0.9, 0.62, tint.a)
+			# The ROLE hue is drawn by the sibling block above rather than here, so a
+			# role contour is painted exactly once per sprite instead of twice.
+			oc = Color(_ROLE_RIM_DEFAULT.r, _ROLE_RIM_DEFAULT.g, _ROLE_RIM_DEFAULT.b, tint.a)
 			d = 2.2 / s
-			# a3-33: a known ROLE takes its own contour hue. The generic warm
-			# separator above stays the default for anything not in the map, so an
-			# unlisted kind can never render un-rimmed.
-			if _ROLE_RIM.has(style_key):
-				var rc: Color = _ROLE_RIM[style_key]
-				oc = Color(rc.r, rc.g, rc.b, tint.a)
 		# a2-05: tiny DECOR (sub-14px on screen) drops the rim — a 1px dark rim on a
 		# sub-16px prop swamps it into a black dead-pixel speck that reads as noise, not
 		# an object; without it the litter reads as a small object AND recedes into the
