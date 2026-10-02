@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -197,6 +198,41 @@ def ask_codex(model: str, shots: list[str]) -> None:
     print(text[-9000:])
 
 
+def verdict_defect(text: str) -> str:
+    """WHY a verdict is not usable, or "" if it is. Shape, never taste.
+
+    This exists because one response in this loop's history came back as the
+    MODEL'S OWN SKILL BOILERPLATE — a chunk of its documentation, complete and
+    confident and about nothing — and it was about to be acted on. The prompt
+    below asks for five numbered areas and a scored summary; a response that
+    cannot supply them did not answer the question, whatever it says at the top.
+
+    Kept deliberately narrow: it rejects only responses that are STRUCTURALLY
+    not a verdict. It never judges whether the findings are any good, because a
+    shape check that editorialises is a gate that gets disabled.
+    """
+    t = text.strip()
+    if len(t) < 200:
+        return f"too short to be a review ({len(t)} chars)"
+    low = t.lower()
+    # The tell for the boilerplate failure: it describes the reviewing apparatus
+    # instead of the game. Phrased as a signal, not a verdict, so a legitimate
+    # review that happens to mention a skill is not rejected.
+    for smell in ("use whenever", "skill.md", "## when to use", "you are a helpful",
+                  "triggers on", "this skill"):
+        if smell in low:
+            return f"reads as the model's own boilerplate, not a review ('{smell}')"
+    # The prompt's own contract: five area verdicts + a one-line summary.
+    scores = sum(1 for k in ("assets", "mechanics", "ui", "ux", "difficulty")
+                 if re.search(rf"\b{k}\b", low))
+    if scores < 4:
+        return (f"missing the per-area verdict lines the prompt requires "
+                f"(found {scores}/5 area names)")
+    if not re.search(r"^\s*1[.)]", t, re.M):
+        return "no numbered finding — the prompt asks for numbered findings, this is prose"
+    return ""
+
+
 def ask(model: str, shots: list[str]) -> None:
     content = [{"type": "text", "text": PROMPT}]
     for s in shots:
@@ -237,6 +273,18 @@ def ask(model: str, shots: list[str]) -> None:
         text = " ".join(c.get("text", "") for c in text if isinstance(c, dict))
     if not text:
         print("EMPTY after all fallbacks:", json.dumps(msg)[:600]); sys.exit(2)
+    defect = verdict_defect(text)
+    if defect:
+        # Loud, and it still SAVES the text — a rejected verdict is evidence about
+        # the model, and discarding it is how a bad rotation goes unnoticed.
+        slug0 = model.replace("/", "_")
+        bad = Path(f"/tmp/loop-{slug0}.REJECTED.md")
+        bad.write_text(f"# {model} — REJECTED: {defect}\n\n{text}\n")
+        print(f"REJECTED VERDICT — {defect}")
+        print(f"saved for inspection: {bad}")
+        print("Not added to the ledger as a review. Acting on this would mean acting")
+        print("on something that is not a review.")
+        sys.exit(2)
     used = body.get("usage", {})
     slug = model.replace("/", "_")
     out = Path(f"/tmp/loop-{slug}.md")
@@ -259,6 +307,53 @@ def nxt() -> None:
     print("ALL DONE — every model in the rotation has been asked"); sys.exit(3)
 
 
+def selftest() -> None:
+    """Prove the verdict gate can FAIL. Run: python3 tools/loop_review.py selftest
+
+    A gate that has never been shown to reject is not a gate — it is a machine
+    that prints a confident sentence, which is the exact failure this file exists
+    to prevent (see the boilerplate incident in verdict_defect's docstring). The
+    cases below are the ones that actually happened, plus the one that must be
+    ACCEPTED so the gate cannot be satisfied by rejecting everything.
+    """
+    good = """1. ASSETS TO IMPLEMENT
+ 1) The gunner sprites read flat against rust ground.
+## MECHANICS
+ 1) Claymore is strictly dominated by the grenade crate.
+## UI
+ 1) The verb legend is permanently on screen.
+## UX
+ 1) Nothing teaches the arc throw.
+## DIFFICULTY
+ 1) Paid revive is brutal early.
+VERDICT: solid indie"""
+    boilerplate = (
+        "# Use whenever the user asks for an image, sprite, or game-asset lookup.\n"
+        "## When to use\nThis skill triggers on any request mentioning rendering.\n"
+        "Example: make me a picture of a cat. Use this file's scripts to do it well.")
+    cases = [
+        ("a real verdict is ACCEPTED", good, True),
+        ("model boilerplate is REJECTED", boilerplate, False),
+        ("a stub is REJECTED", "Looks good to me.", False),
+        ("a refusal echo is REJECTED", "I cannot review images. " * 12, False),
+        ("unnumbered prose is REJECTED",
+         "ASSETS fine. MECHANICS has issues. UI busy. UX thin. DIFFICULTY fair. " * 4, False),
+    ]
+    bad = 0
+    for name, text, want_ok in cases:
+        defect = verdict_defect(text)
+        got_ok = defect == ""
+        mark = "ok  " if got_ok == want_ok else "FAIL"
+        if got_ok != want_ok:
+            bad += 1
+        detail = "accepted" if got_ok else f"rejected ({defect})"
+        print(f"  [{mark}] {name:34s} -> {detail}")
+    if bad:
+        print(f"SELFTEST FAILED — {bad}/{len(cases)} case(s) wrong; the gate is wrong")
+        sys.exit(1)
+    print(f"selftest PASS — {len(cases)}/{len(cases)} cases, and it CAN reject")
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1]
     if cmd == "render":
@@ -267,5 +362,7 @@ if __name__ == "__main__":
         ask(sys.argv[2], sys.argv[3:])
     elif cmd == "next":
         nxt()
+    elif cmd == "selftest":
+        selftest()
     else:
         print(__doc__); sys.exit(1)

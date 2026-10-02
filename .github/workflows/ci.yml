@@ -73,6 +73,14 @@ jobs:
         shell: bash
         run: python3 tools/i18n_check.py
 
+      # The review harness's verdict gate exists because one model returned its
+      # own skill boilerplate instead of a review and it was about to be acted
+      # on. A gate nobody ever watched reject is exactly the thing this loop's
+      # own history says not to ship, so its ability to FAIL is asserted here.
+      - name: Selftest the reviewer verdict gate (must be able to reject)
+        shell: bash
+        run: python3 tools/loop_review.py selftest
+
       - name: Verify shipping package contents for every preset
         shell: bash
         run: |
