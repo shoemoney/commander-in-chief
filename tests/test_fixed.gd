@@ -160,9 +160,14 @@ func test_length_overflow_bound() -> void:
 	## Both components maxed: the SUM of the two squares must not wrap either.
 	Runner.T.ok(Fixed.length(lim, lim) > l0, "|(SQUARE_MAX, SQUARE_MAX)| does not wrap")
 
-	## Regression guard for the actual trap: an endless run's camera_top passes
-	## -46340 px, so an absolute coordinate handed to length() would blow the bound
-	## minutes into a run. Every call site must pass a DELTA.
-	var endless_5min_y := -46340 * Fixed.ONE
-	Runner.T.ok(absi(endless_5min_y) > Fixed.SQUARE_MAX - Fixed.ONE,
-		"an endless run reaches the overflow bound in absolute y — deltas only")
+	## REMOVED 2026-10-02: a "regression guard" that was `absi(-46340 * Fixed.ONE) >
+	## Fixed.SQUARE_MAX - Fixed.ONE` — a literal product compared against a constant.
+	## It could never fail for any code change, and its stated premise was false: endless
+	## pins camera_top at -VIEW_H (sim_world.gd:5447) and the gate stream is capped by
+	## _stamp_final_gate (:6134-6138), so no mode reaches -46340 px. Fixed.gd's own
+	## docstring carried the same fiction and has been corrected.
+	##
+	## The assertions immediately above it are the real coverage: they pin |x|, |y| and the
+	## both-components-maxed sum against the real SQUARE_MAX boundary. The overflow guard
+	## itself lives in fixed.gd and is live in this runner, so a genuine overflow still
+	## fails the run — it does not need a constant comparison standing in for it.

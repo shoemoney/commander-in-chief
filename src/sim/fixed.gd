@@ -123,12 +123,26 @@ static func length(x: int, y: int) -> int:
 	## agree on the garbage). Verified: length(46340px, 0) is exact, length(46341px, 0)
 	## returns 0.
 	##
-	## PASS DELTAS, NEVER ABSOLUTE COORDINATES. All current call sites do. The trap is
-	## that world y is unbounded downward — an endless run's `camera_top` passes
-	## -46340 px around the 5-minute mark, so the first person who hands an absolute
-	## coordinate to this function ships a run that quietly corrupts itself minutes in.
-	## The assert catches that in dev/tests (it is compiled out of release builds, so
-	## it costs the shipped sim nothing and can never change a checksum).
+	## PASS DELTAS, NEVER ABSOLUTE COORDINATES. All current call sites do, and the
+	## assert below is the tripwire for the first one that does not.
+	##
+	## CORRECTION 2026-10-02: this docstring used to claim "an endless run's camera_top
+	## passes -46340 px around the 5-minute mark". That is FALSE and it sized a risk
+	## around a camera that does not move. Endless pins camera_top at -VIEW_H for the
+	## whole run — sim_world.gd:5447 returns early with the comment "endless never
+	## calls _step_camera at all; camera_top is pinned at -VIEW_H by design", restated
+	## at :6400-6413. The only writes are sim_world.gd:935 (`= -VIEW_H`) and :5526
+	## (campaign-only), and the gate stream is terminated by _stamp_final_gate at
+	## :6134-6138 ("Nothing streams past it in campaign; Boss Rush stamps this same
+	## finale to cap its own gauntlet").
+	##
+	## So nothing reaches -46340 px today, and the premise has been removed rather than
+	## left to be believed. The assert itself stays: it is the right guard for whatever
+	## unbounded coordinate turns up next, it costs the shipped sim nothing (compiled
+	## out of release, so it can never change a checksum), and the failure it would catch
+	## is real even though the example was not — fsqrt's `v <= 0` guard (this file, the
+	## sqrt helper) turns an overflow into a silent, plausible 0, which is precisely
+	## the "corrupt-but-deterministic run with nothing to detect it" failure mode.
 	assert(absi(x) <= SQUARE_MAX and absi(y) <= SQUARE_MAX,
 		"Fixed.length overflow: (%d, %d) exceeds SQUARE_MAX — pass a delta, not an absolute coordinate" % [x, y])
 	return fsqrt(mul(x, x) + mul(y, y))

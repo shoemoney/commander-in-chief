@@ -5929,10 +5929,23 @@ func _howto_page_endless(page: int = 0) -> void:
 	# wins over the BACK-clearance invariant in the pathological overflow case — a legible
 	# row grazing BACK beats an illegible one that clears it.
 	pitch = maxf(readable, pitch)
-	# Two invariants: the block never collides with BACK (pure fit, no upward clamp),
-	# and it never teaches below a legible pitch.
-	assert(y + float(rows.size() - 1) * pitch <= last_max)
-	assert(pitch >= readable)
+	# The BACK-clearance invariant, as a push_error rather than an assert.
+	# Two corrections, both 2026-10-02:
+	#   - Godot COMPILES OUT `assert` in release exports, so the one form this file used
+	#     was the one the codebase has already rejected for a must-be-loud invariant.
+	#     The house pattern is push_error, chosen deliberately at hud.gd:2057 for exactly
+	#     this reason ("survives release, unlike a stripped assert").
+	#   - there was a SECOND assert here, `assert(pitch >= readable)`, one line below
+	#     `pitch = maxf(readable, pitch)`. That is a tautology OF maxf: it can never fail
+	#     for any input, in any build, in any locale. The comment above it claimed "two
+	#     invariants" where one was a no-op. Deleted rather than converted — there is
+	#     nothing left to assert, because the line above already guarantees it.
+	if y + float(rows.size() - 1) * pitch > last_max:
+		push_error("endless rows: block bottom %.1f clears BACK only at %.1f — a row will "
+			% [y + float(rows.size() - 1) * pitch, last_max]
+			+ "render under BACK. The readable floor is deliberately allowed to win over "
+			+ "clearance (c3-05); if this fires, the roster or ENDLESS_PER_PAGE grew past "
+			+ "what the 13px floor can fit.")
 	# Box tracks the DERIVED pitch (never a fixed size): pitch - 1 guarantees a >=1px
 	# gap between adjacent sprites at any page size, so they grow with the roomier
 	# pitch yet can never overlap.

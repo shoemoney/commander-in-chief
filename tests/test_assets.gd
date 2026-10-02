@@ -1960,8 +1960,24 @@ func test_a3_marsh_wetness_pool_and_sheen() -> void:
 	var pv: float = maxf(pool.r, maxf(pool.g, pool.b))
 	var sv: float = maxf(sheen.r, maxf(sheen.g, sheen.b))
 	Runner.T.ok(sv > pv, "the sheen is LIGHTER than the dark pool (a glint off the water)")
-	# The wetness is marsh-only: band 2 of the 5-stop march (int(march*5) == 2).
-	Runner.T.eq(clampi(int(0.45 * 5.0), 0, 4), 2, "march 0.45 lands in the MARSH band (2) where the wetness draws")
+	# REMOVED 2026-10-02: `Runner.T.eq(clampi(int(0.45 * 5.0), 0, 4), 2, "march 0.45 lands
+	# in the MARSH band (2) where the wetness draws")`.
+	#
+	# It was `2 == 2` — a constant compared with itself, so it could never fail — AND it
+	# described a formula that is not in the product. `_draw_marsh_wetness`
+	# (main.gd:10052) computes no band index at all: it loops a 5x7 tile grid and gates
+	# only on `if h % 3 != 0`. There is no `int(march * 5.0)`, no `clampi`, and no
+	# "MARSH band 2" anywhere in that function.
+	#
+	# The nearest thing in the codebase is main.gd:1075, `wsec`, which DOES index a
+	# 5-stop march — but it selects RIVER COLOUR (_WATER_SHALLOW_STOPS/_WATER_DEEP_STOPS),
+	# not marsh wetness, and it carries a `+ 0.0001` epsilon the assertion omitted,
+	# which exists precisely to stop a march just under a band edge rounding down.
+	#
+	# Deleted rather than rewritten because there is no honest version of the claim: the
+	# marsh wetness is not band-gated at all. The two REAL assertions above it (pool
+	# darker than sheen, and the pool/sheen colours coming from MARSH_WET) still pin the
+	# behaviour that exists.
 
 
 # --- a3-11: bosses show hp-keyed battle damage — a full-hp boss is pristine, damage

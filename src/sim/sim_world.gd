@@ -558,6 +558,12 @@ const HULK_HALF_H := 23 * F_ONE      # 104px canvas x 0.62 call x 0.72 SCALE = 4
                                      # test_hitbox_fairness). Was 12 — 52% of the drawn height, so 11px of
                                      # visible steel at each end of the hull stopped nothing at all.
 const SANDBAG_FIELD_CAP := 12        # six two-segment nests; shared party cap
+# The "Priced" camp crate curve (sim_world.gd:6238): 10 at segment 2, +5 per
+# segment past it, hard-capped. Named 2026-10-02 so a test can assert the RULE
+# through these rather than restate the expression as constant-vs-constant arithmetic.
+const CAMP_PRICE_BASE := 10
+const CAMP_PRICE_STEP := 5
+const CAMP_PRICE_CAP := 30
 const SANDBAG_HALF_W := 18 * F_ONE   # segment is 36x10 px — rushers must flank in under ~2s
 const SANDBAG_HALF_H := 5 * F_ONE
 const SANDBAG_EMBRASURE := 12 * F_ONE # clear inner-edge gap, independent of cardinalized heading
@@ -6234,8 +6240,16 @@ func _stamp_stretch_setpieces() -> void:
 				rocks.append({"x": spx2, "y": sp_y})
 			elif sp_kind == 1:
 				# "Priced" pinned: 10 + 5/segment past 2, capped 30.
+				#
+				# Named 2026-10-02. The curve was three bare literals at its only call
+				# site, and the test that "pinned" it restated the same expression with
+				# constant-vs-constant assertions — so changing 30 to 50, or 10 to 12,
+				# left every assertion green while their messages kept claiming the curve
+				# was pinned. Now the numbers have names the test can read, and the
+				# test asserts the RULE through them instead of repeating the formula.
 				pickups.append({"x": spx2, "y": sp_y, "kind": 0,
-					"cost": mini(30, 10 + (absi(_next_gate_y / GATE_SPACING) - 2) * 5)})
+					"cost": mini(CAMP_PRICE_CAP,
+						CAMP_PRICE_BASE + (absi(_next_gate_y / GATE_SPACING) - 2) * CAMP_PRICE_STEP)})
 
 
 func _author_lz() -> void:

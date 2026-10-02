@@ -59,6 +59,42 @@ func _px(fixed_radius: int) -> float:
 	return float(fixed_radius) / float(Fixed.ONE)
 
 
+## THE SILHOUETTE FAILED for one of two very different reasons, and the caller could
+	## only see one of them. Corrected 2026-10-02.
+	##
+	## `_silhouette` returned Vector2.ZERO for BOTH "the texture has no pixel above
+	## alpha 0.35" and — in principle — "the texture is absent", and every call site
+	## reported it as the second with `ok(true, "<key> texture absent — check skipped")`.
+	## The second case is unreachable anyway: Art.TEX is built entirely from `preload()`
+	## (art.gd:31, :71, :274), so a missing file is a parse error at script load, not a
+	## runtime ZERO. So the reachable case — art that loads but is blank, fully
+	## transparent, or re-exported at the wrong alpha — silently converted SEVEN fairness
+	## bands into passes, which is precisely the class of defect this suite exists to
+	## find.
+	##
+	## Both conditions are now distinguished, and the degenerate one is an honest failure
+	## rather than a skip. The guards stay (a suite that dies on one bad key tells you
+	## less than one that names it), but they can no longer report success.
+func _silhouette_or_explain(key: String) -> Dictionary:
+	var t: Texture2D = Art.tex(key)
+	if t == null:
+		return {"missing": true, "empty": false, "d": Vector2.ZERO}
+	var img := t.get_image()
+	if img.is_compressed():
+		img.decompress()
+	var lit := 0
+	for y in img.get_height():
+		for x in img.get_width():
+			if img.get_pixel(x, y).a > 0.35:
+				lit += 1
+				break
+		if lit > 0:
+			break
+	if lit == 0:
+		return {"missing": false, "empty": true, "d": Vector2.ZERO}
+	return {"missing": false, "empty": false, "d": _silhouette(key)}
+
+
 func _silhouette(tex_name: String) -> Vector2:
 	## The drawn opaque footprint in screen px: alpha bbox x SCALE x call scale.
 	## Returns Vector2.ZERO when the texture is missing so the caller can skip
@@ -134,9 +170,17 @@ func test_enemy_bullet_is_smaller_than_the_soldier_it_kills() -> void:
 	# sim test is a circle: anything at or above 1.0 means the whole visible
 	# soldier is lethal surface, which in a one-hit-kill game is the single
 	# most-reported unfairness in the genre.
-	var d := _silhouette("player1")
+	# A ZERO silhouette is a FAILURE, not a skip: see _silhouette_or_explain. A
+	# blank or wrong-alpha player1 would otherwise turn this entire fairness band
+	# into a pass, and the suite exists to catch exactly that.
+	var probe := _silhouette_or_explain("player1")
+	Runner.T.ok(not probe["missing"] and not probe["empty"],
+		"player1 has drawable pixels — without them every player1 fairness band below is vacuous")
+	if probe["missing"] or probe["empty"]:
+		return
+	var d: Vector2 = probe["d"]
 	if d == Vector2.ZERO:
-		Runner.T.ok(true, "player1 texture absent — silhouette check skipped")
+		Runner.T.ok(false, "player1 silhouette is degenerate (a zero-area bounding box)")
 		return
 	var inscribed := minf(d.x, d.y) / 2.0
 	var r := _px(SimWorld.ENEMY_BULLET_HIT_RADIUS)
@@ -172,7 +216,8 @@ func test_contact_death_demands_deep_visual_overlap() -> void:
 	# Arcade bias: you should already look buried in the man before it kills.
 	var ph := _half("player1")
 	if ph == 0.0:
-		Runner.T.ok(true, "player1 texture absent — contact check skipped")
+		Runner.T.ok(false, "player1 has no drawable pixels — the contact band is "
+			+ "vacuous, not skipped (see _silhouette_or_explain)")
 		return
 	var r := _px(SimWorld.ENEMY_TOUCH_RADIUS)
 	for foe in ["enemy_smg", "enemy_assault", "frogman", "m_technical"]:
@@ -189,7 +234,8 @@ func test_colossus_crush_never_outgrows_its_hull() -> void:
 	# under the crush radius, which would kill you outside the machine.
 	var ch := _half("colossus_body")
 	if ch == 0.0:
-		Runner.T.ok(true, "colossus_body texture absent — crush check skipped")
+		Runner.T.ok(false, "colossus_body has no drawable pixels — the crush band is "
+			+ "vacuous, not skipped (see _silhouette_or_explain)")
 		return
 	var r := _px(SimWorld.COLOSSUS_CRUSH_RADIUS)
 	Runner.T.ok(r < ch,
@@ -204,7 +250,8 @@ func test_mine_trigger_needs_the_player_standing_on_it() -> void:
 	var ph := _half("player1")
 	var mh := _half("wep_claymore")
 	if ph == 0.0 or mh == 0.0:
-		Runner.T.ok(true, "mine/player texture absent — trigger check skipped")
+		Runner.T.ok(false, "player1 and/or wep_claymore has no drawable pixels — the "
+			+ "trigger band is vacuous, not skipped (see _silhouette_or_explain)")
 		return
 	_band("mine trigger", _px(SimWorld.MINE_TRIGGER_RADIUS) / (ph + mh), 0.45, 0.80)
 
@@ -218,9 +265,15 @@ func test_the_bunker_wall_that_eats_rounds_is_the_wall_you_can_see() -> void:
 	# died in invisible armour most of a sprite-width off the drawn wall, which
 	# is the "no visible cause" failure pointed at the player's own offense.
 	# The drawn body must COVER the AABB it enforces.
-	var d := _silhouette("bunker")
+	# A ZERO silhouette is a FAILURE, not a skip: see _silhouette_or_explain.
+	var probe := _silhouette_or_explain("bunker")
+	Runner.T.ok(not probe["missing"] and not probe["empty"],
+		"bunker has drawable pixels — without them the armour band is vacuous")
+	if probe["missing"] or probe["empty"]:
+		return
+	var d: Vector2 = probe["d"]
 	if d == Vector2.ZERO:
-		Runner.T.ok(true, "bunker texture absent — armour check skipped")
+		Runner.T.ok(false, "bunker silhouette is degenerate (a zero-area bounding box)")
 		return
 	var aw := float(SimWorld.BUNKER_W) / float(Fixed.ONE)
 	var ah := float(SimWorld.BUNKER_H) / float(Fixed.ONE)
@@ -262,7 +315,8 @@ func test_player_bullet_is_generous_against_infantry() -> void:
 	# to count, which is the wrong bias for the weapon you aim yourself.
 	var fh := _half("enemy_smg")
 	if fh == 0.0:
-		Runner.T.ok(true, "enemy_smg texture absent — bullet check skipped")
+		Runner.T.ok(false, "enemy_smg has no drawable pixels — the bullet band is "
+			+ "vacuous, not skipped (see _silhouette_or_explain)")
 		return
 	var r := _px(SimWorld.BULLET_HIT_RADIUS)
 	Runner.T.ok(r > fh, "a player round grazing the silhouette must count as a hit")
@@ -341,7 +395,13 @@ func test_a_round_on_the_visible_edge_of_every_enemy_counts_as_a_hit() -> void:
 	for kind in roster:
 		var h := _half(roster[kind])
 		if h == 0.0:
-			continue   # texture absent — art.gd guards its lookups too
+			# NOT a skip. Every roster key is live art, and a blank or wrong-alpha
+			# one would remove an entire kind from the fairness sweep while the
+			# suite still reported a pass.
+			Runner.T.ok(false, "roster kind '%s' (sprite %s) has no drawable pixels — "
+				% [kind, roster[kind]]
+				+ "it is excluded from the fairness sweep entirely (see _silhouette_or_explain)")
+			continue
 		var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
 		_clear_field(sim)
 		var e := _spawn_probe_target(sim, kind)
@@ -370,7 +430,8 @@ func test_the_spotter_dies_inside_the_reticle_the_hud_paints_on_it() -> void:
 	# game's own kill marker, did nothing.
 	var h := _half("m_radar_tank")
 	if h == 0.0:
-		Runner.T.ok(true, "m_radar_tank texture absent — spotter check skipped")
+		Runner.T.ok(false, "m_radar_tank has no drawable pixels — the spotter band is "
+			+ "vacuous, not skipped (see _silhouette_or_explain)")
 		return
 	var sim := SimWorld.new(0xC0FFEE, 1, "campaign")
 	_clear_field(sim)
