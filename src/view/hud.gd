@@ -279,6 +279,15 @@ const VERB_LEGEND_Y := 344.0
 # The enemy kinds that count as "a boss is on the field" for a3-27. The gunship
 # and the colossus are the two the campaign docks an HP bar for; the vehicles in
 # the endless arena are not bosses and do not suppress the legend.
+#
+# RETIRED 2026-10-01. This table was never read by anything that could match: it
+# was consulted as an enemy `kind` over `sim.enemies`, and no enemy is ever
+# BUILT with kind "gunship" or "colossus" — those two live in gates[i]["boss"],
+# sim.endless_boss and sim.colossus. The feature was inert in every mode.
+# `_boss_engaged` now asks the three containers that actually hold a boss, which
+# is the same set the draw path walks. Kept as documentation of the intended set,
+# and PINNED as empty-by-design by tests/test_hud.gd, because a table that means
+# nothing and looks load-bearing is exactly how this stayed invisible so long.
 const BOSS_VERB_SUPPRESS := {"gunship": true, "colossus": true}
 # c1-16: kill-streak timer ring geometry. The old ring was a 4.5px radius / 1.5px hairline —
 # near-illegible at the 640-wide design size. A 5.5px radius / 2px stroke is drawn CENTERED in a
@@ -1008,15 +1017,34 @@ static func verb_active_segs(used: Dictionary, sim: SimWorld = null) -> Array:
 	return out
 
 
-## Any boss-class enemy on the field. The boss kinds are the ones main.gd draws
-## with the BOSS_RIM treatment and docks an HP bar for, so this is the same set —
-## asked of the sim directly rather than threaded through from the view, because
-## verb_active_segs is static and is called from three places.
+## Any boss-class body is on the field and the legend must yield.
+##
+## This used to be a `kind` lookup over `sim.enemies`, against a table of
+## {"gunship", "colossus"} — and it was INERT. No enemy dict is ever constructed
+## with either kind: the Bridge Gunship lives in `gates[i]["boss"]`
+## (sim_world.gd:3243, :5058) and in `sim.endless_boss` (:888), and the Colossus
+## in `sim.colossus` (:887). None of the three is in `sim.enemies`, and bosses are
+## not even subject to MAX_ENEMIES. So a3-27's suppression — a 22-line rationale
+## about not teaching verbs over the boss bar — never ran in any mode. Zero test
+## coverage: `rg 'BOSS_VERB_SUPPRESS' tests/` returned nothing.
+##
+## The mistake is asking the wrong COLLECTION. This file already knew bosses live
+## outside `sim.enemies` — see the HOSTILES tally at hud.gd:2190, which spells it
+## out and adds `endless_boss` to the count for exactly this reason. The draw path
+## asks the same three places; this now does too.
 static func _boss_engaged(sim: SimWorld) -> bool:
-	for e in sim.enemies:
-		if BOSS_VERB_SUPPRESS.has(e.get("kind", "")):
-			return true
-	return false
+	if sim == null:
+		return false
+	# the campaign/arcade gate gunship, and the endless miniboss
+	for g in sim.gates:
+		if not g.is_empty() and g.has("boss"):
+			var b: Dictionary = g["boss"]
+			if not b.is_empty() and bool(b.get("alive", false)):
+				return true
+	if not sim.endless_boss.is_empty() and bool(sim.endless_boss.get("alive", false)):
+		return true
+	# the colossus, which is its own dict rather than a roster member
+	return not sim.colossus.is_empty() and bool(sim.colossus.get("alive", false))
 
 
 ## Emphasis blink that honors REDUCE MOTION: steady-on (no strobe) when reduced,

@@ -3986,9 +3986,25 @@ func test_no_world_label_ever_lands_on_the_bottom_hud_rail() -> void:
 	frames["colossus"] = hud.bottom_rail_rects()
 	for tag in frames.keys():
 		var rr: Array[Rect2] = frames[tag]
-		Runner.T.eq(rr.size(), 2, "%s frame reserves BOTH rail members (caption scrim + verb chip)" % tag)
+		# A frame with no boss reserves BOTH rail members: the caption scrim AND the
+		# verb chip, which is the case this sweep was built to protect.
+		#
+		# A frame with a LIVE colossus reserves ONE. Not a regression — a3-27
+		# suppresses the control-verb legend during a boss fight, and as of
+		# 2026-10-01 that suppression actually works (it used to scan `sim.enemies`
+		# for kinds that never exist there, so it never fired). With no chip drawn
+		# there is nothing to reserve, and reserving a rect for a primitive that
+		# is not painted would suppress legitimate world labels over empty pixels.
+		# The caption scrim is still reserved, which is the member that collides.
+		var want := 2 if tag == "default" else 1
+		Runner.T.eq(rr.size(), want,
+			"%s frame reserves the expected rail members (caption scrim + verb chip "
+			% tag
+			+ "%s)" % ("+ chip" if want == 2 else "only — a3-27 suppresses the chip during a boss"))
 	Runner.T.ok(HudIcons.bottom_band_lift(csim) > 0.0,
-		"the colossus frame really does lift the bottom cluster (%.0fpx)" % HudIcons.bottom_band_lift(csim))
+		"the colossus frame still resolves a non-zero bottom lift (%.0fpx) — kept as "
+			% HudIcons.bottom_band_lift(csim)
+		+ "defence in depth even though suppression means no chip is drawn")
 	# --- the sweep ---
 	var was_scale: float = Art.text_scale
 	var counts := {"A_no_reservation": 0, "B_no_max_y": 0, "C_shipped": 0}

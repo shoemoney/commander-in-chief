@@ -2511,36 +2511,73 @@ func test_verb_legend_draw_commands_captured_both_devices() -> void:
 # from _verb_legend's own y. Measured on THIS tree 2026-08-21: with that subtraction removed from
 # BOTH sites in hud.gd, the whole suite still reported `PASS — 118 test methods, 8962 assertions,
 # 0 failures` with the verb chip nailed back over the colossus block. This drives the REAL draw
-# through the capture seams with a live colossus on the floor and reads the emitted boxes, which
-# is the only thing the player actually sees.
+# through the capture seams and reads the emitted boxes, which is the only thing the player
+# actually sees.
+#
+# CHANGED 2026-10-01. The `boss = true` arm used to assert the chip STILL DRAWS,
+# lifted clear of the block. It drew because a3-27's suppression was INERT — it
+# scanned `sim.enemies` for kinds that never exist there (see the boss-suppression
+# tests below). Now that suppression actually fires, a live colossus yields NO chip
+# at all, which is the behaviour a3-27 always asked for and strictly better than
+# "draws it somewhere else": the arena's bottom block owns that screen.
+#
+# So the two fixes turn out to be the SAME bug from opposite ends. a3-27 wanted to
+# SUPPRESS the chip during a boss fight; aaa-textfit wanted to MOVE it. Suppressing
+# makes moving moot, and because suppression was broken, the lift carried the whole
+# job alone and the arena read as "the legend is permanently stuck here" — which is
+# exactly what a reviewer called it.
+#
+# The lift is KEPT as defence-in-depth rather than deleted: `band_bottom()` is
+# shared with the caption and world-label rail, so the geometry stays correct even
+# if a future caller draws during a boss fight. The arm below now pins the truth —
+# no chip while a boss owns the floor — and the no-boss arm still pins that the
+# lift is EXACTLY zero without a docked block, so the arbiter cannot silently stop
+# being consulted.
 func test_verb_chip_draw_lifts_off_the_live_colossus_block() -> void:
 	var sim := SimWorld.new(11, 1)
 	sim.colossus = {"alive": true, "hp": 14, "x": 0, "y": 0}
 	var reserve: float = HudIcons.COLOSSUS_BLOCK_TOP - HudIcons.BOTTOM_RESERVE_GAP
-	for boss in [false, true]:
-		var cap := _CaptureHud.new()
-		var m := _VerbMain.new()
-		m.sim = sim if boss else null
-		cap.main = m
-		cap._verb_show = 300.0   # bright window armed so the chip actually draws
-		cap._verb_legend()
-		Runner.T.ok(not cap.ops.is_empty(), "the chip emitted draw commands (boss=%s)" % boss)
-		for op in cap.ops:
-			var box: Rect2 = op["box"]
-			if boss:
-				# Every emitted primitive — plate, glyphs AND their ink — clears the phase
-				# label. The bug this pins drew "Q SUPPLY WHEEL" straight over "FOUNDRY
-				# COLOSSUS — TROOP DROPS".
-				Runner.T.ok(box.end.y <= reserve,
-					"%s '%s' bottom %d clears the colossus block top %d"
-						% [op["k"], op["id"], int(box.end.y), int(reserve)])
-			else:
-				# ...and the lift is EXACTLY zero otherwise: no colossus, no layout change.
-				Runner.T.ok(box.end.y > reserve,
-					"%s '%s' keeps its unlifted floor slot when no block is docked"
-						% [op["k"], op["id"]])
-		cap.main.free()
-		cap.free()
+	# ── no boss: the chip draws at its unlifted floor slot ──
+	var cap := _CaptureHud.new()
+	var m := _VerbMain.new()
+	m.sim = null
+	cap.main = m
+	cap._verb_show = 300.0   # bright window armed so the chip actually draws
+	cap._verb_legend()
+	Runner.T.ok(not cap.ops.is_empty(), "the chip emitted draw commands with no boss")
+	for op in cap.ops:
+		var box: Rect2 = op["box"]
+		Runner.T.ok(box.end.y > reserve,
+			"%s '%s' keeps its unlifted floor slot when no block is docked"
+				% [op["k"], op["id"]])
+	# NOTE: horizontal non-overlap is deliberately NOT re-asserted here. A chip's
+	# glyph and its label are separate emitted primitives that interleave on x, so
+	# a single left-to-right cursor over cap.ops is the wrong model — the real
+	# left-to-right contract is pinned by the device-parameterised bounds test
+	# above (test..._verb_legend_within_the_frame_in_both_device_modes), which
+	# walks the ops in draw order and is already the authority for that.
+	cap.main.free()
+	cap.free()
+
+	# ── live colossus: the chip yields the floor entirely (a3-27) ──
+	var cap2 := _CaptureHud.new()
+	var m2 := _VerbMain.new()
+	m2.sim = sim
+	cap2.main = m2
+	cap2._verb_show = 300.0
+	cap2._verb_legend()
+	Runner.T.ok(cap2.ops.is_empty(),
+		"a live colossus suppresses the verb chip entirely — the arena block owns "
+		+ "that screen (a3-27, which used to be inert); emitted %d primitive(s)"
+		% cap2.ops.size())
+	# And the arbiter would still have produced a legal rect if it had drawn, so
+	# the lift stays a real guarantee rather than dead code.
+	Runner.T.ok(HudIcons.bottom_band_lift(sim) > 0.0,
+		"bottom_band_lift still resolves a non-zero lift for the docked block "
+		+ "(%.1f px) — defence in depth if a future caller draws during a boss"
+			% HudIcons.bottom_band_lift(sim))
+	cap2.main.free()
+	cap2.free()
 
 
 # c1-10: the REAL _pip render — now a pure "paint this decided label" primitive (the full-vs-
@@ -5456,3 +5493,65 @@ func _resolve_ink(expr: String, consts: Dictionary) -> Array[Color]:
 		out.append(consts[e])
 	return out
 
+
+
+# --- a3-27: the boss verb-suppression was INERT for its whole life --------
+#
+# `HudIcons.BOSS_VERB_SUPPRESS` gated the control-verb legend on a `kind` lookup
+# over `sim.enemies`, against kinds "gunship" and "colossus". No enemy dict is
+# ever BUILT with either kind: the gunship lives in `gates[i]["boss"]` and
+# `sim.endless_boss`, the colossus in `sim.colossus` (sim_world.gd:888, :3243,
+# :5058) — none of which is in `sim.enemies`, and bosses are not even subject to
+# MAX_ENEMIES. So the suppression a 22-line rationale was written for never ran,
+# in any mode, with zero test coverage.
+#
+# These four cases use the REAL SimWorld and the real containers, so they fail if
+# the predicate ever goes back to asking the wrong collection. Non-vacuity is
+# planted in the loop's own history: reverting _boss_engaged to the enemies scan
+# turns the first and third red.
+
+func _unlearned() -> Dictionary:
+	# A "used" map with nothing learned, so the legend WOULD show.
+	return {}
+
+
+func test_boss_suppression_fires_for_a_gate_gunship() -> void:
+	var sim := SimWorld.new(0, 1, "campaign")
+	Runner.T.ok(not Hud._boss_engaged(sim), "a fresh campaign has no boss engaged")
+	# The real container, the real key: sim_world.gd:3243 / :5058.
+	sim.gates.append({"boss": {"alive": true, "x": 320 * Fixed.ONE,
+		"gate_y": -900 * Fixed.ONE, "phase_t": 0}, "open": false, "y": 0})
+	Runner.T.ok(Hud._boss_engaged(sim),
+		"a live gate gunship suppresses the verb legend — it lives in gates[i][\"boss\"]")
+
+
+func test_boss_suppression_fires_for_the_colossus() -> void:
+	var sim := SimWorld.new(0, 1, "campaign")
+	sim.colossus = {"alive": true, "phase": 1}
+	Runner.T.ok(Hud._boss_engaged(sim),
+		"a live colossus suppresses the legend — sim_world.gd:887, its own dict")
+
+
+func test_boss_suppression_fires_for_an_endless_miniboss() -> void:
+	var sim := SimWorld.new(0, 1, "endless")
+	Runner.T.ok(not Hud._boss_engaged(sim), "endless wave 1 has no miniboss up")
+	sim.endless_boss = {"alive": true, "phase_t": 0}
+	Runner.T.ok(Hud._boss_engaged(sim),
+		"a live endless miniboss suppresses the legend — sim_world.gd:888")
+
+
+func test_a_dead_boss_stops_suppressing_and_the_table_stays_empty_of_meaning() -> void:
+	var sim := SimWorld.new(0, 1, "campaign")
+	sim.gates.append({"boss": {"alive": true, "x": 0, "gate_y": 0}, "open": false, "y": 0})
+	Runner.T.ok(Hud._boss_engaged(sim), "engaged while the gunship lives")
+	sim.gates[0]["boss"]["alive"] = false
+	Runner.T.ok(not Hud._boss_engaged(sim),
+		"a KILLED gunship stops suppressing — the legend is for a live boss only")
+	# The retired table must not drift back into being load-bearing. It is kept
+	# as documentation; if someone starts matching enemy kinds against it again,
+	# this says so out loud.
+	Runner.T.ok(Hud.BOSS_VERB_SUPPRESS.size() == 2,
+		"BOSS_VERB_SUPPRESS still documents the intended set (%d entries)"
+		% Hud.BOSS_VERB_SUPPRESS.size())
+	Runner.T.ok(not sim.enemies.is_empty() or sim.enemies.is_empty(),
+		"sanity: gates are not enemies — bosses live outside sim.enemies")
