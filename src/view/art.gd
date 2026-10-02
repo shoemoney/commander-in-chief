@@ -781,12 +781,25 @@ const OUTLINE := {
 	"m_radar_tank": true, "m_rocket_truck": true, "m_jet": true,
 	"m_heli_transport": true, "m_heli_attack2": true, "m_drone": true,
 	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
-	"wep_grenade": true, "wep_shotgun": true,
-	"wep_rifle": true, "wep_mg": true, "item_bullet": true, "item_bullet_shotgun": true,
-	# The rare-capsule set: same ground-pickup class as the rifle/shotgun/mg
-	# capsules above (plus the planted claymore + its ghost — rim alpha follows
-	# tint.a, so the 0.28-alpha preview stays subtle).
-	"icon_rend": true, "wep_claymore": true, "wep_smoke": true, "wep_flashbang": true,
+	"wep_grenade": true, "wep_claymore": true,
+	# The rare-capsule sprites (cap_*) below DO reach _spr (main.gd:11023) and stay.
+	#
+	# NOT IN THIS LIST, and the reason is worth recording (2026-10-01 dead-config
+	# sweep). `wep_rifle`/`wep_mg`/`wep_shotgun`/`wep_smoke`/`icon_rend`/
+	# `item_bullet`/`item_bullet_shotgun`/`wep_flashbang` all sat here until then and
+	# every one was DEAD: they reach the screen only through HudIcons._stat →
+	# _emit_icon → draw_texture_rect (hud.gd:3346, :3853), which never calls _spr, so
+	# `Art.outlined()` is never evaluated for them. wep_rifle had no draw site in
+	# src/ AT ALL — not even a wrong one. `wep_claymore` and `wep_grenade` DO go
+	# through _spr (main.gd:10281, :13440, :12953), so both stay: the claymore's rim
+	# alpha follows tint.a, so its 0.28-alpha planted ghost stays subtle, which is
+	# exactly the behaviour the old comment described.
+	#
+	# Unlike SCALE, this table has no documented "bypassed" convention and its
+	# docstring promises the opposite ("Sprites that get a 1px dark outline in
+	# _spr()"), so a row here that _spr never sees reads as live configuration.
+	# test_assets.gd's a2 registry check only verifies each row mirrors a live TEX
+	# key — which all eight did — so it was structurally blind to this.
 	# sie-01: courier is the one remaining native-bake enemy infantry sprite (SUPPLY COURIER, main.gd
 	# "courier"/"courier_escape") -- same blurry 64px the earlier art class as the four re-baked below, deliberately
 	# LEFT UNTOUCHED here: out of this item's scope, a fine target for a future infantry-family pass.
@@ -809,20 +822,24 @@ const _GLYPH_PAD := {"interact": "ui_pad_x", "revive": "ui_pad_y",
 # (main._revive_context). SHIFT survives as the separate "grenade_alt" bind, which has no
 # glyph of its own — nothing draws a prompt for the alternate throw.
 const _GLYPH_KEY := {"interact": "F", "revive": "E", "roll": "C", "wheel": "Q", "grenade": "E"}
-# (Hint-toast button WORDS live in _PAD_LABELS / pad_label below — the two
-# parallel loops built the same helper twice; pad_label won: its Switch table
-# is positionally correct where the duplicate transplanted Xbox letters.)
+# (The verb-keyed hint-toast button WORDS this comment described lived in
+# _PAD_LABELS / pad_label, and were REMOVED as dead config on 2026-10-01 — nothing
+# read them. The LIVE equivalent is pad_button_label(), which is keyed on the
+# positional button id rather than a verb, so it follows a rebind.)
 
 ## Semantic hint → registry key for the device-aware prompt sprites (see
 ## glyph_key below). Pad column mirrors the bindings in main._gather_inputs;
 ## keyboard column favors the mouse/keycap art (WASD/arrows land on the wide
 ## blank keycap for callers to stamp, per the ui_key_blank letter pattern).
 const _HINT_PAD := {"confirm": "glyph_pad_a", "back": "ui_pad_b",
-	"start": "glyph_pad_start", "fire": "glyph_rt", "grenade": "glyph_lb",
-	"move": "glyph_stick_l", "aim": "glyph_stick_r", "nav_lr": "glyph_dpad_lr"}
+	"start": "glyph_pad_start", "fire": "glyph_rt",
+	# `grenade` is DELIBERATELY absent (menu.gd:6422-6425): the grenade moved onto
+	# a live E keybind, so drawing the pad's right-stick button beside it would be
+	# a lie. It keeps the hardcoded device icon on that branch instead.
+	"move": "glyph_stick_l", "aim": "glyph_stick_r"}
 const _HINT_KB := {"confirm": "glyph_key_enter", "back": "ui_key_blank",
-	"start": "glyph_key_enter", "fire": "glyph_mouse_l", "grenade": "glyph_mouse_r",
-	"move": "glyph_key_wide", "aim": "glyph_key_wide", "nav_lr": "glyph_key_wide"}
+	"start": "glyph_key_enter", "fire": "glyph_mouse_l",
+	"move": "glyph_key_wide", "aim": "glyph_key_wide"}
 
 
 static func group_digits(n: int) -> String:
@@ -912,18 +929,21 @@ static func _brand(key: String) -> String:
 	return _BRAND_MAP.get(pad_brand, {}).get(key, key)
 
 
-## Brand-correct button NAMES for text hints (the glyph twin of _brand):
-## semantic verbs → what's printed on the last-used pad. Unknown brands
-## fall back to Xbox labels, same as the glyph lookups.
-const _PAD_LABELS := {
-	"xbox": {"interact": "X", "revive": "Y", "wheel": "BACK", "grenade": "LB"},
-	"ps": {"interact": "SQUARE", "revive": "TRIANGLE", "wheel": "SHARE", "grenade": "L1"},
-	"switch": {"interact": "Y", "revive": "X", "wheel": "MINUS", "grenade": "L"},
-}
-
-
-static func pad_label(verb: String) -> String:
-	return _PAD_LABELS.get(pad_brand, _PAD_LABELS["xbox"]).get(verb, verb.to_upper())
+# REMOVED 2026-10-01: `_PAD_LABELS` and its `pad_label()` reader, a 12-cell
+# verb→brand-name table. Both were DEAD: `rg -nw 'pad_label' src/ tools/ tests/`
+# matched only the declaration and the two comment lines that described it. Its
+# live-bind twin `pad_button_label()` (keyed on the POSITIONAL button id a caller
+# actually reads from the pad, so it tracks a rebind) is what menu.gd and
+# main.gd call in seven places.
+#
+# The table's own comment claimed "pad_label won: its Switch table is positionally
+# correct" — it won a merge that no longer has a caller, and the comment outlived
+# the win by an unknown margin. A table that reads as live configuration but is
+# unreachable is worse than no table: it is why nobody asks whether the Switch
+# spelling is right, when in fact nothing has consulted it in some time.
+#
+# Left a gap rather than deleting the comment at art.gd:812 alone, because that
+# comment is the only place that recorded the two-parallel-loops history.
 
 
 ## LIVE-bind twins of _GLYPH_PAD / _PAD_LABELS: keyed on the POSITIONAL button id a caller
@@ -1265,9 +1285,17 @@ static func draw_glyph_left(ci: CanvasItem, action: String, left_x: float, mid_y
 
 
 ## Device-aware prompt lookup: semantic action hint ('confirm', 'back',
-## 'start', 'fire', 'grenade', 'move', 'aim', 'nav_lr') → TEX registry key for
-## the current device (use_pad). Total: unknown hints fall back to the
-## confirm glyph so callers always get a drawable key.
+## 'start', 'fire', 'move', 'aim') → TEX registry key for the current device
+## (use_pad). Total: unknown hints fall back to the confirm glyph so callers
+## always get a drawable key.
+##
+## The hint lists were audited 2026-10-01 and three of eight rows were unreachable:
+## `grenade` (deliberate — menu.gd:6422 pins it to a hardcoded device icon, since
+## the verb moved onto a live E keybind), and `nav_lr` + nothing else, which had no
+## caller anywhere in src/, tools/ or tests/. Rows that name a hint no caller can
+## produce are worse than absent rows: they read as live configuration, so nobody
+## asks whether the glyph is reachable. `fire` IS reachable — menu.gd:6427 admits
+## it on the same branch as move/aim — and is kept for that.
 static func glyph_key(action_hint: String) -> String:
 	if use_pad:
 		return _brand(_HINT_PAD.get(action_hint, "glyph_pad_a"))

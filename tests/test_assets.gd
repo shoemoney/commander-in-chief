@@ -3770,3 +3770,67 @@ func test_resting_scanline_does_not_read_as_ground_banding() -> void:
 	Runner.T.ok(base > 0.0, "the arcade framing survives — the effect is not simply removed")
 	Runner.T.ok(base + surge >= 0.12, "a hitstop still spikes it visibly (%.3f peak)" % (base + surge))
 	Runner.T.ok(surge > base * 2.0, "the hitstop surge dominates the resting value, so the beat still reads")
+
+
+# --- Art.OUTLINE rows must actually REACH _spr -----------------------------
+#
+# Found 2026-10-01 by a dead-config sweep. Eight rows sat in OUTLINE and none of
+# them could ever take effect: wep_rifle / wep_mg / wep_shotgun / wep_smoke /
+# icon_rend / item_bullet / item_bullet_shotgun / wep_flashbang reach the screen
+# ONLY through HudIcons._stat → _emit_icon → draw_texture_rect (hud.gd:3346, :3853),
+# which never calls _spr, so `Art.outlined()` — the sole consumer of this table —
+# is never evaluated for them. wep_rifle had no draw site in src/ at all.
+#
+# The existing a2 registry check (test_a2_registry_has_no_dead_rows) could not see
+# this: it verifies each row mirrors a live TEX key, which all eight did. A row can
+# name real art and still be unreachable, because the gate lives in a DRAW function
+# and the art is painted by a different one.
+#
+# The ratchet is the general form: an OUTLINE row must be reachable from a _spr
+# call site. The HUD-icon bypass is legitimate behaviour — it is just not an OUTLINE
+# row — so it is named here with the seam that documents why.
+func test_outline_rows_are_reachable_from_a_spr_call_site() -> void:
+	var art: Script = load("res://src/view/art.gd")
+	var main_src: String = FileAccess.get_file_as_string("res://src/main.gd")
+	var outline: Dictionary = art.OUTLINE
+	# A style key reaches _spr when some call site passes it as a literal or via a
+	# registry that _spr consumes (_RUSHER_SKINS, _CAPSULE_TEX, _CORPSE_TEX, ...).
+	# The check is deliberately conservative: it can only produce FALSE NEGATIVES
+	# (a live row reported as unreachable), never a false positive, so it cannot
+	# condemn a row that works. Every such row is listed below with its registry.
+	var registries := {
+		"enemy_smg": "_RUSHER_SKINS", "enemy_assault": "_RUSHER_SKINS",
+		"enemy_shotgun": "_RUSHER_SKINS", "enemy_lmg": "_RUSHER_SKINS",
+		"cap_pierce": "_CAPSULE_TEX", "cap_spread": "_CAPSULE_TEX",
+		"cap_triple": "_CAPSULE_TEX", "cap_rend": "_CAPSULE_TEX",
+		"cap_claymore": "_CAPSULE_TEX", "cap_smoke": "_CAPSULE_TEX",
+		"cap_flash": "_CAPSULE_TEX",
+		"tank_barrel": "_spr literal", "gunship_barrel": "_spr literal",
+		"colossus_barrel": "_spr literal",
+	}
+	var unreachable: Array = []
+	for k in outline:
+		if registries.has(k):
+			continue
+		if main_src.contains('"%s"' % k) or main_src.contains("'%s'" % k):
+			continue
+		unreachable.append(k)
+	Runner.T.eq(unreachable.size(), 0,
+		"every Art.OUTLINE row is reachable from a _spr call site, or is a named "
+		+ "registry row"
+		+ (" (unreachable: %s)" % str(unreachable) if unreachable.size() > 0 else ""))
+
+
+func test_the_hud_icon_weapon_sprites_are_not_outline_rows() -> void:
+	# The specific eight, pinned so the general check above cannot be satisfied by
+	# quietly re-adding them. These are painted by HudIcons, which has its own rim
+	# grammar; listing them in OUTLINE asserted a rim that was never drawn.
+	var art: Script = load("res://src/view/art.gd")
+	for k in ["wep_rifle", "wep_mg", "wep_shotgun", "wep_smoke", "icon_rend",
+			"item_bullet", "item_bullet_shotgun", "wep_flashbang"]:
+		Runner.T.ok(not art.OUTLINE.has(k),
+			"'%s' is painted by HudIcons, not _spr, so it carries no OUTLINE row" % k)
+	# ...and the two weapon pickups that DO go through _spr must keep theirs.
+	for k in ["wep_claymore", "wep_grenade"]:
+		Runner.T.ok(art.OUTLINE.has(k),
+			"'%s' reaches _spr (main.gd:10281/:13440/:12953) and keeps its rim" % k)

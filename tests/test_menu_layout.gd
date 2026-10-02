@@ -9141,3 +9141,54 @@ func _resolve_ink(expr: String, consts: Dictionary) -> Array[Color]:
 	if consts.has(e) and consts[e] is Color:
 		out.append(consts[e])
 	return out
+
+
+# --- the device-glyph hint tables must name hints a caller can PRODUCE ----
+#
+# Found 2026-10-01 by a dead-config sweep: three of eight rows in Art._HINT_PAD /
+# _HINT_KB were unreachable. `grenade` is deliberate (menu.gd:6422-6425 — the verb
+# moved onto a live E keybind, so the pad button beside it would be a lie) and is
+# pinned as excluded below. `nav_lr` had NO caller anywhere in src/, tools/ or
+# tests/ and no comment saying so — the worst kind of row, because it looks like
+# live configuration.
+#
+# The general form of the bug is "a row naming something nothing produces", so the
+# ratchet is the general form too: every hint either has a reachable producer, or
+# is named here as deliberately absent with its reason.
+func test_glyph_hint_rows_are_all_reachable() -> void:
+	var art: Script = load("res://src/view/art.gd")
+	var consts: Dictionary = art.get_script_constant_map()
+	var pad: Dictionary = consts["_HINT_PAD"]
+	var kb: Dictionary = consts["_HINT_KB"]
+	Runner.T.ok(pad.size() == kb.size(),
+		"the two device columns cover the SAME hints (%d pad / %d kb)"
+			% [pad.size(), kb.size()])
+	# The hints a call site can actually produce, from src/. `fire` is admitted by
+	# menu.gd:6427 on the same branch as move/aim even though no @fire SEGMENT
+	# exists yet — it is reachable the moment one is written, which is a different
+	# claim from "nothing produces it".
+	var producible := ["confirm", "back", "start", "fire", "move", "aim"]
+	# Documented absences, each with the fact that earns it.
+	var deliberately_absent := {
+		"grenade": "menu.gd:6422-6425 — moved onto a live E keybind; the pad branch "
+			+ "uses a hardcoded device icon instead",
+	}
+	var orphans: Array = []
+	for k in pad:
+		if not (k in producible) and not deliberately_absent.has(k):
+			orphans.append(k)
+	Runner.T.eq(orphans.size(), 0,
+		"every pad-hint row is producible by a call site or documented as absent"
+		+ (" (orphans: %s)" % str(orphans) if orphans.size() > 0 else ""))
+	for k in deliberately_absent:
+		Runner.T.ok(not pad.has(k),
+			"'%s' stays out of the pad column (%s)" % [k, deliberately_absent[k]])
+	# And every row must resolve to a REAL texture in both device columns — a hint
+	# pointing at a missing TEX key would draw nothing and say nothing.
+	var was_pad: bool = Art.use_pad
+	for dev in [false, true]:
+		Art.use_pad = dev
+		for k in pad:
+			Runner.T.ok(Art.TEX.has(Art.glyph_key(k)),
+				"hint '%s' resolves to a real TEX key on %s" % [k, "pad" if dev else "kb"])
+	Art.use_pad = was_pad   # restore global so device state can't leak to other suites

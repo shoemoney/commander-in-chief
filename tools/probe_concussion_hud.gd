@@ -437,8 +437,13 @@ func _player_box_logical() -> Rect2:
 	# A box around the soldier, clamped to the frame and clear of both HUD strips
 	# so the edge census never counts chrome as world detail.
 	var c := _player_screen_logical()
-	var x0 := clampf(c.x - PLAYER_BOX_HALF_W, 0.0, 640.0)
-	var x1 := clampf(c.x + PLAYER_BOX_HALF_W, 0.0, 640.0)
+	# LOGICAL_W, not a hardcoded 640.0 — its sibling LOGICAL_H is read on the two
+	# lines below and this pair used to disagree, which is the exact mistake that
+	# orphans a constant: LOGICAL_W had ZERO readers anywhere in the tree (the only
+	# zero-reader const in src/, tools/ and tests/ when audited 2026-10-01) purely
+	# because these two clamps repeated the literal instead of naming it.
+	var x0 := clampf(c.x - PLAYER_BOX_HALF_W, 0.0, LOGICAL_W)
+	var x1 := clampf(c.x + PLAYER_BOX_HALF_W, 0.0, LOGICAL_W)
 	var y0 := clampf(c.y - PLAYER_BOX_HALF_H, float(HUD_TOP_LOGICAL), LOGICAL_H - HUD_BOTTOM_LOGICAL)
 	var y1 := clampf(c.y + PLAYER_BOX_HALF_H, float(HUD_TOP_LOGICAL), LOGICAL_H - HUD_BOTTOM_LOGICAL)
 	return Rect2(x0, y0, x1 - x0, y1 - y0)
