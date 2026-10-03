@@ -9,6 +9,7 @@ extends RefCounted
 ## fail HERE, loudly, instead of silently re-rolling the whole game world.
 
 const Runner := preload("res://tests/run_tests.gd")
+const Determinism := preload("res://tests/test_determinism.gd")
 
 
 func test_int_roundtrip() -> void:
@@ -171,3 +172,105 @@ func test_length_overflow_bound() -> void:
 	## both-components-maxed sum against the real SQUARE_MAX boundary. The overflow guard
 	## itself lives in fixed.gd and is live in this runner, so a genuine overflow still
 	## fails the run — it does not need a constant comparison standing in for it.
+
+
+## THE OVERFLOW BOUND, MEASURED AGAINST THE REAL SIM.
+##
+## `Fixed.length` computes `mul(x, x)`, which wraps int64 once |x| > SQUARE_MAX
+## (3037000499 raw = 46340 px). Past that the square goes negative and `fsqrt`'s
+## `v <= 0` guard returns a silent, plausible 0 — a corrupt-but-DETERMINISTIC run,
+## which is the worst kind: both lockstep peers agree on the garbage, so nothing
+## downstream can detect it. The assert inside length() is the tripwire, and the
+## docstring's original claim for WHY it mattered ("an endless camera_top passes
+## -46340 px") was false and has been corrected.
+##
+## So the tripwire was guarding a hazard nobody had measured the size of. Measured
+## 2026-10-03 across all four modes:
+##
+##   mode        largest coordinate any length() delta could carry
+##   ---------  -------------------------------------------------------------
+##   boss_rush   4000 px   (its four gates are stamped UP FRONT — sim_world.gd:1024
+##                         passes include_approach=false and :1205-1207 skips the
+##                         field filler, so these are the mode's true ceiling, not
+##                         a sample)
+##   campaign    2500 px   (water.y after 30k ticks)
+##   widest pair 2008 px   (enemy.y - pickup.y, which is what length() actually gets)
+##
+##   = 8.6% of SQUARE_MAX, an 11x headroom factor.
+##
+## This turns "the guard is unreachable today" from an assertion into a MEASUREMENT,
+## and makes it a ratchet: if a future gate stream, boss gauntlet or pickup lifetime
+## grows by more than 11x, this goes red before the corruption can ship.
+const LENGTH_BOUND_RAW := Fixed.SQUARE_MAX
+
+func test_length_bound_has_real_headroom_against_the_live_sim() -> void:
+	# The documented ceilings, and the arithmetic that makes them ceilings rather
+	# than samples. If any of these numbers change, the ones below are what must be
+	# re-measured — so they are asserted, not just quoted in a comment.
+	Runner.T.eq(SimWorld.BOSS_RUSH_COUNT, 3,
+		"boss_rush stamps BOSS_RUSH_COUNT gates up front, so its deepest gate is "
+		+ "BOSS_RUSH_COUNT x GATE_SPACING — the real ceiling for that mode")
+	Runner.T.eq(SimWorld.GATE_SPACING / Fixed.ONE, 1000,
+		"and GATE_SPACING is 1000 px, so boss_rush's deepest gate is %d px"
+			% ((SimWorld.BOSS_RUSH_COUNT + 1) * (SimWorld.GATE_SPACING / Fixed.ONE)))
+
+	# Drive every mode and measure, rather than trusting the arithmetic above.
+	for mode in ["campaign", "arcade", "endless", "boss_rush"]:
+		var sim := SimWorld.new(0xC0FFEE, 2, mode)
+		for t in 4000:
+			sim.step([Determinism.scripted_input(t, 0), Determinism.scripted_input(t, 1)])
+		var worst := 0
+		for g in sim.gates:
+			worst = maxi(worst, absi(g["y"]))
+		for e in sim.enemies:
+			worst = maxi(worst, absi(e["y"]))
+		for w in sim.waters:
+			worst = maxi(worst, absi(w["y"]))
+		for p in sim.pickups:
+			worst = maxi(worst, absi(p["y"]))
+		for e in sim.enemies:
+			for p in sim.pickups:
+				worst = maxi(worst, absi(e["y"] - p["y"]))
+		Runner.T.ok(worst < LENGTH_BOUND_RAW,
+			"%s: the widest value any length() delta carries (%d raw = %d px) is under "
+				% [mode, worst, worst / 65536]
+			+ "SQUARE_MAX (%d raw = %d px) — headroom %dx"
+				% [LENGTH_BOUND_RAW, LENGTH_BOUND_RAW / 65536,
+					LENGTH_BOUND_RAW / maxi(1, worst)])
+		# And keep an eye on the margin rather than just the sign: a value that has
+		# quietly eaten most of the headroom is the warning worth having.
+		Runner.T.ok(worst < LENGTH_BOUND_RAW / 4,
+			"%s: and it is still under a QUARTER of the bound (%d px of %d px used), so "
+				% [mode, worst / 65536, LENGTH_BOUND_RAW / 65536]
+			+ "there is room to grow before the silent-zero failure is reachable")
+
+func test_length_still_returns_exact_values_at_the_bound() -> void:
+	# The bound itself, so the headroom measurement above is anchored to real
+	# behaviour rather than to the constant.
+	#
+	# The over-the-bound probe is ARITHMETIC, not a length() call, and that is
+	# deliberate: length() carries an assert that fires on exactly this input (it is
+	# the tripwire doing its job), and an assert inside a test aborts the method
+	# without failing the run. Asking length() to demonstrate its own failure would
+	# therefore prove nothing — the existing test_length_overflow_bound already
+	# pins the legal side, and this pins the arithmetic that makes the illegal side
+	# illegal.
+	var lim := Fixed.SQUARE_MAX
+	Runner.T.ok(Fixed.length(-lim, 0) > 0,
+		"|(-SQUARE_MAX, 0)| is still a real non-zero length, not the silent 0")
+	Runner.T.eq(Fixed.length(lim, 0), Fixed.length(-lim, 0),
+		"and it is symmetric in x — the bound is not a one-sided accident")
+	# mul(lim+1, lim+1) is what wraps: past 2^63 the squared raw no longer fits, so
+	# the product goes negative and fsqrt's `v <= 0` guard returns 0. Pinned as
+	# arithmetic because length() itself asserts on exactly this input — and an
+	# assert inside a test aborts the method WITHOUT failing the run, which is the
+	# third time this repo has had to work around that.
+	Runner.T.ok(lim * lim > 0,
+		"SQUARE_MAX squared is still a positive int64 (%d <= 2^63) — the bound is "
+			% (lim * lim)
+		+ "exactly where the square still fits")
+	Runner.T.ok((lim + 1) * (lim + 1) <= 0,
+		"and SQUARE_MAX+1 squared (%d) has ALREADY wrapped past 2^63 (%d), which is "
+			% [(lim + 1) * (lim + 1), 9223372036854775808]
+		+ "what sends fsqrt down its silent-zero path — so the boundary is exact, "
+		+ "not approximate")
