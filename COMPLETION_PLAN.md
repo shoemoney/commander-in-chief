@@ -4,15 +4,14 @@ Status: living. Updated each loop iteration. Epistemic status of every claim is
 retained in the Hindsight bank `cic` (tags: `claim:verified` / `claim:unverified`
 / `claim:disproven`) so a later session inherits the state, not just the plan.
 
-## Where this stands (2026-10-02)
+## Where this stands (2026-10-03)
 
-Four commits, all verified rather than asserted, and one thing deliberately NOT
-done. Suite: **1,285 methods / 39,401 assertions / 0 failures**, `lint_sim` clean,
-CI green on `main`.
+Eight commits across two iterations, all verified by planting a defect rather than
+by asserting one cannot happen. Suite: **1,289 methods / 39,434 assertions / 0
+failures**, `lint_sim` clean, CI green on all jobs.
 
-The headline is not a feature. It is that **three separate shipped claims turned
-out to be dead code**, and they were all the same shape — a table row naming
-something the code that reads it can never be handed:
+**Iteration 1** found three shipped features that were dead code, all the same
+shape — a table row naming something the code that reads it can never be handed:
 
 | Claim | What it actually was |
 |---|---|
@@ -20,13 +19,21 @@ something the code that reads it can never be handed:
 | a3-27 "stop teaching verbs during a boss" | never fired in any of four modes |
 | a1-02 "the heavy already reads" | the row's absence was the CAUSE of no rim, not a decision |
 
-What let all three survive is the more useful finding: **each sat behind a test
-that checked an adjacent fact.** A row mirroring a live TEX key. A kind being a
-string. A suite being green. None of them asked whether the value could ever be
-*reached*. The three ratchets added today all ask the reachability question, and
-each was verified by planting the defect back rather than by asserting it cannot
-happen — which is how I found that my own separation test was blind to identical
-hues, the exact shape of the bug it was written for.
+**Iteration 2** worked the four leads the first audit left as UNPROVEN. One was a
+real hole, one was already fine, and two turned out to be missing measurements:
+
+| Lead | Verdict |
+|---|---|
+| **U1 event-seam coverage** | **REAL, and the worst of the set.** The gate asserted on what a 600-tick × 2-mode sample fired: **15 of 101 event types (15%)**. Pushed to 12k ticks × 4 modes it reached 38, so 63 types need a tank, a purchase, a route or a boss kill. Add an event, forget the handler, go green — on 85% of the seam. Now the static harvest is the gate and the sample is corroboration. |
+| **U2 chip-band ratchet** | **NOT BROKEN.** All 14 ids the draw can hand `_fits2` are banded, and planting the described blind spot was caught by the *existing* fixture test. Kept the source-level check as hardening; claims no fix. |
+| **U3 sprite silhouettes** | **NOT BROKEN** (23/23 solid) — but the check had no plant, and neutering its threshold left the suite green. Now has planted controls through a shared predicate. |
+| **U4 `Fixed.length` overflow** | **A HAZARD OF UNKNOWN SIZE.** The tripwire existed; the reason for it was false (removed in iteration 1). Measured: 4000 px worst case against a 46340 px bound — **8.6%, 11× headroom.** Now a ratchet on the *margin*, not the sign. |
+
+The shape that recurred across both iterations is not "dead code" but **a gate that
+cannot fail**: U1 asserted only what it happened to see, U3 asserted only negatives.
+Both were found by planting, and in U3's case the first version of the fix
+reproduced the same blind spot inside itself — the control inlined its own copy of
+the census, so it passed no matter what the real threshold became.
 
 ## Autonomy: how to make me continue without prompting
 
@@ -85,6 +92,33 @@ which is the useful outcome.
   suite is green) rather than the reachability that matters.
 
 **Done when:** no `claim:unverified` remains for a shipped change. ✅ for M1.
+
+## Milestone 1b — Gates that cannot fail  [DONE, 2026-10-03]
+
+The follow-on question M1 raised: if dead code hides behind adjacent checks, what
+about the checks themselves? Audited the leads the M1 sweep left UNPROVEN.
+
+- **M1b.1 The event seam.** ❌→✅ The one real hole. `test_event_coverage.gd`
+  asserted only on what a 600-tick × 2-mode torture sample fired — **15 of 101
+  types**. The static harvest is now the gate; the sample is corroboration. Proven
+  with a controlled plant: renaming the victory event (emitted only when the
+  colossus dies, which no 600-tick sample reaches) passes under the old
+  sample-only gate and fails by name under the new one. Committed `06e98dfd`.
+- **M1b.2 The chip-band ratchet.** ✅ Already correct — all 14 `_fits2` ids are
+  banded, and the fixture caught the planted blind spot itself. Kept a
+  source-level check because a fixture can only see what it stages, including the
+  one non-literal call site (`"mutator" if si == 0 else "mutator2"`) a literal
+  harvest misses. Committed `170ff9ec`.
+- **M1b.3 Sprite silhouettes.** ✅ All 23 are solid. But the check had no plant and
+  neutering its threshold left the suite green — an assertion that only ever
+  reports negatives. Now routed through one shared predicate with planted
+  controls; both knobs verified load-bearing. Committed `fb539a53`.
+- **M1b.4 The `Fixed.length` overflow.** ✅ Measured. The tripwire existed; its
+  stated reason was false (M1). Worst case across four modes is **4000 px against
+  a 46340 px bound — 8.6%, 11× headroom** — so it is now a ratchet on the margin,
+  which catches an 8× squeeze that a sign-check would miss. Committed `c9b134b2`.
+
+**Done when:** every gate touched has a plant that turns it red. ✅
 
 ## Milestone 2 — Make the reviewer trustworthy end to end
 
@@ -165,7 +199,21 @@ I cannot declare these fair without someone playing it.
   suite**, the exact failure AGENTS.md documents. Reverting was the correct
   move; the lesson is that a "fix" whose measurement came from a busy machine is
   a fix to nothing.
-- **Measure the premise before fixing the item.** M2.1 said `screenshots.gd` was
-  the source of phantom findings. Measured: 3/3 runs, 14 real frames each. The
-  item was dropped rather than "completed", because acting on it would have
-  replaced a working harness for no reason.
+- **Measure the premise before fixing the item.** M2.1 said `screenshots.gd` was the
+  source of phantom findings. Measured: 3/3 runs, 14 real frames each. The item was
+  dropped rather than "completed", because acting on it would have replaced a
+  working harness for no reason. The same discipline killed the U2 fix: that
+  fixture was NOT broken — the planted blind spot was caught by the existing test —
+  so the commit adds hardening and says "not a bug fix" rather than claiming credit.
+- **A gate that has never been shown to reject is not a gate.** Found twice more in
+  the second iteration, and once the FIX reproduced the bug inside itself: the first
+  version of U3's control inlined its own copy of the alpha census, so it passed no
+  matter what the real threshold became. A planted control has to travel through the
+  same code the gate uses, or it is decoration.
+- **An assert inside a test aborts the method WITHOUT failing the run.** This cost a
+  U4 test that reported PASS while tripping a SCRIPT ERROR. Demonstrating that a
+  function rejects its own bad input is not a test — the runner cannot see it — so
+  the boundary is pinned as arithmetic and the assert left to do its real job.
+- **Audit what a gate COVERS, not just whether it passes.** U1 was green on every
+  run for the life of the suite and structurally covered 15% of the event seam. The
+  question that finds these is "what would this NOT see?", not "is it red?".
