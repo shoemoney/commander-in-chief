@@ -18,23 +18,103 @@ const Determinism := preload("res://tests/test_determinism.gd")
 const TICKS := 600
 
 
+## THE STATIC HARVEST IS THE GATE. The runtime sample is corroboration only.
+##
+## This test used to assert `handled.has(t)` for every `t` in a 600-tick, 2-mode
+## SAMPLE of what the sim emitted. Measured on 2026-10-03: that sample reaches
+## **15 of the 101 event types the sim can emit** — 15%. Pushed to 12,000 scripted
+## ticks across all four modes it reaches 38, so 63 types are not reachable by that
+## input at all (they need a tank, a shop purchase, a gate route, a boss kill, a
+## pilot rescue, and so on).
+##
+## So the gate was structural for 15% of the seam and silent for the other 85%. Add
+## an event, forget the branch in main.gd, and it passes as long as nothing in the
+## torture happens to fire it — which is the exact failure this file exists to catch,
+## on the majority of the surface.
+##
+## The static harvest cannot miss one: every `{"t": "..."` literal in src/sim is a
+## type the sim can emit, whether or not any run in this suite reaches it. So the
+## harvest is now the assertion, and the sample is kept for what only a run can show:
+## that the harvest is not reading phantom strings, and that the seam is live.
 func test_emitted_events_are_all_handled() -> void:
 	var handled := _handled_types()
-	var emitted := {}   # used as a set: ev["t"] -> true
+	var declared := _declared_types()
+
+	# THE GATE: every type the sim can possibly emit must have a view handler.
+	var unhandled: Array = []
+	for t in declared.keys():
+		if not handled.has(t):
+			unhandled.append(t)
+	Runner.T.eq(unhandled.size(), 0,
+		"every event type src/sim can emit has a view handler in main.gd"
+		+ (" (unhandled: %s)" % ", ".join(unhandled) if unhandled.size() > 0 else ""))
+
+	# The harvest must not be a regex miss — a silently-empty set would make the gate
+	# above vacuous, which is the failure mode of the version this replaced.
+	Runner.T.ok(declared.size() >= 80,
+		"the static harvest found %d event types across src/sim — a regex break would "
+			% declared.size()
+		+ "make the gate above vacuous (expected >= 80)")
+	Runner.T.ok(handled.size() >= 80,
+		"the static parse found %d handled types in main.gd" % handled.size())
+
+	# The runtime sample, as CORROBORATION: it must be a subset of the harvest (no
+	# phantom), non-trivial (the seam is live), and every sampled type handled (the
+	# original check, kept because a runtime-only emitter would slip past the static one).
+	var sampled := {}
 	for mode in ["campaign", "endless"]:
 		var sim := SimWorld.new(0xC0FFEE, 2, mode)
 		for tick in TICKS:
 			sim.step([Determinism.scripted_input(tick, 0), Determinism.scripted_input(tick, 1)])
 			for ev in sim.events:
-				emitted[ev["t"]] = true
+				sampled[ev["t"]] = true
+	Runner.T.ok(sampled.size() >= 5,
+		"torture emitted only %d event types — the coverage check ran on nothing"
+			% sampled.size())
+	var phantom: Array = []
+	var sampled_unhandled: Array = []
+	for t in sampled.keys():
+		if not declared.has(t):
+			phantom.append(t)
+		if not handled.has(t):
+			sampled_unhandled.append(t)
+	Runner.T.eq(phantom.size(), 0,
+		"every runtime-observed type is in the static harvest (no phantom harvest)"
+		+ (" (phantom: %s)" % ", ".join(phantom) if phantom.size() > 0 else ""))
+	Runner.T.eq(sampled_unhandled.size(), 0,
+		"every runtime-observed type has a handler"
+		+ (" (unhandled: %s)" % ", ".join(sampled_unhandled)
+			if sampled_unhandled.size() > 0 else ""))
+	# Stated, so the next reader knows the static gate is carrying the weight and does
+	# not "helpfully" go back to sampling only.
+	Runner.T.ok(true,
+		"the static harvest covers %d types; this run's torture sample reached %d "
+			% [declared.size(), sampled.size()]
+		+ "(%.0f%%) — the SAMPLE is corroboration, the HARVEST is the gate"
+			% (100.0 * float(sampled.size()) / float(maxi(1, declared.size()))))
 
-	# Guard against a vacuously-green run: the torture must actually fire events.
-	Runner.T.ok(emitted.size() >= 5,
-		"torture emitted only %d event types — the coverage check ran on nothing" % emitted.size())
 
-	for t in emitted.keys():
-		Runner.T.ok(handled.has(t),
-			"sim emits event '%s' but the view never handles it (not in _EVENT_SOUND, not a `match kind:` case in _consume_events, not pickup/kill) — it is silently dropped" % t)
+## Every `{"t": "..."` literal in src/sim — the set of types the sim CAN emit,
+## independent of whether any run in this suite reaches it.
+##
+## Deliberately a text harvest rather than a call into the sim: a runtime set can
+## only contain what some run happened to produce, which is the limitation this
+## function exists to remove. It reads every .gd in src/sim, so an event added to a
+## file other than sim_world.gd is caught too.
+func _declared_types() -> Dictionary:
+	var out := {}
+	var re := RegEx.new()
+	re.compile("\\{\\s*\"t\"\\s*:\\s*\"([a-z_0-9]+)\"")
+	for path in DirAccess.get_files_at("res://src/sim"):
+		if not path.ends_with(".gd"):
+			continue
+		var f := FileAccess.open("res://src/sim/" + path, FileAccess.READ)
+		if f == null:
+			continue
+		for m in re.search_all(f.get_as_text()):
+			out[m.get_string(1)] = true
+		f.close()
+	return out
 
 
 ## Build the view's HANDLED set by statically reading src/main.gd as text.
