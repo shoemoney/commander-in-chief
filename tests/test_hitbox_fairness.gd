@@ -95,6 +95,25 @@ func _silhouette_or_explain(key: String) -> Dictionary:
 	return {"missing": false, "empty": false, "d": _silhouette(key)}
 
 
+## THE DEGENERATE-SPRITE PREDICATE, in one place so a control can exercise the
+## same code the census does. A sprite is degenerate if it has no pixel above the
+## census alpha, or too few to bound a body — in either case every silhouette band
+## computed from it reads Vector2.ZERO.
+const ALPHA_CENSUS := 0.35
+const MIN_LIT_PIXELS := 8
+
+
+static func _is_degenerate_alpha(img: Image) -> bool:
+	var lit := 0
+	for y in img.get_height():
+		for x in img.get_width():
+			if img.get_pixel(x, y).a > ALPHA_CENSUS:
+				lit += 1
+				if lit >= MIN_LIT_PIXELS:
+					return false
+	return true
+
+
 func _silhouette(tex_name: String) -> Vector2:
 	## The drawn opaque footprint in screen px: alpha bbox x SCALE x call scale.
 	## Returns Vector2.ZERO when the texture is missing so the caller can skip
@@ -618,3 +637,86 @@ func test_board_reach_exceeds_the_hull_standoff_on_every_axis_including_the_corn
 	Runner.T.ok(reach_px * reach_px > corner_sq,
 		"board reach (%dpx) clears the hull CORNER (%.1fpx), so a diagonal walk-up can board"
 			% [reach_px, sqrt(float(corner_sq))])
+
+
+## EVERY sprite this suite measures must actually HAVE a silhouette.
+##
+## Measured 2026-10-03: all 23 keys are solid (none zero-lit, none under 2% coverage
+## above alpha 0.35), so this is not a fix — it is the check that keeps that true.
+##
+## It matters because of the guard rewrites above. Those now FAIL on a zero
+## silhouette rather than skipping, which is right, but it left the question of
+## whether any sprite in CALL_SCALE can silently become degenerate open. The failure
+## mode is concrete: a re-export that bakes wrong (BC-compressed alpha, an off-by-one
+## crop, a layer flattened to transparent) still loads, so `Art.TEX.has(key)` is true
+## and the old "texture absent" message could never fire. Every band that reads that
+## sprite's silhouette would then measure Vector2.ZERO.
+##
+## The one guard that COULD have caught it, test_sol_guards (test_assets.gd:1619),
+## asserts ResourceLoader.exists() for paths containing "/troops/" — which covers
+## player1 and enemy_smg but not colossus_body (assets/art/colossus_body.png),
+## m_radar_tank (assets/art/mil2/radar_tank.png) or bunker (assets/art/cast2/
+## bunker.png). The other nearby pin is a SIZE table (test_assets.gd:2202), and size
+## is not ink: a fully transparent export at the right dimensions passes it.
+func test_every_measured_sprite_has_an_opaque_silhouette() -> void:
+	var thin: Array = []
+	var missing: Array = []
+	for key in CALL_SCALE.keys():
+		if not Art.TEX.has(key):
+			missing.append(key)
+			continue
+		var t: Texture2D = Art.TEX[key]
+		var img := t.get_image()
+		if img.is_compressed():
+			img.decompress()
+		var lit := 0
+		var max_alpha := 0.0
+		for y in img.get_height():
+			for x in img.get_width():
+				var a: float = img.get_pixel(x, y).a
+				if a > max_alpha:
+					max_alpha = a
+				if a > ALPHA_CENSUS:
+					lit += 1
+		if lit == 0:
+			thin.append("%s (no pixel above alpha 0.35; max %.2f)" % [key, max_alpha])
+		elif lit < 8:
+			# Fewer than 8 lit pixels cannot bound a real body, so every band
+			# computed from it is noise dressed as a measurement.
+			thin.append("%s (only %d lit pixel(s); max alpha %.2f)" % [key, lit, max_alpha])
+	Runner.T.eq(missing.size(), 0,
+		"every sprite the fairness suite measures exists in Art.TEX"
+		+ (" (missing: %s)" % ", ".join(missing) if missing.size() > 0 else ""))
+	Runner.T.eq(thin.size(), 0,
+		"every measured sprite has a real silhouette — a transparent or wrong-alpha "
+		+ "re-export would make each of its bands read Vector2.ZERO"
+		+ (" (degenerate: %s)" % ", ".join(thin) if thin.size() > 0 else ""))
+	# The harvest must not be vacuous: if CALL_SCALE were emptied or renamed, this
+	# would pass on nothing.
+	Runner.T.ok(CALL_SCALE.size() >= 20,
+		"the measured set is populated (%d sprites)" % CALL_SCALE.size())
+	# ── THE PLANTED CONTROL ──
+	#
+	# Verified 2026-10-03 by neutering the `lit < 8` threshold to `lit < 0`: the suite
+	# stayed GREEN. The assertion above only ever reports NEGATIVES, so a broken
+	# detector and a healthy sprite are indistinguishable — the same shape as a gate
+	# that has never been shown to reject.
+	#
+	# So the census is re-run here over a sprite that is degenerate BY CONSTRUCTION,
+	# built in memory rather than shipped: a fully transparent image. The point is
+	# that the SAME predicate the loop above uses runs again and must flag it. Written
+	# as a call through the shared helper rather than an inline re-implementation,
+	# because an inline copy would pass no matter what the loop's threshold became —
+	# which is exactly how plant 1 slipped through the first attempt at this control.
+	var blank := Image.create_empty(16, 16, false, Image.FORMAT_RGBA8)
+	blank.fill(Color(1.0, 0.2, 0.2, 0.0))
+	Runner.T.ok(_is_degenerate_alpha(blank),
+		"CONTROL: a fully transparent image is degenerate by the SAME predicate the loop "
+		+ "above uses, so the census can tell a bad re-export from a real sprite")
+	var speck := Image.create_empty(16, 16, false, Image.FORMAT_RGBA8)
+	speck.fill(Color(1.0, 1.0, 1.0, 0.0))
+	speck.set_pixel(1, 1, Color(1.0, 1.0, 1.0, 1.0))
+	speck.set_pixel(2, 2, Color(1.0, 1.0, 1.0, 1.0))
+	Runner.T.ok(_is_degenerate_alpha(speck),
+		"CONTROL: and two lit pixels cannot bound a body either — the threshold is "
+		+ "reachable, not decorative")
