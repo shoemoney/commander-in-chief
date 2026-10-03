@@ -619,6 +619,63 @@ func test_every_row0_chip_is_banded() -> void:
 	h.free()
 
 
+# The row-0 test above enumerates from ONE fixture: a non-shop endless row at 1P with
+# a specific set of timers. That was measured 2026-10-03 against the SOURCE and it does
+# currently cover the whole set — 14 ids reach `_fits2` and all 14 are banded — so this
+# is not a bug fix, it is the check that keeps that true.
+#
+# The fixture's blind spot is real in principle: a chip gated behind a condition the
+# fixture does not satisfy (a shop-row-only chip, a 2P-only chip, a chip needing a
+# mutator this row does not carry) is DRAWN in production and never enumerated, so
+# neither this test nor the push_error at hud.gd:4009 would ever name it. A fixture can
+# only see what it stages.
+#
+# So this harvests the SOURCE instead: every id the draw can hand to `_fits2`, which is
+# a superset of anything any fixture can reach. It also handles the one call site that
+# is not a literal — `"mutator" if si == 0 else "mutator2"` — which a literal-only
+# harvest silently misses, and which is exactly the kind of gap that leaves a row
+# unbanded without anything going red.
+func test_every_fits2_call_site_id_is_banded_at_source_level() -> void:
+	var src := FileAccess.get_file_as_string("res://src/view/hud.gd")
+	Runner.T.ok(src.length() > 0, "could not read src/view/hud.gd to harvest _fits2 call sites")
+	if src.is_empty():
+		return
+	var re := RegEx.new()
+	re.compile('_fits2\\(\\s*"([a-z0-9_]+)"')
+	var ids := {}
+	for m in re.search_all(src):
+		ids[m.get_string(1)] = true
+	# The ternary site: neither branch is a literal argument to _fits2, so the regex
+	# above cannot see either. Named explicitly, with the source text that must change
+	# if the call site is refactored — then this line stops matching and the assertion
+	# below fails rather than quietly covering one fewer chip.
+	if src.contains('"mutator" if si == 0 else "mutator2"'):
+		ids["mutator2"] = true
+	Runner.T.ok(ids.size() >= 12,
+		"the source harvest found %d _fits2 call-site ids — a regex break would make "
+			% ids.size()
+		+ "this vacuous (expected >= 12; the one non-literal site is named explicitly)")
+	var unbanded: Array = []
+	var keys: Array = ids.keys()
+	keys.sort()
+	for k in keys:
+		if not HudIcons.CHIP_PRIO.has(k):
+			unbanded.append(k)
+	Runner.T.eq(unbanded.size(), 0,
+		"every id the draw can hand to _fits2 is banded in CHIP_PRIO, so no chip can "
+		+ "reach the unbanded fallback"
+		+ (" (unbanded: %s)" % ", ".join(unbanded) if unbanded.size() > 0 else ""))
+	# The rows that are deliberately NOT _fits2 rows: the fixed economy head. Pinned so
+	# the "no unbanded ids" result above is not read as "every row is used".
+	for k in ["chest", "score", "tokens"]:
+		Runner.T.ok(HudIcons.CHIP_PRIO.has(k),
+			"'%s' is banded for ORDER only — the fixed economy head never routes through "
+				% k
+			+ "_fits2 (hud.gd:190-192)")
+		Runner.T.ok(not ids.has(k),
+			"'%s' is genuinely never passed to _fits2, so its band is order-only" % k)
+
+
 # c1-06: the streak tier-hint is ATOMIC with the streak chip — the real measure pass emits
 # ONE 'streak' candidate whose width already includes the ">xN" hint, so the hint can never
 # be dropped on its own (no silent partial chip, no separate +N tally).
