@@ -7339,7 +7339,13 @@ func _step_observer() -> void:
 				events.append({"t": "rear_breach", "x": camp_x, "y": camp_y})
 
 	if observer.is_empty():
-		if stall_ticks >= OBSERVER_STALL_TICKS:
+		# 1.4 gate-flicker fix — split spawn vs live. Accrue at half-rate while held (above) but defer
+		# SPAWN until the gate opens: spawning at tick N while held and despawning at N+1 (the `held or`
+		# arm below) flickered for one tick and never barraged, so the farm had zero whip. The deferred
+		# observer spawns the first tick the camera is free and then lives until the player actually
+		# advances OBSERVER_DESPAWN_ADVANCE past it. Endless is inert here — its Spotter comes from
+		# the wave mutator, not stall_ticks.
+		if stall_ticks >= OBSERVER_STALL_TICKS and not held:
 			observer = {
 				"x": rng.range_i(60, 580) * F_ONE,
 				"strike_cd": OBSERVER_STRIKE_CD_TICKS,
@@ -7348,14 +7354,12 @@ func _step_observer() -> void:
 			events.append({"t": "observer_spawn", "x": observer["x"],
 				"y": camera_top + OBSERVER_Y_OFFSET})
 	else:
-		# Pushing well past the observer despawns him (pressure released) — OR the camera getting
-		# held, because then that release condition is unreachable by construction: escaping costs
-		# OBSERVER_DESPAWN_ADVANCE (150px) of northward advance the clamp forbids, so an observer
-		# already up when you entered the arena is a barrage you can neither outrun nor walk away
-		# from. Endless is EXEMPT and keeps its Spotter: there the observer living until it is shot
-		# is the documented, intended pressure (it only gets the stall_ticks freeze above, which
-		# never fed anything but the view).
-		if (held and mode != "endless") or camera_top < observer["spawn_cam"] - OBSERVER_DESPAWN_ADVANCE:
+		# Live observer persists while held — keep striking. The old `held or` arm cleared it next
+		# tick before strike_cd 90 ever fired, so a gate-held farm never felt the whip. Release is
+		# now ONLY the 150px northward advance, which the clamp forbids while held, so the barrage
+		# continues until you push out or shoot it. Endless keeps its "lives until shot" pressure
+		# (it never advances, so only the shot clears it).
+		if camera_top < observer["spawn_cam"] - OBSERVER_DESPAWN_ADVANCE:
 			observer = {}
 			_clear_observer_strikes()
 			stall_ticks = 0

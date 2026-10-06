@@ -185,10 +185,12 @@ func test_stall_never_accrues_while_the_sim_holds_the_camera() -> void:
 
 
 func test_no_observer_spawns_or_persists_while_the_camera_is_held() -> void:
-	# (a) While held, the drip is throttled and the whip accrues at half-rate —
-	# observers CAN spawn (the gate farm fix), but only at the throttled cadence
-	# (~1 per 960 held ticks). Before 1.3 this was 0 while held and the gate was a
-	# farm; endless stays at 0 by exemption.
+	# 1.4 gate-flicker fix — split spawn vs live.
+	# (a) While held, SPAWN is deferred: stall accrues at half-rate (~960t to fuse) but the
+	# observer does NOT spawn until the gate opens. Before 1.4 the spawn fired while held at
+	# 480 stall and despawned next tick (flicker, never barraged) — gate farm had zero whip.
+	# Deferring keeps the throttle (bunker/spawner half-rate + zero farm coin) while the whip
+	# waits for a fair window. Endless never uses this path.
 	for mode in ["campaign", "boss_rush"]:
 		var sim := SimWorld.new(3, 1, mode)
 		sim.god_mode = true
@@ -205,32 +207,46 @@ func test_no_observer_spawns_or_persists_while_the_camera_is_held() -> void:
 			for ev in sim.events:
 				if ev["t"] == "observer_spawn":
 					spawns += 1
-		# Half-rate stall: at most ceil(held/960) observers in this window
-		var max_expected: int = int(ceil(float(held_ticks) / float(SimWorld.OBSERVER_STALL_TICKS * 2))) + 1
-		Runner.T.ok(spawns <= max_expected,
-			"%s: %d observer(s) spawned while held (%d held ticks) — expected at most %d at half-rate, unlimited spawn is the farm" % [mode, spawns, held_ticks, max_expected])
-		Runner.T.ok(spawns >= 1,
-			"%s: %d observer(s) while held — expected at least 1 at half-rate (held %d ticks, 0 was the pre-1.3 farm)" % [mode, spawns, held_ticks])
+		Runner.T.eq(spawns, 0,
+			"%s: %d observer(s) spawned while held (%d held ticks) — spawn is deferred until the gate opens, flicker while held is the bug" % [mode, spawns, held_ticks])
 
-	# ...(b) and one that was ALREADY up when you hit the wall must stand down.
-	# OBSERVER_DESPAWN_ADVANCE is 150px of northward advance the clamp forbids, so
-	# without this it is an unshakeable barrage: you cannot outrun it and you cannot
-	# walk away. (Endless is exempt by design — its Spotter lives until it is shot.)
+	# ...(b) and one that was ALREADY up when you hit the wall must KEEP STRIKING.
+	# The old `held or` despawn arm cleared it next tick before strike_cd 90 ever fired, so a
+	# gate-held farm never felt the whip. Release is now ONLY the 150px northward advance, which
+	# the clamp forbids while held, so the barrage continues until you push out or shoot it.
+	# (Endless is exempt by design — its Spotter lives until it is shot, same as before.)
 	for mode in ["campaign", "boss_rush"]:
 		var sim := SimWorld.new(3, 1, mode)
 		sim.god_mode = true
 		var inp := _push_north()
 		var seeded := false
+		var strikes_before := 0
 		for t in 4000:
 			inp.fire = (t % 8) != 0
 			if sim.camera_held():
 				if not seeded:
-					sim.observer = {"x": 300 * Fixed.ONE, "strike_cd": 120, "spawn_cam": sim.camera_top}
+					sim.observer = {"x": 300 * Fixed.ONE, "strike_cd": 90, "spawn_cam": sim.camera_top}
+					sim.strikes.clear()
 					seeded = true
+					strikes_before = 0
+				# drive 120 ticks while held — observer must persist and barrage
+				for k in 120:
+					inp.fire = (k % 8) != 0
 					sim.step([inp])
-					continue
+					if sim.observer.is_empty():
+						break
+				Runner.T.ok(not sim.observer.is_empty(),
+					"%s: live observer despawned while gate-held before advancing %dpx — it should keep barraging while held" \
+						% [mode, SimWorld.OBSERVER_DESPAWN_ADVANCE / Fixed.ONE])
+				Runner.T.ok(sim.strikes.size() > strikes_before,
+					"%s: live observer held %d ticks without a strike — it must barrage while the gate holds" % [mode, 120])
+				# now advance 150px past spawn and ensure it does despawn
+				var spawn_cam: int = sim.observer["spawn_cam"] if not sim.observer.is_empty() else sim.camera_top
+				sim.camera_top = spawn_cam - SimWorld.OBSERVER_DESPAWN_ADVANCE - 1
+				sim._prev_camera_top = sim.camera_top
+				sim.step([inp])
 				Runner.T.ok(sim.observer.is_empty(),
-					"%s: an observer that was already up when the camera got held is still firing — it can never be outrun (needs %dpx of advance the clamp forbids)" \
+					"%s: observer should despawn after advancing %dpx past spawn_cam, but it persisted" \
 						% [mode, SimWorld.OBSERVER_DESPAWN_ADVANCE / Fixed.ONE])
 				break
 			sim.step([inp])

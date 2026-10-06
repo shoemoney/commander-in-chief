@@ -13870,8 +13870,14 @@ func _draw_threat_pips() -> void:
 		if not e["alive"] or e.get("windup", 0) <= 0:
 			continue
 		var k: String = e["kind"]
+		# 1.4 windup-gated widening: sniper/grenadier/ghillie/drone/technical/mg_nest PLUS the
+		# base infantry (rusher/elite) now telegraph while winding up. A RIFLEMAN at 15-20px off
+		# the 640x360 edge is 0.3s from a locked shot and had zero pip in the first 30s because
+		# the filter excluded their kinds entirely — the off-screen threat read as a cheap death.
+		# Windup-gated so a patrolling line doesn't spam the edge; the AREA vs aimed shape/hue
+		# split still carries the dodge semantics.
 		if k != "sniper" and k != "grenadier" and k != "ghillie" and k != "drone" \
-				and k != "technical" and k != "mg_nest":
+				and k != "technical" and k != "mg_nest" and k != "rusher" and k != "elite":
 			continue
 		var sp := _to_screen(e["x"], e["y"])
 		if sp.x >= 0.0 and sp.x <= SCREEN_W and sp.y >= 0.0 and sp.y <= SCREEN_H:
@@ -13886,10 +13892,15 @@ func _draw_threat_pips() -> void:
 		var col := Color(1.0, 0.7, 0.25) if (k == "grenadier" or k == "drone") else Color(1.0, 0.32, 0.32)
 		var pf := 1.0 if _motion < 0.5 else Art.pulse(0.12)   # steady under reduce-motion
 		var perp := Vector2(-dir.y, dir.x)
-		var tip := edge + dir * (7.0 + pf * 3.0)
-		var base := edge - dir * 4.0
-		var tri := Art.rnd(PackedVector2Array([tip, base + perp * 5.0, base - perp * 5.0]))
-		Art.circle(self, edge, 9.0 + pf * 2.0, Color(col.r, col.g, col.b, 0.14 + pf * 0.08))
+		# 1.4 legibility — 9px -> 11px scrim (22px physical @ 1080p floor) with +2px arrow geometry
+		# so the pip reads at integer-scale screenshot and on ultrawide pillarbox. Base alpha
+		# 0.14 -> 0.22 (scrim) keeps the arrow legible over bright desert/snow while the pulse
+		# still breathes. Tip +2, base +2, perp +2 preserve the arrow's proportions at the
+		# larger radius (tip 7->9, base 4->6, perp 5->7).
+		var tip := edge + dir * (9.0 + pf * 3.0)
+		var base := edge - dir * 6.0
+		var tri := Art.rnd(PackedVector2Array([tip, base + perp * 7.0, base - perp * 7.0]))
+		Art.circle(self, edge, 11.0 + pf * 2.0, Color(col.r, col.g, col.b, 0.22 + pf * 0.08))
 		if k == "grenadier" or k == "drone":
 			# AREA strike incoming = HOLLOW arrow; aimed shot = filled. The
 			# amber/red hue split collapses under deuteranopia, so the shape
