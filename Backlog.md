@@ -1,7 +1,7 @@
 # Backlog
 
 Open defects, design calls and debt for Commander In Chief, as of **2026-08-24** (branch
-`main` @ `21290ee`).
+`main` @ `067f70a`).
 
 > ⚠️ **Read the severities sceptically — that is a rule this project paid for.** Handed-down
 > reports here have repeatedly named a real smell and got the consequence wrong by a whole
@@ -72,6 +72,8 @@ carries as `#1`–`#39`; where a re-confirmation added a genuinely new angle it 
 existing entry's neighbourhood rather than renumbered. Likewise of the ledger's 115 raw backlog
 reports, most were the run re-discovering findings already banked below; the 35 additions are new
 titles only. **Zero shas** map to this window — see the run-window note above for why.
+
+**Window `22efd37..067f70a` (1.3, 2026-08-24, 2 commits):** `96c3afd` (`.uid` sidecar for `probe_roll_gate`) and `067f70a` (vignette `0.12→0.04`, closed-gate coin farm) — no Backlog findings or owner decisions added or resolved; `Backlog.md` unchanged between `22efd37` and `067f70a` (`git diff 22efd37 HEAD -- Backlog.md` is empty). Counts above verified unchanged at `067f70a`.
 
 **Counts as of the 2026-08-23 merge:** **39 numbered owner decisions** (`#1`–`#39`, of which `#6`,
 `#8` and `#36` are RESOLVED) and **~100 open findings** across §2–§7. This run handed over **80
