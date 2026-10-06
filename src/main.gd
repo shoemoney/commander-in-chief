@@ -7727,10 +7727,12 @@ func _hulk_sim_cover(h: Dictionary) -> bool:
 
 
 func _draw_ready_tally() -> void:
-	## 2P shop skip is unanimous. Holding alone used to look like a dead bind.
-	if sim.mode != "endless" or sim.intermission_ticks <= 0 or sim.players.size() < 2:
+	## Shop skip is unanimous hold — per-tick ready_hold progress so solo hold is not silently discarded.
+	## ready_hold only advances while EVERY living player holds REVIVE (see sim_world.gd:_ready_up / _step_waves);
+	## holding 1/2 resets ready_hold to 0 every tick, so the HUD must show tally + fill.
+	if sim.mode != "endless" or sim.intermission_ticks <= 0:
 		return
-	if _last_inputs.size() < sim.players.size():
+	if sim.players.is_empty() or _last_inputs.size() < sim.players.size():
 		return
 	var living := 0
 	var holding := 0
@@ -7740,12 +7742,35 @@ func _draw_ready_tally() -> void:
 		living += 1
 		if i < _last_inputs.size() and (_last_inputs[i] as SimInput).revive:
 			holding += 1
-	if living < 2 or holding <= 0:
+	if living == 0:
 		return
-	var txt := "READY %d/%d — BOTH HOLD TO DEPLOY" % [holding, living]
-	if holding >= living:
-		txt = "READY %d/%d — DEPLOYING" % [holding, living]
-	Art.text_center(self, txt, 320, 54, 9, Color(1.0, 0.92, 0.55))
+	var frac := clampf(float(sim.ready_hold) / float(SimWorld.READY_HOLD_TICKS), 0.0, 1.0)
+	var txt := ""
+	var col := Color(1.0, 0.92, 0.55)
+	var show_bar := false
+	if living == 1:
+		if holding == 0 and sim.ready_hold == 0:
+			return
+		var bind_name := GameMenu.key_label(bind("revive")) if not Art.use_pad else Art.pad_button_label(pad_bind_for_glyph("revive"))
+		txt = "HOLD [%s] TO DEPLOY  %d%%  (%d/%d)" % [bind_name, int(round(frac * 100.0)), sim.ready_hold, SimWorld.READY_HOLD_TICKS]
+		show_bar = true
+	else:
+		if holding == 0:
+			return
+		if holding < living:
+			txt = "READY %d/%d — ALL HOLD  %d/%d" % [holding, living, sim.ready_hold, SimWorld.READY_HOLD_TICKS]
+			col = Color(0.88, 0.88, 0.85, 0.85)
+		else:
+			txt = "READY %d/%d  %d%% — DEPLOYING" % [holding, living, int(round(frac * 100.0))]
+			show_bar = true
+	Art.text_center(self, txt, 320, 54, 9, col)
+	if show_bar:
+		var bar_w := 80.0
+		var bar_h := 4.0
+		var bx := 320.0 - bar_w / 2.0
+		draw_rect(Rect2(bx, 68, bar_w, bar_h), Color(0, 0, 0, 0.55))
+		draw_rect(Rect2(bx, 68, bar_w * frac, bar_h), Color(1.0, 0.9, 0.4, 0.95))
+		draw_rect(Rect2(bx, 68, bar_w, bar_h), Color(1, 1, 1, 0.25), false, 1.0)
 
 
 func _draw() -> void:

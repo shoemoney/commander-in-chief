@@ -76,7 +76,9 @@ const CHIP_PRIO := {
 	"chest": 999, "score": 998, "tokens": 997,
 	# objective — live "what do I do now" readouts. shop (95) tops hostiles: the buy window is the
 	# more perishable (it closes on a timer), so on a too-tight row the shop timer survives.
-	"shop": 95, "hostiles": 90,
+	# ready (92): unanimous hold to deploy early — sits under SHOP so the perishable timer
+	# still wins, but above HOSTILES/WAVE so the deploy progress never vanishes mid-shop.
+	"shop": 95, "ready": 92, "hostiles": 90,
 	# c4-09: the "GRENADES ONLY" cue for a bullet-immune submerged diver docks DIRECTLY under
 	# HOSTILES (89) — it exists to explain that very counter (a lurking diver inflates the tally
 	# with nothing shootable on screen), so it must survive on the same crowded rows the counter
@@ -1653,6 +1655,46 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			var shoptxt := "SHOP OPEN %ds" % [(sim.intermission_ticks + 59) / 60]
 			if _fits2("shop", ICON + 13.0 + _tw(shoptxt)):
 				x = _warn_stat("hud_gunshop", shoptxt, x, y, shop_col) if shop_warn else _stat("hud_gunshop", shoptxt, x, y, shop_col)
+			# Ready-up progress: unanimous hold to deploy early. ready_hold (0..READY_HOLD_TICKS)
+			# only advances while EVERY living player holds REVIVE; solo hold stays 0 and the
+			# tally documents why (1/2 never fills). Shown as a chip + mini bar so holding
+			# alone is not silently discarded for the whole intermission.
+			var ready_living := 0
+			for rp in sim.players:
+				if rp["alive"]:
+					ready_living += 1
+			if ready_living > 0:
+				var ready_holding := 0
+				var li = main.get("_last_inputs") if main != null else null
+				if li is Array:
+					for ri in mini(sim.players.size(), li.size()):
+						if sim.players[ri]["alive"] and (li[ri] as SimInput).revive:
+							ready_holding += 1
+				elif sim.ready_hold > 0:
+					ready_holding = ready_living
+				if ready_living == 1:
+					if sim.ready_hold > 0:
+						var rpct := int(round(float(sim.ready_hold) / float(SimWorld.READY_HOLD_TICKS) * 100.0))
+						var rtxt := "DEPLOY %d%%" % rpct
+						if _fits2("ready", _tw(rtxt) + 8.0):
+							x = _text(rtxt, x, y + ICON - 3.0, Color(1.0, 0.92, 0.55)) + 8.0
+							if not _measure:
+								var rf := clampf(float(sim.ready_hold) / float(SimWorld.READY_HOLD_TICKS), 0.0, 1.0)
+								_mini_bar(Rect2(x - _tw(rtxt) - 8.0, y + 12, 36, 3), rf, Color(1.0, 0.9, 0.4))
+				else:
+					if ready_holding > 0:
+						var rcol := Color(0.88, 0.88, 0.85, 0.85) if ready_holding < ready_living else Color(1.0, 0.92, 0.55)
+						var rtxt2: String
+						if ready_holding < ready_living:
+							rtxt2 = "READY %d/%d" % [ready_holding, ready_living]
+						else:
+							var pct2 := int(round(float(sim.ready_hold) / float(SimWorld.READY_HOLD_TICKS) * 100.0))
+							rtxt2 = "READY %d/%d %d%%" % [ready_holding, ready_living, pct2]
+						if _fits2("ready", _tw(rtxt2) + 8.0):
+							x = _text(rtxt2, x, y + ICON - 3.0, rcol) + 8.0
+							if not _measure and ready_holding >= ready_living:
+								var rf2 := clampf(float(sim.ready_hold) / float(SimWorld.READY_HOLD_TICKS), 0.0, 1.0)
+								_mini_bar(Rect2(x - _tw(rtxt2) - 8.0, y + 12, 36, 3), rf2, Color(1.0, 0.9, 0.4))
 		else:
 			# WAVE identity chip (prio 85): demotable, but sits above vanity so it
 			# survives a crowded row. _stat advance minus the 2px tuck == its footprint.
