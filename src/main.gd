@@ -1754,8 +1754,8 @@ func _reset() -> void:
 	# (0xC0FFEE) and CHALLENGE SEED runs from burning the daily; _record_run's
 	# stamp stays — it re-writes the same value and owns the midnight comment.
 	if _daily and seed_v == _daily_seed() and _daily_done_seed != seed_v:
-		_daily_done_seed = seed_v
-		_persist({"daily": {"done_seed": _daily_done_seed}})
+		_daily_done_seed = seed_v # _reset arms daily lock on deal
+		_persist({"daily": {"done_seed": _daily_done_seed}}) # _reset persists attempt
 	var _mode_str := "endless" if _endless else ("boss_rush" if _boss_rush \
 		else ("arcade" if _arcade_chapter >= 1 else "campaign"))
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, _mode_str)
