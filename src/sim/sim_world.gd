@@ -3402,10 +3402,13 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 	for bk in bunkers:
 		if bk["alive"] and _point_in_aabb_expanded(x, y, bk, GRENADE_RADIUS):
 			bk["alive"] = false
-			war_chest += COIN_BUNKER
-			score += COIN_BUNKER * 10
+			# 1.3 sim#1: bunker bust while camera_held and stalled is the same farm
+			# as the bunker drip — no pay while pinned.
+			if not (camera_held() and stall_ticks >= REAR_CAMP_TICKS):
+				war_chest += COIN_BUNKER
+				score += COIN_BUNKER * 10
 			events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2,
-				"y": bk["y"] + BUNKER_H / 2, "coin": COIN_BUNKER})
+				"y": bk["y"] + BUNKER_H / 2, "coin": 0 if (camera_held() and stall_ticks >= REAR_CAMP_TICKS) else COIN_BUNKER})
 	# Explosions torch tanks in radius (the observer mortar already did; a
 	# player's own grenade now does too) — deny a parked tank to a partner, or
 	# torch the tank a partner is driving (they get the bail-boost / kamikaze
@@ -3482,6 +3485,14 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 	## score_pct: score paid at a reduced rate while still feeding the streak —
 	## the airstrike wipe's terms (see _fire_mission).
 	e["alive"] = false
+	# 1.3 sim#1: a closed gate was a safe farm — bunker/spawner drip paid war_chest
+	# while camera_held with zero whip. Kills that happen while the camera is
+	# pinned and the stall has built (i.e. the camper, not the wave-clear) grant
+	# no economy and no score. Gated on stall_ticks so a legitimate gate wave
+	# that clears before the half-rate stall fires still pays.
+	if camera_held() and stall_ticks >= REAR_CAMP_TICKS:
+		no_coin = true
+		no_score = true
 	var coin: int = COIN_ELITE if e["elite"] else COIN_RUSHER
 	if e["kind"] == "mg_nest":
 		coin = COIN_MG_NEST   # own tier: stationary/telegraphed pays between rusher and elite
@@ -4267,6 +4278,12 @@ func _step_bunkers() -> void:
 			continue
 		if not bk["alive"]:
 			continue
+		# 1.3 sim#1: while camera_held the gate is a safe farm — every 120 ticks a
+		# rusher drips from the bunker while the stall counter stays at 0 (held guard).
+		# Throttle the drip while held: pause the hatch timer so the arena does not
+		# pay you for standing still. Pruning above still runs so off-screen bunkers clear.
+		if camera_held():
+			continue
 		# CLAMPED AT 0 — the only one of these three the PLAYER can see. The reset is
 		# gated on the enemy cap but the decrement is not, so a full field drives this
 		# negative; main.gd's bunker draw builds the hatch-charge glow from 1 - spawn_cd/120, which
@@ -4437,6 +4454,11 @@ func _step_spawner() -> void:
 		else maxi(24, SPAWN_INTERVAL_TICKS - opened * 6)
 	if hard:
 		interval = maxi(16, (interval * 2) / 3)   # NG+ pours them in faster
+	# 1.3 sim#1: while camera_held the spawner was still dripping at full cadence —
+	# 24 bodies/600t at gate-1 while the camera is pinned, i.e. the farm. Halve the
+	# drip while held (interval *=2) so the observer can fire before it pays.
+	if camera_held():
+		interval *= 2
 	if tick_count % interval != 0 or enemies.size() >= MAX_ENEMIES or _spawn_grace > 0:
 		return
 	_spawn_counter += 1
@@ -7285,6 +7307,16 @@ func _step_observer() -> void:
 		stall_ticks = 0
 	elif any_alive and not held:
 		stall_ticks += 1
+	elif any_alive and held:
+		# 1.3 sim#1: while camera_held the stall counter stayed at 0, so the
+		# gate was a safe farm (93.8% held ticks, zero whip) and bunker drip paid
+		# while pinned. Accrue at half-rate while held so the observer still
+		# whips the camper (480 at 0.5/tick = 960 held ticks ~16s) but a legitimate
+		# gate wave that clears in ~5-10s never sees it. Integer-only: every other tick.
+		# Campaign/boss_rush only — endless never scrolls by design and its
+		# observer is the Spotter mutator that lives until shot, not a stall whip.
+		if mode != "endless" and tick_count % 2 == 0:
+			stall_ticks += 1
 
 	# c3 3v CHOKE-CAMP breach: camping a seg-2+ choke for REAR_CAMP_TICKS (the
 	# earlier, softer, rear-only nudge before the 480t front Observer) spawns a
@@ -7373,10 +7405,14 @@ func _resolve_strikes() -> void:
 
 
 func _kill_observer() -> void:
+	# 1.3 sim#1: observer kill while camera_held and stalled was profitable farm
+	# (2x elite coin + half-reset). No pay while pinned past the stall threshold.
+	var held_farm := camera_held() and stall_ticks >= REAR_CAMP_TICKS
 	events.append({"t": "kill", "x": observer["x"], "y": camera_top + OBSERVER_Y_OFFSET,
-		"coin": COIN_ELITE * 2, "kind": "observer"})
-	war_chest += COIN_ELITE * 2
-	score += COIN_ELITE * 20
+		"coin": 0 if held_farm else COIN_ELITE * 2, "kind": "observer"})
+	if not held_farm:
+		war_chest += COIN_ELITE * 2
+		score += COIN_ELITE * 20
 	observer = {}
 	_clear_observer_strikes()
 	# Half, not zero. Killing the spotter used to fully re-arm the 480-tick timer,

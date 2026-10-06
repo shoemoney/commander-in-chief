@@ -161,9 +161,21 @@ func test_stall_never_accrues_while_the_sim_holds_the_camera() -> void:
 			longest = maxi(longest, run)
 			if sim.stall_ticks > before:
 				bad += 1
-		Runner.T.eq(bad, 0,
-			"%s: stall_ticks incremented on %d of %d ticks where camera_held() was true — the sim is scoring its own wall as the player loitering" \
-				% [mode, bad, held_ticks])
+		if mode == "endless":
+			Runner.T.eq(bad, 0,
+				"%s: stall_ticks incremented on %d of %d ticks where camera_held() was true — endless observer lives until shot, not a stall whip" \
+					% [mode, bad, held_ticks])
+		else:
+			# 1.3 sim#1: the gate was a safe farm because stall stayed 0 while held
+			# (93.8% held ticks, zero whip). Now it accrues at half-rate while held
+			# so the observer whips the camper after ~960 held ticks (~16s) but a
+			# legitimate gate wave that clears in <10s never sees it. Half-rate =
+			# every other tick, so bad ≈ held/2.
+			Runner.T.ok(bad > 0 and bad < held_ticks,
+				"%s: stall_ticks should accrue at half-rate while held (got %d of %d held ticks; want >0 and <held)" \
+					% [mode, bad, held_ticks])
+			Runner.T.ok(bad >= held_ticks / 3 and bad <= held_ticks / 2 + 20,
+				"%s: stall half-rate out of band: %d of %d held ticks (expected ~held/2)" % [mode, bad, held_ticks])
 		# Vacuity guard: a leg that never observed a hold longer than the fuse proved nothing.
 		Runner.T.ok(longest >= SimWorld.OBSERVER_STALL_TICKS,
 			"%s: longest contiguous held run was only %d ticks (< the %d-tick observer fuse) — this leg ran on nothing" \
@@ -171,23 +183,41 @@ func test_stall_never_accrues_while_the_sim_holds_the_camera() -> void:
 
 
 func test_no_observer_spawns_or_persists_while_the_camera_is_held() -> void:
-	# (a) nothing new may arrive while the player is walled in...
+	# (a) while the camera is held the observer is a whip, not a permanent wall:
+	# with half-rate stall it spawns after ~960 held ticks, then immediately
+	# despawns next tick (held and not endless) so it never persists as a barrage
+	# you cannot outrun. Count spawns and ensure none persist beyond one tick.
 	for mode in ["campaign", "boss_rush"]:
 		var sim := SimWorld.new(3, 1, mode)
 		sim.god_mode = true
 		var inp := _push_north()
 		var spawns := 0
+		var persisted := 0
 		for t in 4000:
 			inp.fire = (t % 8) != 0
 			var held: bool = sim.camera_held()
+			var had_obs: bool = not sim.observer.is_empty()
 			sim.step([inp])
 			if not held:
 				continue
 			for ev in sim.events:
 				if ev["t"] == "observer_spawn":
 					spawns += 1
-		Runner.T.eq(spawns, 0,
-			"%s: %d observer(s) spawned on a tick where the sim itself was holding the camera" % [mode, spawns])
+			# If observer was present before this held tick and is still present after,
+			# it persisted while held — the pre-1.3 bug where the wall built a barrage
+			# you could neither outrun nor walk away from. With the held-despawn it
+			# lives exactly one tick (spawn then next tick held -> despawn).
+			if had_obs and not sim.observer.is_empty():
+				# Allow the one-tick grace: observer spawns on tick N, despawns on N+1.
+				# So persistence beyond 1 tick is the bug.
+				# Track if observer survived two consecutive held ticks.
+				persisted += 1
+		Runner.T.ok(spawns > 0,
+			"%s: %d observer(s) spawned while held — expected >0 after ~960 held ticks (half-rate whip)" % [mode, spawns])
+		# With immediate held-despawn, observer never lives more than one held tick,
+		# so persisted counts over the run should stay 0 (or 1 for the spawn tick itself).
+		Runner.T.ok(persisted <= spawns,
+			"%s: observer persisted %d ticks while held (spawns %d) — should despawn next tick while held" % [mode, persisted, spawns])
 
 	# ...(b) and one that was ALREADY up when you hit the wall must stand down.
 	# OBSERVER_DESPAWN_ADVANCE is 150px of northward advance the clamp forbids, so

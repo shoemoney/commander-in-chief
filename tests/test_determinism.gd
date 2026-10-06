@@ -727,13 +727,25 @@ const SEED := 0xDEADBEEF
 ## the 2.1x effective gain with knockdown avoidance. Player x/y are hashed,
 ## so every sample moves from tick 0 in both tortures (both press roll at t%41==0). No RNG draw added/removed, no new hashed field, pure trajectory
 ## delta — verified by re-deriving twice, A==B holds.
+## RE-RECORDED (2026-08-24, 1.3 sim#1 gate-hold safe farm). Intentional
+## economy/pacing fix: while camera_held() the gate was a safe farm —
+## 93.8% held ticks (4692/5000 north-push), stall_ticks stayed 0 (held guard
+## gated the increment), and bunker drip (24 bodies/600t) + spawner cadence
+## paid war_chest at full rate. Fix: bunker drip pauses while held, spawner
+## interval *=2 while held, stall accrues at half-rate while held (tick %2)
+## so observer fires at ~960 held ticks (16s) before farm pays, and held kills
+## past REAR_CAMP_TICKS grant 0 chest/score. Gate wave that clears in <10s
+## still pays; prolonged stall does not. ENDLESS_GOLDEN VERIFIED UNCHANGED
+## (campaign-only: endless uses _step_waves not _step_spawner, and its
+## _step_observer only runs when observer already exists, so half-rate never
+## fires). All 6 campaign samples move (hashed cadence). Re-derived twice.
 const GOLDEN: Array[int] = [
-	6044423000615395277,
-	5100615744244822346,
-	3615625611271201610,
-	6313509943363623719,
-	4914979495626228452,
-	2538892228083404284,
+	2793400566532005571,
+	6675469510438991848,
+	8570989623235374293,
+	1461379111444264610,
+	4719799377092346643,
+	4320891251341857376,
 ]
 
 

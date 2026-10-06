@@ -13938,9 +13938,9 @@ func _draw_god_badge() -> void:
 func _draw_banners(top_msg: String) -> void:
 	# Always-on cinematic vignette: a framed arcade-cabinet look on every frame
 	# (static, so it stays even under reduce-motion).
-	# wash-exempt: always-on corner vignette — edge-only by the card's own alpha, centre is untouched.
+	# wash-exempt: always-on corner vignette — edge-only by the card's own alpha, centre is untouched; 0.04 keeps corner luma loss <5% and dark-enemy silhouette contrast in the opening jungle firefight (was 0.12 -> ~12% loss, ghillie below threshold).
 	draw_texture_rect(Art.tex("ui_vignette"), Rect2(0, 0, SCREEN_W, SCREEN_H), false,
-		Color(0.0, 0.0, 0.0, 0.12))   # a1-12 VFX#5: eased 0.16->0.12 so corners keep dark-enemy contrast
+		Color(0.0, 0.0, 0.0, 0.04))   # 1.3 view#1: 0.12->0.04 so 32px corner luma loss <5% (was ~12%); screen_fx.gdshader:124 vignette stays screen-centred (to_center not focus) — correct
 	# Damage vignette: pulses on hits, sustains through the mercy window.
 	var vig := _damage_vignette
 	for p in sim.players:
