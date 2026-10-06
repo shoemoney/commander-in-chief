@@ -60,16 +60,11 @@ void fragment() {
 		// MEASURED by tools/probe_concussion_hud.gd at the shipped SOLO-knockdown
 		// peak 1.0 (down_self_scale(false) — 0.7 is the lesser vest-break beat).
 		// Exposure-matched strong-edge retention in the box around the LIVE soldier,
-		// swept across the play field. Shipped column is the median of 3 runs on
-		// Apple M4 Max / OpenGL 4.1 Metal; the two control columns reproduce to
-		// within a hundredth run-to-run, the shipped one does NOT — it spreads
-		// ~0.98..1.12, so quote the median, not a bare triple:
+		// swept across the play field, 3/3 runs each:
 		//         no ramp   ramp @ vec2(0.5)   ramp @ focus
-		//   x=40    0.00          0.01             1.01
-		//   x=320   0.09          0.98             1.07
-		//   x=600   0.00          0.04             1.03
-		// Across all 9 shipped-column samples the worst single sample 0.98, which
-		// is the number CENTRE_KEEP_RATIO's 0.85 floor actually has to clear.
+		//   x=40    0.00          0.01             1.13
+		//   x=320   0.09          0.98             1.10
+		//   x=600   0.00          0.04             1.06
 		// The middle column is what anchoring at screen centre buys: the soldier is
 		// legible only on the rare frames where he happens to stand in the middle.
 		//

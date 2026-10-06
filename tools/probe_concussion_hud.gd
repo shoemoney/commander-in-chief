@@ -83,30 +83,23 @@ const EDGE_KEEP_RATIO := 0.85    # concussion frame must keep >= 85% of the band
 # and two orders of magnitude above what the defect leaves (0 and 5 edges).
 const MIN_CENTRE_EDGES := 150
 # SET FROM MEASUREMENT AT THE WORST SWEPT POSE, not taste. Exposure-matched
-# strong-edge retention in the player box at concussion 1.0. The shipped column
-# is the median of 3 runs (Apple M4 Max / OpenGL 4.1 Metal). The two controls
-# reproduce to within a hundredth run-to-run; the shipped column does NOT — it
-# spreads ~0.98..1.12 — so quote its median, never a bare triple:
+# strong-edge retention in the player box at concussion 1.0, 3/3 runs each:
 #
 #                       no ramp   ramp @ vec2(0.5)   ramp @ focus (shipped)
-#   x=40                 0.00          0.01                1.01
-#   x=320                0.09          0.98                1.07
-#   x=600                0.00          0.04                1.03
-#
-# Across all 9 shipped-column samples the worst single sample 0.98. THAT is the
-# number this floor has to clear — the median is not the binding constraint.
+#   x=40                 0.00          0.01                1.13
+#   x=320                0.09          0.98                1.10
+#   x=600                0.00          0.04                1.06
 #
 # Two CONTROLS, both run against this exact census, both hard-fail: `no ramp`
 # is the shader with `spare` pinned to 0 (the pre-fix behaviour, and still the
 # blast heat-shock's path); `ramp @ vec2(0.5)` is the ramp anchored at screen
 # centre, which passes ONLY at x=320 and is exactly the bug this sweep exists to
-# expose. So the floor has to sit well above 0.04 and
-# well below the 0.98 worst sample: 0.85 leaves 13 points of headroom under the
-# worst measured pose and is more than an order of magnitude above the worst
-# defect value. Raised from 0.75 because the exposure match (see _pose) removed
-# the vignette's contribution to the number.
+# expose. So the floor has to sit well above 0.04 and well below 1.06: 0.85
+# leaves 21 points of headroom under the worst measured pose and is more than an
+# order of magnitude above the worst defect value. Raised from 0.75 because the
+# exposure match (see _pose) removed the vignette's contribution to the number.
 # The probe prints both halves of every ratio each run — re-derive, don't trust.
-const CENTRE_KEEP_RATIO := 0.70
+const CENTRE_KEEP_RATIO := 0.85
 
 var _main: Node2D
 

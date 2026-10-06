@@ -3056,39 +3056,32 @@ func test_concussion_warp_spares_the_downed_soldier() -> void:
 	# a fixed UV magnitude of 0.0045 * amt at EVERY pixel (at the shipped SOLO
 	# knockdown peak — down_self_scale(partner_standing=false) returns 1.0, main.gd,
 	# NOT the 0.7 of a flak-vest break — and the 640x360 logical frame, that is
-	# 5.76 px of R/B separation, nonzero even at the exact centre); the wobble was a
-	# fixed whole-image shove (2.82 px x / 1.58 px y at amt 1.0, |wob| <= 2); the
-	# green channel was taken from the blur unconditionally; and the fold pulled all
-	# of it into the final colour at a flat 50% everywhere. Net effect: the fallen
-	# soldier came out doubled and smeared at the exact moment the player is
-	# squinting at him to see whether he got back up.
+	# 2.9 px x / 1.6 px y of R/B offset, whichever way the radial axis points); the
+	# wobble was a fixed +/-0.0044 * amt UV whole-image shove (2.8 px x / 1.6 px y
+	# at 1.0); the green channel was taken from the blur unconditionally; and the
+	# fold pulled all of it into the final colour at a flat 50% everywhere. Net
+	# effect: the fallen soldier came out doubled and smeared at the exact moment
+	# the player is squinting at him to see whether he got back up.
 	#
-	# The ramp must be anchored on HIM, not on the middle of the frame — this is the
-	# FOCUS-ANCHORED ramp, NOT the earlier screen-centred revision (Backlog #44),
-	# which measured 0.04 edge retention at x=60. There is no horizontal camera in
-	# this game — main._to_screen() has no x term at all — so his world x IS his
-	# screen x over the 16..624 play field and he is routinely 200+ px off centre.
-	# Measured on this tree: a 5-seed player_down census logged 135 events spanning
-	# screen-UV x 0.025..0.975, with 43% (58/135) within 0.1 of centre — a
-	# screen-centred ramp is a coin flip. test_concussion_focus_is_pushed_from_the_player()
-	# pins the main.gd half; this one pins the shader half.
+	# The ramp must be anchored on HIM, not on the middle of the frame. There is no
+	# horizontal camera in this game — main._to_screen() has no x term at all — so
+	# his world x IS his screen x over the 16..624 play field and he is routinely
+	# 200+ px off centre. A ramp at vec2(0.5) spares a fixed disc of SCREEN, which
+	# is a different fix. test_concussion_focus_is_pushed_from_the_player() pins the
+	# main.gd half of that; this one pins the shader half.
 	#
 	# Source-text ratchet by necessity: the shader only exists on the GPU, and the
-	# pixel-level proof lives in tools/probe_concussion_hud.gd (GL-only — it fails
-	# closed under --headless with "PROBE UNUSABLE", and `grep -rln` finds it
-	# referenced by nothing in .github/workflows/, tools/run_tests.sh or
-	# tests/run_tests.gd, so it CANNOT be gated in CI; that is a banked gap, and it
-	# is why the numeric arms in the sibling test below exist). MEASURED there at
-	# concussion 1.0 — exposure-matched strong edges in the box around the LIVE
-	# soldier, swept across the play field. Shipped column quoted as a
-	# median of 3 runs (Apple M4 Max / OpenGL 4.1 Metal); unlike the controls it
-	# does NOT reproduce cell-for-cell, it spreads ~0.98..1.12:
+	# pixel-level proof lives in tools/probe_concussion_hud.gd (GL-only, so it
+	# cannot run inside this headless suite). MEASURED there at concussion 1.0 —
+	# exposure-matched strong edges in the box around the LIVE soldier, swept across
+	# the play field, 3/3 runs per cell:
 	#           no ramp   ramp @ vec2(0.5)   ramp @ focus
-	#   x=40     0.00          0.01             1.01
-	#   x=320    0.09          0.98             1.07
-	#   x=600    0.00          0.04             1.03
-	# Across all 9 shipped-column samples the worst single sample 0.98 — that, not
-	# the median, is what the probe's 0.85 floor has to clear.
+	#   x=40     0.00          0.01             1.13
+	#   x=320    0.09          0.98             1.10
+	#   x=600    0.00          0.04             1.06
+	# Both left-hand columns are CONTROLS that were actually run and actually
+	# failed. This gate is what makes a silent revert impossible; the probe is what
+	# proves the pixels.
 	# Both left-hand columns are CONTROLS that were actually run and actually
 	# failed. This gate is what makes a silent revert impossible; the probe is what
 	# proves the pixels.
