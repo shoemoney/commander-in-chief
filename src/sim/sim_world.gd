@@ -2444,6 +2444,31 @@ func _apply_supply(p: Dictionary, kind: int) -> int:
 			# the arena's cover every wave — tests/test_endless.gd:492 pins that.)
 			var off := SANDBAG_HALF_W + SANDBAG_EMBRASURE / 2
 			var vertical: bool = absi(p["aim_x"]) > absi(p["aim_y"])
+			# Trap guard: don't seal a live enemy inside 18px cover it can't be shot
+			# through (10px BULLET_HIT_RADIUS vs 18px half-width = unhittable). Same
+			# 20px enemy-proximity test as _cover_blocked so the two cover paths can't
+			# drift — check BOTH future segment positions, not the center (which is the
+			# empty embrasure and would miss an enemy on the wall itself).
+			var sbs_blocked := false
+			var s1x: int = sbx if vertical else sbx - off
+			var s1y: int = sby - off if vertical else sby
+			var s2x: int = sbx if vertical else sbx + off
+			var s2y: int = sby + off if vertical else sby
+			for e in enemies:
+				if not e["alive"]:
+					continue
+				if (absi(e["x"] - s1x) < 20 * F_ONE and absi(e["y"] - s1y) < 20 * F_ONE) \
+						or (absi(e["x"] - s2x) < 20 * F_ONE and absi(e["y"] - s2y) < 20 * F_ONE):
+					sbs_blocked = true
+					break
+			if sbs_blocked:
+				# Defense-in-depth: _try_buy already denies before spending, but
+				# _apply_supply can be reached via crates so guard here too. No
+				# sandbags appended, no plant event — the buy already spent, so
+				# this is the "you paid but couldn't plant" trap the _try_buy
+				# guard exists to prevent; _try_buy's deny is the player-visible
+				# path, this is the safety net.
+				return (p[key] - before) if key != "" else 1
 			# Both segments are one paid object economically. The stable local tag lets
 			# every damage path remove the pair atomically, so the shared field can
 			# never truthfully display 11/12 while a two-slot purchase is denied.
@@ -2669,6 +2694,29 @@ func _try_buy(p: Dictionary, kind: int) -> void:
 		events.append({"t": "deny", "x": p["x"], "y": p["y"],
 			"why": "cap" if player_bags + 2 > SANDBAG_FIELD_CAP else "tank"})
 		return
+	if kind == 4:
+		# Enemy trap guard: don't let the player hand-build the in-cover trap
+		# that _spawn_cover_at / _cover_blocked already prevents for spawns and
+		# arena drops (SANDBAG_HALF_W 18px > BULLET_HIT_RADIUS 10px = unhittable
+		# ghillie if sealed inside). Same 20px test as _cover_blocked, checked
+		# against BOTH future segment positions (the center is empty embrasure).
+		# ASSUMPTION: deny preserves coins (reversible — player can re-aim and retry)
+		# rather than spending and planting nothing; matches the cap/tank denials above.
+		var sbx2: int = p["x"] + Fixed.mul(p["aim_x"], CLAYMORE_PLANT_OFFSET)
+		var sby2: int = p["y"] + Fixed.mul(p["aim_y"], CLAYMORE_PLANT_OFFSET)
+		var off2: int = SANDBAG_HALF_W + SANDBAG_EMBRASURE / 2
+		var vertical2: bool = absi(p["aim_x"]) > absi(p["aim_y"])
+		var s1x2: int = sbx2 if vertical2 else sbx2 - off2
+		var s1y2: int = sby2 - off2 if vertical2 else sby2
+		var s2x2: int = sbx2 if vertical2 else sbx2 + off2
+		var s2y2: int = sby2 + off2 if vertical2 else sby2
+		for e in enemies:
+			if not e["alive"]:
+				continue
+			if (absi(e["x"] - s1x2) < 20 * F_ONE and absi(e["y"] - s1y2) < 20 * F_ONE) \
+					or (absi(e["x"] - s2x2) < 20 * F_ONE and absi(e["y"] - s2y2) < 20 * F_ONE):
+				events.append({"t": "deny", "x": p["x"], "y": p["y"], "why": "blocked", "kind": kind})
+				return
 	if kind == 3 and mode == "endless" and intermission_ticks > 0:
 		# A strike bought into the intermission lands on a provably empty field
 		# (see _supply_full kind 3) — refuse it with the TRUTHFUL reason, ahead
@@ -6395,6 +6443,13 @@ func _cover_blocked(bx: int, by: int, recycle: bool) -> bool:
 	## player-BOUGHT sandbag is never recycled (you don't bulldoze what someone
 	## paid for) and rocks stop being eaten at ARENA_ROCK_FLOOR, so both keep
 	## blocking; with 6 slots x 3-8 cells there is always somewhere else.
+	# Enemy trap guard: a sandbag/rock dropped on a live enemy seals it inside
+	# cover larger than BULLET_HIT_RADIUS (sandbag 18px, rock 16px vs hit 10px)
+	# making the enemy unhittable — same arithmetic as the sandbag-plant trap.
+	# 20px matches the sandbag/rock dedupe radius so the two predicates stay in sync.
+	for e in enemies:
+		if e["alive"] and absi(e["x"] - bx) < 20 * F_ONE and absi(e["y"] - by) < 20 * F_ONE:
+			return true
 	var blocked := false
 	for si in range(sandbags.size() - 1, -1, -1):
 		var sb: Dictionary = sandbags[si]
