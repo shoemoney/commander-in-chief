@@ -6412,6 +6412,21 @@ func _cover_blocked(bx: int, by: int, recycle: bool) -> bool:
 				rocks.remove_at(ri)
 			else:
 				blocked = true
+	# Live rooted units are bullet cover that the spawn seam (_spawn_cover_at)
+	# already guards — a kind-0 rock (half 16) on a ghillie (hit 10) is a
+	# permanent 13px trap: bullets die on the rock before they reach the 10px
+	# hit disc. Arena/supply drops must not plant on them. No recycle (enemies
+	# are not cover to be cratered); just block. Uses the same 20*F_ONE square
+	# the sandbag/rock dedupe already pays so the threshold cannot drift apart.
+	# ASSUMPTION: only ROOTED_KINDS block — roaming rushers move off the cell
+	# the same tick and never create the "blocks bullets but not movement" trap.
+	for e in enemies:
+		if not e.get("alive", true):
+			continue
+		if not ROOTED_KINDS.has(e["kind"]):
+			continue
+		if absi(e["x"] - bx) < 20 * F_ONE and absi(e["y"] - by) < 20 * F_ONE:
+			blocked = true
 	return blocked
 
 
