@@ -888,6 +888,13 @@ var _tanks_stepped_this_tick: bool = false
 
 
 func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -> void:
+	# Static guard for the endless pinned-camera invariant (see ROOTED_SPAWN_Y_SPAN).
+	# If this fires, the rooted row would exceed the player's reachable band and
+	# produce off-screen turrets in endless with no sweep cull (camera_top never moves).
+	assert(ROOTED_SPAWN_Y_MIN + ROOTED_SPAWN_Y_SPAN - 1 <= CAMERA_BAND_BOTTOM / F_ONE,
+		"ROOTED_SPAWN_Y_SPAN overflows reachable band: would strand endless turrets off-screen past camera_top+344 with no cull")
+	assert(ROOTED_SPAWN_Y_MIN + ROOTED_SPAWN_Y_SPAN - 1 <= 360,
+		"rooted row must stay inside VIEW_H 360 for endless pinned camera")
 	mode = game_mode
 	rng = SimRng.new(seed_value)
 	camera_top = -VIEW_H
@@ -3716,10 +3723,13 @@ func _step_enemies() -> void:
 		# Rally masts have NO sweep exemption. They used to be the one entity that could
 		# never be swept; a sibling pass then made them spawn at camera_top+40 (inside the
 		# reachable band) instead of above the player's own ceiling. Under endless's FIXED
-		# camera an in-band rooted mast can never exceed camera_top+420, so sweeping
-		# unconditionally cannot remove a live one — and campaign's ratcheting camera needs
-		# the sweep or every mast walked past lives forever in enemies[] and in the per-tick
-		# _broadcasts aura scan. One rule beats a mode-conditional special case.
+		# camera (pinned at -VIEW_H, never stepped) an in-band rooted mast can never exceed
+		# camera_top+420 (max row 287 < 420), so sweeping unconditionally cannot remove a live
+		# one — and campaign's ratcheting camera needs the sweep or every mast walked past
+		# lives forever in enemies[] and in the per-tick _broadcasts aura scan. One rule beats
+		# a mode-conditional special case. Bound enforced at ROOTED_SPAWN_Y_SPAN: pushing the
+		# row past CAMERA_BAND_BOTTOM 344 strands turrets south of the clamp but north of this
+		# 420 line — permanent off-screen fire with no cull.
 		if not e["alive"] or e["y"] > camera_top + 420 * F_ONE:
 			enemies.remove_at(i)
 			continue
@@ -4713,8 +4723,16 @@ func _spawn_courier() -> void:
 
 
 # c4-19: the rooted spawn ROW is a range, not a pixel. See _rooted_spawn_y().
+# ENDLESS INVARIANT: camera_top is pinned at -VIEW_H forever — step() never
+# calls _step_camera for endless (see step(), camera_held(), _step_camera).
+# The only despawn is y > camera_top + 420 (sweep in _step_enemies). A row
+# past CAMERA_BAND_BOTTOM 344 would strand a live turret south of the player's
+# clamp but north of the sweep — permanent, off-screen, unkillable. Keep the
+# whole row in-band: ROOTED_SPAWN_Y_MIN + ROOTED_SPAWN_Y_SPAN - 1 <= 344
+# (<= VIEW_H 360, <= sweep 420 by construction). Raising SPAN past ~344 is
+# silent breakage — no cull ever fires to clean it up.
 const ROOTED_SPAWN_Y_MIN := 56    # >= 36dcff1's camera_top+40 plus the kind-0 rock's 12px half-height
-const ROOTED_SPAWN_Y_SPAN := 232  # 56..287, wholly inside _clamp_actor's 16 .. CAMERA_BAND_BOTTOM 344
+const ROOTED_SPAWN_Y_SPAN := 232  # 56..287, wholly inside _clamp_actor's 16 .. CAMERA_BAND_BOTTOM 344 — see invariant above
 
 
 func _rooted_spawn_y(x: int) -> int:
@@ -5294,6 +5312,12 @@ func _step_fords() -> void:
 
 
 func _step_camera() -> void:
+	## Endless never steps the camera — camera_top is pinned at -VIEW_H for the
+	## entire run (step() does not call this for endless; camera_held() returns
+	## true by mode). The sweep cull at camera_top+420 is therefore the ONLY
+	## endless despawn, and rooted spawns must stay <= camera_top+CAMERA_BAND_BOTTOM
+	## (see ROOTED_SPAWN_Y_SPAN invariant) or they become off-screen turrets
+	## with no cull. Campaign/arcade ratchet + gate-hold below.
 	# c4 2v: lane-block TELEGRAPH — emit warn/seal/clear cues for the band in view
 	# so a seal reads before it commits. Checksum-excluded events; pure phase read.
 	if is_campaign_world():
@@ -5336,10 +5360,14 @@ func _step_camera() -> void:
 			camera_top = maxi(desired, camera_top - MAX_CAM_STEP)
 
 	if mode != "campaign" and mode != "arcade":
-		return   # boss_rush pre-authors its whole gate gauntlet in _init; nothing to stream
-		# (endless never reaches here at all -- see step()). Arcade reuses the
-		# FULL campaign streaming machinery below (it's the same authored world,
-		# just entered mid-way via jump_to_chapter()), so it must NOT no-op here.
+		return   # boss_rush pre-authors its whole gate gauntlet in _init; nothing to stream.
+		# Endless never reaches here at all — step() skips _step_camera entirely and
+		# camera_top stays pinned at -VIEW_H, so the sweep line y > camera_top+420 is
+		# the only endless cull and ROOTED_SPAWN_Y_SPAN must keep the row <= 344 to
+		# avoid permanent off-screen turrets (see invariant at ROOTED_SPAWN_Y_SPAN).
+		# Arcade reuses the FULL campaign streaming machinery below (it's the same
+		# authored world, just entered mid-way via jump_to_chapter()), so it must NOT
+		# no-op here.
 
 	# Stream the world ahead of the scroll: bunkers between gates, a gate
 	# arena every GATE_SPACING, a parked tank between each pair of gates.
