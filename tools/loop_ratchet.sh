@@ -47,7 +47,7 @@ fail=0
 # is about elapsed time since the last completed iteration, not version equality.
 if [ -f "$STAMP" ]; then
   prev=$(cat "$STAMP")
-  age=$(( $(date +%s) - $(stat -f %m "$STAMP" 2>/dev/null || echo 0) ))
+  age=$(( $(date +%s) - $(stat -f %m "$STAMP" 2>/dev/null || stat -c %Y "$STAMP" 2>/dev/null || echo 0) ))
   mins=$(( age / 60 ))
   if [ "$VERSION" != "$prev" ]; then
     echo "ok    work in flight: stamped v$prev, now at v$VERSION"
