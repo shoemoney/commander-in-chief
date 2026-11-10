@@ -209,6 +209,23 @@ func _pose(idx: int) -> void:
 	for w in main._wheel:
 		w["open"] = false
 		w["sel"] = -1
+	# The debrief is view state, not sim state, so a fresh sim does not clear it. The
+	# defeat-card pose sets _debrief = true; before this scrub that K.I.A. card rode along
+	# into every later pose that did not happen to overwrite it — the Endless shop and the
+	# off-screen-pip shot were both captured UNDER a casualty report nobody had earned
+	# (seen in the 19-shot capture, 2026-11-10). Same rule as the garnish above: a pose
+	# starts clean and opts in.
+	main._debrief = false
+	main._result_t = 0.0
+	main._run_vp_gain = 0
+	# Same class, older: the OPTIONS pose turns REDUCE MOTION, COLORBLIND, ASSIST and
+	# FULLSCREEN on to exercise the header summary, and nothing ever turned them off. It
+	# went unnoticed while only menu poses followed it; the first gameplay pose added after
+	# it rendered with the colourblind palette and CB / RM status pips in its corner.
+	main._motion = 1.0
+	main._set_colorblind(false)
+	main._assist = false
+	main._fullscreen = false
 	main._set_text_scale(100)   # each pose starts from the shipped baseline; a shot may opt up
 	if shots[current].has("dress"):
 		shots[current]["dress"].call(main)   # view-layer garnish (fx, recoil)
@@ -239,6 +256,10 @@ func _dress_victoly(m: Node2D) -> void:
 	# fade a t=0 pose would render the card near-invisible instead. Every other shot in
 	# this harness poses a SETTLED state — this one never did. It does now.
 	m._result_t = 1.0
+	# A full campaign clear banks 22 VP (2 per sector + 10 for the win). Unposed, the card's
+	# new progression row read "0 VP BANKED" on the one screen that is supposed to brag.
+	m.vet_points = 83
+	m._run_vp_gain = 22
 	# The card's widest row ("%d¢ WAR CHEST BANKED -> +%s") reads _victory_banked /
 	# _victory_banked_score, not sim.war_chest (the sim zeroes that on the same tick —
 	# see sim_world.gd's victory payout). Unposed both stay 0, rendering the narrowest
