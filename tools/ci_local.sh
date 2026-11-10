@@ -2,7 +2,8 @@
 # Run the BLOCKING jobs of .github/workflows/ci.yml locally, on one machine.
 #
 #   tools/ci_local.sh              # lint + test + gl-capture
-#   tools/ci_local.sh lint test    # a subset (any of: lint test gl)
+#   tools/ci_local.sh lint test    # a subset (any of: lint test gl export)
+#   tools/ci_local.sh export       # opt-in: this host's leg of export-smoke (needs templates)
 #   CI_LOCAL_LOGS=/abs tools/ci_local.sh   # keep the logs somewhere specific
 #
 # WHY this exists: hosted CI is a backstop, and a backstop that is not running is not
@@ -13,8 +14,9 @@
 #
 # It mirrors ci.yml; it does not replace it. What it CANNOT tell you is the one thing
 # the hosted matrix exists for: that the determinism goldens are bit-identical on
-# macOS-arm64 and Windows as well as on the box you ran this on. It also skips the
-# export-smoke job (needs export templates) and the advisory perf/soak jobs.
+# macOS-arm64 and Windows as well as on the box you ran this on. `export` is opt-in
+# (it needs the export templates installed, and covers only the Linux leg of the
+# 3-OS export-smoke matrix); the advisory perf/soak jobs are not mirrored at all.
 #
 # Every Godot process gets a private HOME, so this is safe to run beside other
 # sessions — same reason as tools/run_tests.sh, which it uses wherever that fits.
@@ -139,13 +141,30 @@ job_gl() {
 	step gl_probe gl_probe
 }
 
+# Linux leg of export-smoke. Runs under the REAL home on purpose: the export
+# templates live in ~/.local/share/godot/export_templates, and nothing here touches
+# user:// until verify_native_export.py, which isolates its own runs.
+job_export() {
+	echo "export-smoke (Linux x86_64):"
+	local art=build/CommanderInChief-linux.x86_64
+	export_linux() {
+		"$GODOT" --headless --path . --export-release "Linux x86_64" "$art" >"$LOGS/export.log" 2>&1
+		python3 tools/verify_runtime_log.py "$LOGS/export.log" && chmod +x "$art"
+	}
+	attribution() { python3 tools/package_attribution.py "$art" && python3 tools/package_attribution.py "$art" --verify; }
+	step export_release     export_linux
+	step export_attribution attribution
+	step export_native      python3 tools/verify_native_export.py "$art" --engine godot --log-dir "$LOGS/native-smoke"
+}
+
 [ $# -gt 0 ] || set -- lint test gl
 for job in "$@"; do
 	case "$job" in
 		lint) job_lint ;;
 		test) job_test ;;
 		gl) job_gl ;;
-		*) echo "ci_local.sh: unknown job '$job' (lint | test | gl)" >&2; exit 2 ;;
+		export) job_export ;;
+		*) echo "ci_local.sh: unknown job '$job' (lint | test | gl | export)" >&2; exit 2 ;;
 	esac
 done
 
