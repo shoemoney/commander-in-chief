@@ -273,3 +273,8 @@ msgstr "装甲"
 
 msgid "CAPTIONS: ALL, SMART (FADES SEEN CUES) OR OFF. SAVE IN OPTIONS."
 msgstr "字幕: ALL、SMART(見た警告を薄く)、OFF。オプションで保存。"
+msgid "FLAMETHROWER — BURNS INFANTRY + SANDBAGS UP CLOSE. ARMOR LAUGHS"
+msgstr "火炎放射器 — 近距離で歩兵と土のうを焼く。装甲には無力"
+
+msgid "ROCKET LAUNCHER — SLOW, CRACKS ARMOR. FIRES WHEN LINED UP"
+msgstr "ロケットランチャー — 低速、装甲を砕く。射線が合うと発射"

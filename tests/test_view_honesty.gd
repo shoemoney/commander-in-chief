@@ -584,6 +584,7 @@ func test_px_is_only_ever_applied_to_fixed_point_quantities() -> void:
 ## canvases (tools/bake_sprites.py) whose SCALE is 1 / call scale (net 1.0), so their
 ## rows here are the baked canvas, not a master. Re-bake -> re-measure these rows.
 const SPRITE_CANVAS := {
+	"icon_flame": 64, "icon_rocket": 64,   # special-weapon chip + capsule art (tools/gen_ui_icons.py)
 	"ammobox": 160, "barbedwire": 220, "barrel": 160, "barricade": 200, "barrier": 220, "bridge_mid": 220,
 	"bridge_ramp": 220, "bunker": 128, "bunker2": 128, "cactus_dead1": 120, "cactus_dead2": 120,
 	"cactus_dead3": 120, "cactus_large": 120, "cactus_small": 96, "cap_claymore": 128, "cap_flash": 128,

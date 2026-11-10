@@ -88,6 +88,8 @@ SIZES = {
     "icons/icon_grenade": (128, 128),
     "icons/icon_medal": (128, 128),
     "icons/icon_rend": (64, 64),
+    "icons/icon_flame": (64, 64),
+    "icons/icon_rocket": (64, 64),
     "icons/icon_skull": (128, 128),
     "icons/icon_vest": (128, 128),
 }
@@ -539,6 +541,31 @@ def i_icon_rend(p):
     p.keyline(0.030)
 
 
+def i_icon_flame(p):
+    """Special-weapon chip / capsule: a flame licking up off a nozzle. 64px canvas."""
+    p.rect(0.40, 0.72, 0.60, 0.92, (74, 78, 70), r=0.04)
+    p.rect(0.36, 0.66, 0.64, 0.74, (110, 114, 104), r=0.03)
+    p.poly([(0.50, 0.06), (0.74, 0.34), (0.72, 0.60), (0.62, 0.68), (0.38, 0.68),
+            (0.28, 0.58), (0.30, 0.36)], (232, 110, 36))
+    p.poly([(0.50, 0.24), (0.64, 0.44), (0.62, 0.62), (0.56, 0.68), (0.44, 0.68),
+            (0.38, 0.60), (0.38, 0.44)], (250, 190, 64))
+    p.poly([(0.50, 0.44), (0.57, 0.56), (0.55, 0.66), (0.45, 0.66), (0.43, 0.56)],
+           (255, 240, 170))
+    p.keyline(0.030)
+
+
+def i_icon_rocket(p):
+    """Special-weapon chip / capsule: a rocket round, nose up. 64px canvas."""
+    p.poly([(0.50, 0.04), (0.64, 0.24), (0.36, 0.24)], (196, 62, 48))
+    p.rect(0.36, 0.22, 0.64, 0.72, (176, 180, 170), r=0.03)
+    p.rect(0.36, 0.22, 0.46, 0.72, (214, 218, 208), r=0.03)
+    p.rect(0.36, 0.40, 0.64, 0.47, (196, 62, 48))
+    p.poly([(0.36, 0.56), (0.20, 0.82), (0.36, 0.76)], (120, 126, 116))
+    p.poly([(0.64, 0.56), (0.80, 0.82), (0.64, 0.76)], (120, 126, 116))
+    p.poly([(0.42, 0.72), (0.58, 0.72), (0.50, 0.96)], (250, 170, 52))
+    p.keyline(0.030)
+
+
 MENU = {
     "book": i_book, "controller": i_controller, "keyboard": i_keyboard,
     "mi_camera": i_mi_camera,
@@ -552,7 +579,7 @@ PICK = {
     "icon_ammo": i_icon_ammo, "icon_grenade": i_icon_grenade, "icon_coin": i_icon_coin,
     "icon_fuel": i_icon_fuel, "icon_airstrike": i_icon_airstrike,
     "icon_medal": i_icon_medal, "icon_skull": i_icon_skull, "icon_vest": i_icon_vest,
-    "icon_rend": i_icon_rend,
+    "icon_rend": i_icon_rend, "icon_flame": i_icon_flame, "icon_rocket": i_icon_rocket,
 }
 
 

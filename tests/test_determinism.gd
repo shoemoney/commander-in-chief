@@ -1044,6 +1044,11 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## any shot, so sample 0 (t = 600) moves too — measured, not assumed. The torture now WIPES at
 ## TICK 3123 (was alive at 3600; 4 knockdowns either way, still wave 3), so sample 5 is
 ## frozen post-wipe state.
+## RE-RECORDED (2026-11-10 -- SPECIAL WEAPONS): ONLY sample 1 moves (8359... -> 7598...). The
+## Endless crate pool grew from 5 to 7 kinds (flamethrower, rocket launcher), so the wave-1 shop's
+## Fisher-Yates draws a different crate from the same rng stream; later samples reconverge. The
+## campaign GOLDEN is untouched: every new field is hashed conditionally (weapon held / rocket in
+## flight / scorched bag), and the rare-capsule roll is byte-identical below sector 2.
 const ENDLESS_GOLDEN: Array[int] = [
 	2690452510761397110,
 	8359227894364836834,

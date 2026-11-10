@@ -20,7 +20,7 @@ const KNOWN := {
 		"roll_prev", "grenade_buf", "fire_prev",
 		"roll_iframe", "roll_dx", "roll_dy", "boost_ticks", "in_tank", "interact_prev", "buy_prev",
 		"grenade_prev", "vest", "hurt_iframes", "pierce_ticks", "spread_ticks", "triple",
-		"rend_ticks", "smoke_ticks", "claymores", "flush_cd",
+		"rend_ticks", "smoke_ticks", "claymores", "flush_cd", "weapon", "wpn_ammo",   # special weapons: HASHED, conditionally (only while one is held)
 		# lead_x/lead_y/lead_t are the colossus mortar's velocity sample of this
 		# player (_colossus_strike, the gunship stx/sty/st_at idiom). EXCLUDED:
 		# pure derived history of already-hashed x/y/tick_count, never read back

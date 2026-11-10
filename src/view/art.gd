@@ -94,6 +94,8 @@ const TEX := {
 	"icon_medal": preload(ART + "icons/icon_medal.png"),
 	"icon_airstrike": preload(ART + "icons/icon_airstrike.png"),
 	"icon_rend": preload(ART + "icons/icon_rend.png"),  # 64px canvas (siblings 128) — drawn scaled
+	"icon_flame": preload(ART + "icons/icon_flame.png"),    # special-weapon chip + capsule (64px)
+	"icon_rocket": preload(ART + "icons/icon_rocket.png"),
 	# Apocalypse HUD sprites (imported 2D kit, assets/art/hud/).
 	"hud_star": preload(ART + "hud/ICON_Map_Star.png"),
 	"hud_flag": preload(ART + "hud/ICON_Map_Flag.png"),
@@ -568,6 +570,7 @@ const SCALE := {
 	# whole pickup family shares. Pinned by test_view_honesty.gd::SPRITE_CANVAS.
 	"cap_pierce": 0.56, "cap_spread": 0.56, "cap_triple": 0.56, "cap_rend": 0.56,
 	"cap_claymore": 0.48, "cap_smoke": 0.48, "cap_flash": 0.48,
+	"icon_flame": 0.7, "icon_rocket": 0.7,   # 64px canvas -> ~25px ground capsule (the cap_* footprint)
 	# hud_flag is the ONE map-marker glyph that also draws through _spr (the pennant on
 	# the spotter's radar truck, main.gd at spr_scale 0.04). That 0.04 was authored against
 	# the uncapped 256px source; a later sweep set size_limit=128 and halved the flag to a

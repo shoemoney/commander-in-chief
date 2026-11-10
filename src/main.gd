@@ -552,7 +552,7 @@ const WHEEL_TEXT_ROWS := [WHEEL_ROW_CARD, WHEEL_ROW_WARN, WHEEL_ROW_LABEL, WHEEL
 ## the same silence in a new costume — tests/test_view_honesty.gd pins this table against
 ## SimWorld.DEATH_LOSS_KEYS so a field added tomorrow gets a word or goes red.
 const LOSS_NOUN := {
-	"vest": "FLAK VEST", "triple": "TRIPLE SHOT", "claymores": "CLAYMORES",
+	"vest": "FLAK VEST", "triple": "TRIPLE SHOT", "claymores": "CLAYMORES", "weapon": "SPECIAL WEAPON",
 	"pierce_ticks": "PIERCING ROUNDS", "spread_ticks": "TRENCH GUN",
 	"rend_ticks": "REND ROUNDS", "smoke_ticks": "SMOKE",
 	"token": "COMMENDATION", "streak": "FLAWLESS STREAK",
@@ -563,6 +563,10 @@ const _EVENT_SOUND := {
 	"shot": ["shot", -9.0, 1.0],
 	"tank_shot": ["tank_shot", -3.0, 1.0],
 	"throw": ["throw", -8.0, 1.0],
+	"rocket_launch": ["tank_shot", -7.0, 1.4],   # special weapons: the launcher thump...
+	"flame": ["shot", -17.0, 0.5],               # ...the flame's low rasp (a burst every 4 ticks)
+	"weapon_empty": ["click_dry", -8.0, 0.7],     # magazine spent: the MG comes back
+	"bag_burn": ["vest_break", -10.0, 0.6],       # a sandbag burnt through
 	"roll": ["roll", -8.0, 1.0],
 	# "explosion" plays in _ev_explosion with proximity-scaled volume, not here.
 	# "kill" plays in the match branch with streak-scaled pitch, not here.
@@ -3208,6 +3212,8 @@ func _consume_events() -> void:
 						% (Art.pad_button_label(pad_bind_for_glyph("interact")) if Art.use_pad else GameMenu.key_label(bind("interact"))))
 					9: _hint("smoke", "SMOKE — BLINDS RIFLE AIM. NESTS STILL TRACK. SHELLS STILL FALL")
 					10: _hint("flashbang", "FLASHBANG — DETONATES ON GRAB. INFANTRY ONLY.")
+					12: _hint("flamethrower", TranslationServer.translate("FLAMETHROWER — BURNS INFANTRY + SANDBAGS UP CLOSE. ARMOR LAUGHS"))
+					13: _hint("rocket", TranslationServer.translate("ROCKET LAUNCHER — SLOW, CRACKS ARMOR. FIRES WHEN LINED UP"))
 				_trauma = minf(1.0, _trauma + 0.12)
 				# Per-capsule pitch: all four rares shared one 1.4 jingle — grabbing
 				# REND sounded identical to grabbing FLASHBANG. kind 7..10 -> 1.2..1.56.
@@ -4579,7 +4585,8 @@ func _ev_explosion(ev: Dictionary) -> void:
 			_flash_alpha = efa
 			_flash_col = EXPLOSION_FLASH_COL
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
-	if not barrel:
+	WeaponFx.on_event(ev, _fx)   # a rocket draws its own ring at the true splash radius
+	if not barrel and ev.get("src", "") != "rocket":
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 		"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
@@ -8511,10 +8518,10 @@ const _CORPSE_TEX := {"rusher": "enemy_smg", "elite": "enemy_assault", "sniper":
 # clampi(kind - 4, 0, size-1) — an unknown kind must degrade, never crash (the
 # kind-4/5 glyph OOB bug once errored the pickup draw every frame).
 const _CAPSULE_TEX: Array[String] = ["cap_pierce", "cap_spread", "cap_triple", "cap_rend",
-	"cap_claymore", "cap_smoke", "cap_flash"]
-const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CLAYMORE", "SMOKE", "FLASH"]
+	"cap_claymore", "cap_smoke", "cap_flash", "cap_flash", "icon_flame", "icon_rocket"]   # [7] = kind 11 (sandbag: a wheel buy, never a pickup); [8]/[9] = kinds 12/13
+const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CLAYMORE", "SMOKE", "FLASH", "SANDBAG", "FLAMER", "ROCKET"]
 const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "TRIPLE SHOT!",
-	"REND ROUNDS!", "CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!"]
+	"REND ROUNDS!", "CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!", "SANDBAGS!", "FLAMETHROWER!", "ROCKET LAUNCHER!"]
 const GRENADE_PREVIEW_COL := Color(0.5, 0.85, 1.0)   # a2-15 LEG#5: FRIENDLY grenade preview is COOL (b>r), distinct from the warm/red enemy strike telegraph
 const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-underlay — spans ~2.1x the kill radius (soft edge past the amber ring), 0.30a black
 # a3-06: muzzle heat caps. The ignition pop is warmed OFF white-hot (pop_lerp toward white
@@ -8562,7 +8569,7 @@ const ELITE_AURA_ALPHA := {"base": 0.12, "pulse": 0.07}   # a3-12: base holds un
 const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
 	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
-	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family
+	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65), Color(0.8, 0.7, 0.5), Color(1.0, 0.55, 0.2), Color(1.0, 0.4, 0.35)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family
 
 
 static func _tiny_decor_no_rim(tex_name: String, screen_w: float) -> bool:
@@ -11334,6 +11341,10 @@ static func pickup_full_text(kind: int) -> String:
 	match kind:
 		6:
 			return "TRIPLE SHOT OWNED"
+		12:
+			return "FLAMETHROWER FULL"
+		13:
+			return "LAUNCHER FULL"
 		8:
 			return "CLAYMORES FULL"
 	return "ALREADY STOCKED"
@@ -13634,6 +13645,7 @@ func _draw_projectiles() -> void:
 		draw_set_transform(bpos, dir.angle(), Vector2.ONE)
 		draw_texture_rect(bullet_tex, Rect2(-tlen, -twid / 2.0, tlen, twid), false, bullet_mod)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	WeaponFx.draw_world(self, sim, _to_screen, _motion)
 	for b in sim.enemy_bullets:
 		var bpos := _to_screen(b["x"], b["y"])
 		if bpos.y < -20.0 or bpos.y > 380.0:

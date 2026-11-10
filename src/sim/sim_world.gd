@@ -510,9 +510,9 @@ const SHOP_CLAYMORE_COST := 50       # crate-only: one carried charge (grenade 3
 # nothing to shoot, and the flashbang would resolve into an empty arena.
 # Airstrike (3) still stays out — a priced crate is bought on PROXIMITY, so it
 # would call a strike on an empty screen; it remains a telegraphed wheel buy.
-const CRATE_POOL: Array[int] = [0, 1, 2, 6, 8]
+const CRATE_POOL: Array[int] = [0, 1, 2, 6, 8, 12, 13]
 const CRATE_POOL_BASE: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST,
-	SHOP_TRIPLE_COST, SHOP_CLAYMORE_COST]
+	SHOP_TRIPLE_COST, SHOP_CLAYMORE_COST, 80, 90]   # 80 / 90 = Weapons.TABLE flame / rocket "shop"
 const WIPE_SCORE_PCT := 25           # airstrike screen-clear kills score at a quarter rate (see _fire_mission)
 # ONE spend->score rate for EVERY way a coin leaves the chest (spend-wheel and priced
 # ground crates both). It used to be two literals, 6 in _try_buy and 10 in
@@ -856,6 +856,7 @@ var rng: SimRng
 var players: Array[Dictionary] = []
 var bullets: Array[Dictionary] = []
 var grenades: Array[Dictionary] = []
+var rockets: Array[Dictionary] = []   # Weapons.ROCKET rounds in flight (hashed when non-empty)
 var enemies: Array[Dictionary] = []
 var bunkers: Array[Dictionary] = []
 var pickups: Array[Dictionary] = []
@@ -1017,6 +1018,8 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"smoke_ticks": 0,
 			"claymores": 0,
 			"triple": false,
+			"weapon": Weapons.NONE,   # special weapon held (Weapons.TABLE key); 0 = the MG
+			"wpn_ammo": 0,
 			"flush_cd": 0,   # c3 2v: tall-grass flush-grenade cooldown (0 = clear; runs only while camping grass near enemies)
 		})
 	if game_mode == "boss_rush":
@@ -1187,6 +1190,7 @@ func step(inputs: Array) -> void:
 	_step_tanks()
 	_tanks_stepped_this_tick = true
 	_step_bullets()
+	_step_rockets()
 	_step_enemy_bullets()
 	_step_grenades()
 	# Hitbox fairness: contact death resolves AFTER the player's own offense has
@@ -1534,7 +1538,7 @@ func _step_players(inputs: Array) -> void:
 		# dry in a swarm still buys survival and nothing else. `fire_prev` is kept (hashed
 		# state, and the honest record of the wire input) even though nothing reads it.
 		p["fire_prev"] = inp.fire
-		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
+		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0 and p["weapon"] == Weapons.NONE:
 			# Empty-clip bash: one enemy in reach dies (no coin), on a long
 			# cooldown — running dry is a beat of danger, not pure helplessness.
 			var bashed := false
@@ -1596,7 +1600,9 @@ func _step_players(inputs: Array) -> void:
 				# fire is gone: with the edge gate removed its condition is now identical
 				# to the branch above, so it was unreachable.)
 				events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
-		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
+		if inp.fire and p["weapon"] != Weapons.NONE and p["in_tank"] < 0:
+			_fire_special(p, i)
+		elif inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
 			p["fire_cd"] = FIRE_COOLDOWN_TICKS
 			p["mg_ammo"] = p["mg_ammo"] - 1
 			events.append({"t": "shot", "x": p["x"], "y": p["y"], "i": i})
@@ -2398,7 +2404,7 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 ## _respawn's own body, so a strip added here without a word for it goes red the day it lands.
 const DEATH_LOSS_KEYS: PackedStringArray = [
 	"vest", "triple", "claymores",
-	"pierce_ticks", "spread_ticks", "rend_ticks", "smoke_ticks",
+	"pierce_ticks", "spread_ticks", "rend_ticks", "smoke_ticks", "weapon",
 ]
 
 
@@ -2434,6 +2440,7 @@ func _respawn(p: Dictionary, at_y: int, cost := 0) -> void:
 	p["smoke_ticks"] = 0              # ...and the smoke concealment
 	p["claymores"] = 0                # ...and any carried claymore charges
 	p["triple"] = false               # ...and the Triple Shot mod (held until death)
+	p["weapon"] = 0                   # ...and any special weapon (flamethrower / rocket launcher)
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + CAMERA_BAND_BOTTOM)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
@@ -2565,6 +2572,13 @@ func _apply_supply(p: Dictionary, kind: int) -> int:
 			p["rend_ticks"] = REND_TICKS       # Rend Rounds capsule (drop-only)
 		8:
 			p["claymores"] = mini(CLAYMORE_CAP, p["claymores"] + 1)   # a carried charge
+		12, 13:
+			# Special weapon: replaces whatever special is held; the same one just refills.
+			var wid := Weapons.id_for_kind(kind)
+			var wt: Dictionary = Weapons.TABLE[wid]
+			var have: int = p["wpn_ammo"] if p["weapon"] == wid else 0
+			p["weapon"] = wid
+			p["wpn_ammo"] = mini(wt["cap"], have + wt["grant"])
 		9:
 			p["smoke_ticks"] = SMOKE_TICKS     # smoke concealment capsule (drop-only)
 		10:
@@ -2777,6 +2791,9 @@ func _supply_full(p: Dictionary, kind: int) -> bool:
 			return pending_airstrike > 0 or (mode == "endless" and intermission_ticks > 0)
 		6:
 			return p["triple"]
+		12, 13:
+			var wid := Weapons.id_for_kind(kind)
+			return p["weapon"] == wid and p["wpn_ammo"] >= Weapons.TABLE[wid]["cap"]
 		8:
 			return p["claymores"] >= CLAYMORE_CAP
 	return false
@@ -3749,7 +3766,7 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 		# offense capsules should be ≥40% of rare drops — if <30%, raise them.
 		var pkind: int
 		if rng.range_i(0, 5) == 0:
-			pkind = [4, 4, 5, 5, 6, 6, 7, 8, 9, 10][rng.range_i(0, 9)]
+			pkind = _pick_rare_kind()
 			if pkind == 7 and not _shields_possible():
 				pkind = 4   # Rend before any shield can exist is a dead draw — give Pierce
 		else:
@@ -4901,6 +4918,255 @@ func _spawn_mg_bullet(p: Dictionary, i: int, ax: int, ay: int) -> void:
 	bullets.append({"x": p["x"], "y": p["y"],
 		"vx": Fixed.mul(ax, BULLET_SPEED), "vy": Fixed.mul(ay, BULLET_SPEED),
 		"ttl": BULLET_TTL_TICKS, "owner": i})
+
+
+func _pick_rare_kind() -> int:
+	## The rare-capsule roll. Below sector 2 this is byte-for-byte the old 10-slot draw
+	## (same single rng call, same range), so the opening of a run is unchanged; the special
+	## weapons join the pool by sector (Weapons.TABLE min_sector) at three slots apiece.
+	var sec := _sector_index(_econ_depth())
+	var pool: Array[int] = [4, 4, 5, 5, 6, 6, 7, 8, 9, 10]
+	if sec >= Weapons.TABLE[Weapons.FLAME]["min_sector"]:
+		pool.append_array([Weapons.KIND_FLAME, Weapons.KIND_FLAME, Weapons.KIND_FLAME])
+	if sec >= Weapons.TABLE[Weapons.ROCKET]["min_sector"]:
+		pool.append_array([Weapons.KIND_ROCKET, Weapons.KIND_ROCKET, Weapons.KIND_ROCKET])
+	return pool[rng.range_i(0, pool.size() - 1)]
+
+
+func _flame_target_ok(e: Dictionary) -> bool:
+	## A body the flame can still do something to: alive, surfaced, not the rescue objective
+	## and not one of the inherent heavies it cannot cook.
+	return _enemy_strikeable(e) and e["kind"] != "pilot" and not (e["kind"] in Weapons.FLAME_IMMUNE)
+
+
+func _fire_special(p: Dictionary, i: int) -> void:
+	## One call per tick while a special is held and fire is down (always-fire). It only
+	## spends the magazine when there is something to hit: the player has no trigger.
+	if p["fire_cd"] > 0:
+		return
+	var wt: Dictionary = Weapons.TABLE[p["weapon"]]
+	var ax: int = p["aim_x"]
+	var ay: int = p["aim_y"]
+	if p["weapon"] == Weapons.FLAME:
+		var found := false
+		for e in enemies:
+			if _flame_target_ok(e) and Weapons.in_cone(e["x"] - p["x"], e["y"] - p["y"], ax, ay,
+					wt["reach"], wt["tan"], wt["pad"]):
+				found = true
+				break
+		if not found:
+			return
+		_flame_burst(p, i)
+	else:
+		# One rocket in the air per launcher: without this the 36-tick cooldown re-fires at the
+		# very target the first rocket is still flying toward and wastes the second.
+		for fr in rockets:
+			if fr["owner"] == i:
+				return
+		if not _rocket_lane_has_target(p, wt):
+			return
+		rockets.append({"x": p["x"] + Fixed.mul(ax, 8 * F_ONE), "y": p["y"] + Fixed.mul(ay, 8 * F_ONE),
+			"vx": Fixed.mul(ax, wt["speed"]), "vy": Fixed.mul(ay, wt["speed"]),
+			"ttl": wt["ttl"], "owner": i})
+		events.append({"t": "rocket_launch", "x": p["x"], "y": p["y"], "i": i})
+	p["fire_cd"] = wt["cd"]
+	p["wpn_ammo"] = p["wpn_ammo"] - 1
+	if p["wpn_ammo"] <= 0:
+		p["wpn_ammo"] = 0
+		p["weapon"] = Weapons.NONE   # magazine spent: back to the MG (its mods wake up)
+		events.append({"t": "weapon_empty", "x": p["x"], "y": p["y"], "i": i})
+
+
+func _flame_burst(p: Dictionary, i: int) -> void:
+	## One burst of the flame cone. Fire is not stopped by cover: infantry hugging a sandbag
+	## burn through it, and the bag itself heats up and eventually goes. Armor does not care.
+	var wt: Dictionary = Weapons.TABLE[Weapons.FLAME]
+	var ax: int = p["aim_x"]
+	var ay: int = p["aim_y"]
+	events.append({"t": "flame", "x": p["x"], "y": p["y"], "i": i, "ax": ax, "ay": ay})
+	var shrugged := false
+	for e in enemies:
+		if not _enemy_strikeable(e) or e["kind"] == "pilot":
+			continue
+		var dx: int = e["x"] - p["x"]
+		var dy: int = e["y"] - p["y"]
+		if not Weapons.in_cone(dx, dy, ax, ay, wt["reach"], wt["tan"], wt["pad"]):
+			continue
+		if e["kind"] in Weapons.FLAME_IMMUNE or (e["kind"] == "shield" and _shield_blocks(e, {"vx": dx, "vy": dy})):
+			shrugged = true
+			continue
+		if e.get("hp", 1) > 1:
+			e["hp"] = e["hp"] - 1   # veteran armor: fire strips it a point per burst
+			if e["hp"] > 0:
+				shrugged = true
+				continue
+		_kill_enemy(e)
+	if shrugged:
+		events.append({"t": "armor_block", "x": p["x"] + Fixed.mul(ax, wt["reach"] / 2),
+			"y": p["y"] + Fixed.mul(ay, wt["reach"] / 2)})
+	var si := sandbags.size() - 1
+	while si >= 0:
+		var sb := sandbags[si]
+		if Weapons.in_cone(sb["x"] - p["x"], sb["y"] - p["y"], ax, ay, wt["reach"], wt["tan"], SANDBAG_HALF_W):
+			sb["scorch"] = sb.get("scorch", 0) + 1
+			if sb["scorch"] >= wt["cover_hits"]:
+				events.append({"t": "bag_burn", "x": sb["x"], "y": sb["y"]})
+				_break_sandbag_at(si)
+				si = mini(si - 1, sandbags.size() - 1)
+				continue
+		si -= 1
+	# Soft terrain cover burns exactly as it does in a vent jet (_rk_burnable: grass, wall slabs;
+	# stone and hero wrecks are immune). burn_ticks is the vent's existing, unhashed accrual.
+	for ri in range(rocks.size() - 1, -1, -1):
+		var brk := rocks[ri]
+		if not _rk_burnable(brk):
+			continue
+		if Weapons.in_cone(brk["x"] - p["x"], brk["y"] - p["y"], ax, ay, wt["reach"], wt["tan"], _rk_hw(brk)):
+			brk["burn_ticks"] = brk.get("burn_ticks", 0) + 1
+			if brk["burn_ticks"] >= wt["cover_hits"]:
+				events.append({"t": "cover_burn" if brk.get("kind", 0) == 1 else "cover_crack",
+					"x": brk["x"], "y": brk["y"]})
+				rocks.remove_at(ri)
+
+
+func _rocket_lane_has_target(p: Dictionary, wt: Dictionary) -> bool:
+	## Auto-trigger for the launcher: something worth a rocket sits in the lane ahead.
+	var ax: int = p["aim_x"]
+	var ay: int = p["aim_y"]
+	for e in enemies:
+		if _enemy_strikeable(e) and e["kind"] != "pilot" \
+				and Weapons.in_lane(e["x"] - p["x"], e["y"] - p["y"], ax, ay, wt["reach"], wt["lane"]):
+			return true
+	for bk in bunkers:
+		if bk["alive"] and Weapons.in_lane(bk["x"] + BUNKER_W / 2 - p["x"], bk["y"] + BUNKER_H / 2 - p["y"],
+				ax, ay, wt["reach"], wt["lane"] + BUNKER_W / 2):
+			return true
+	for g in gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
+				and Weapons.in_lane(g["boss"]["x"] - p["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET - p["y"],
+					ax, ay, wt["reach"], wt["lane"] + BOSS_HIT_RADIUS):
+			return true
+	if not endless_boss.is_empty() and endless_boss["alive"] \
+			and Weapons.in_lane(endless_boss["x"] - p["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET - p["y"],
+				ax, ay, wt["reach"], wt["lane"] + BOSS_HIT_RADIUS):
+		return true
+	if not colossus.is_empty() and colossus["alive"] \
+			and Weapons.in_lane(colossus["x"] - p["x"], colossus["y"] - p["y"], ax, ay, wt["reach"],
+				wt["lane"] + COLOSSUS_HIT_RADIUS):
+		return true
+	return false
+
+
+func _rocket_hits(x: int, y: int) -> bool:
+	## True when a rocket centred at (x,y) has struck something solid.
+	for bk in bunkers:
+		if bk["alive"] and _point_in_aabb(x, y, bk):
+			return true
+	for sb in sandbags:
+		if absi(x - sb["x"]) <= _sb_hw(sb) and absi(y - sb["y"]) <= _sb_hh(sb):
+			return true
+	for hk in tanks:
+		if ((hk["alive"] and hk["occupant"] < 0) or (not hk["alive"] and hk["burn_ticks"] > 0)) \
+				and absi(x - hk["x"]) <= HULK_HALF_W and absi(y - hk["y"]) <= HULK_HALF_H:
+			return true
+	for rk in rocks:
+		if _rk_solid(rk) and absi(x - rk["x"]) <= _rk_hw(rk) and absi(y - rk["y"]) <= _rk_hh(rk):
+			return true
+	for e in enemies:
+		var ehr: int = KIND_HIT_RADIUS.get(e["kind"], BULLET_HIT_RADIUS)
+		if e["alive"] and e["kind"] != "pilot" and not e.get("submerged", false) \
+				and _dist_lte(x, y, e["x"], e["y"], ehr):
+			return true
+	for bl in barrels:
+		if bl["armed"] and _dist_lte(x, y, bl["x"], bl["y"], BULLET_HIT_RADIUS):
+			return true
+	for g in gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
+				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, BOSS_HIT_RADIUS):
+			return true
+	if not endless_boss.is_empty() and endless_boss["alive"]:
+		var goff: Array = boss_flyin_offset(endless_boss["phase_t"])
+		if _dist_lte(x, y, endless_boss["x"] + int(goff[0]),
+				endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1]), BOSS_HIT_RADIUS):
+			return true
+	if not colossus.is_empty() and colossus["alive"] and _dist_lte(x, y, colossus["x"], colossus["y"], COLOSSUS_HIT_RADIUS):
+		return true
+	return not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, OBSERVER_HIT_RADIUS)
+
+
+func _step_rockets() -> void:
+	if rockets.is_empty():
+		return
+	var ylo := camera_top - 40 * F_ONE
+	var yhi := camera_top + 400 * F_ONE
+	for i in range(rockets.size() - 1, -1, -1):
+		var r := rockets[i]
+		r["x"] = r["x"] + r["vx"]
+		r["y"] = r["y"] + r["vy"]
+		r["ttl"] = r["ttl"] - 1
+		if r["y"] < ylo or r["y"] > yhi or r["x"] < 0 or r["x"] > SCREEN_W_FP:
+			rockets.remove_at(i)   # left the arena unspent
+			continue
+		if r["ttl"] <= 0 or _rocket_hits(r["x"], r["y"]):
+			var bx: int = r["x"]
+			var by: int = r["y"]
+			rockets.remove_at(i)
+			_rocket_blast(bx, by)
+
+
+func _rocket_blast(x: int, y: int) -> void:
+	## Small splash that reaches ARMOR. Like the grenade it never hurts the shooter or the
+	## friendly tanks; unlike it, armored bodies lose Weapons armor_dmg hp instead of
+	## dying outright, and bunkers/bosses are hit for the rocket's own numbers.
+	var wt: Dictionary = Weapons.TABLE[Weapons.ROCKET]
+	var rad: int = wt["blast"]
+	events.append({"t": "explosion", "x": x, "y": y, "src": "rocket", "r": rad})
+	for e in enemies:
+		if e["alive"] and e["kind"] != "pilot" and not (e["kind"] == "ghillie" and e.get("submerged", false)) \
+				and _dist_lte(x, y, e["x"], e["y"], rad):
+			if e.get("hp", 1) > 1:
+				e["hp"] = e["hp"] - wt["armor_dmg"]
+				if e["hp"] > 0:
+					events.append({"t": "armor_block", "x": e["x"], "y": e["y"]})
+					continue
+			_kill_enemy(e)
+	var si := sandbags.size() - 1
+	while si >= 0:
+		if _dist_lte(x, y, sandbags[si]["x"], sandbags[si]["y"], rad):
+			_break_sandbag_at(si)
+			si = mini(si - 1, sandbags.size() - 1)
+		else:
+			si -= 1
+	for ki in range(rocks.size() - 1, -1, -1):
+		if rocks[ki].get("kind", 0) == 2 and _dist_lte(x, y, rocks[ki]["x"], rocks[ki]["y"], rad):
+			events.append({"t": "cover_crack", "x": rocks[ki]["x"], "y": rocks[ki]["y"]})
+			rocks.remove_at(ki)
+	for bk in bunkers:
+		if bk["alive"] and _point_in_aabb_expanded(x, y, bk, rad):
+			bk["alive"] = false
+			war_chest += COIN_BUNKER
+			score += COIN_BUNKER * 10
+			events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2,
+				"y": bk["y"] + BUNKER_H / 2, "coin": COIN_BUNKER})
+	for bl in barrels:
+		if bl["armed"] and bl["fuse_ticks"] == 0 and _dist_lte(x, y, bl["x"], bl["y"], rad):
+			bl["fuse_ticks"] = BARREL_FUSE_TICKS
+	for g in gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
+				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, rad + BOSS_HIT_RADIUS):
+			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": g["boss"]["gate_y"] - BOSS_Y_OFFSET})
+			_damage_boss(g["boss"], wt["boss_dmg"])
+	if not endless_boss.is_empty() and endless_boss["alive"]:
+		var goff: Array = boss_flyin_offset(endless_boss["phase_t"])
+		var gbx: int = endless_boss["x"] + int(goff[0])
+		var gby: int = endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1])
+		if _dist_lte(x, y, gbx, gby, rad + BOSS_HIT_RADIUS):
+			events.append({"t": "boss_hit", "x": gbx, "y": gby})
+			_damage_boss(endless_boss, wt["boss_dmg"])
+	if not colossus.is_empty() and colossus["alive"] and _dist_lte(x, y, colossus["x"], colossus["y"], rad + COLOSSUS_HIT_RADIUS):
+		_damage_colossus(wt["colossus_dmg"])
+	if not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, rad):
+		_kill_observer()
 
 
 func _spawn_courier() -> void:
@@ -7779,6 +8045,11 @@ func checksum() -> int:
 		if wp > 0:
 			h = feed.call(wp, h)   # conditional (flush_cd precedent): 0 while the wheel is shut, so a run that never shops leaves the stream byte-identical
 	for p in players:
+		if p["weapon"] != Weapons.NONE:
+			# Conditional feed: holding the MG (every torture run) leaves the stream byte-identical.
+			h = feed.call(p["weapon"], h)
+			h = feed.call(p["wpn_ammo"], h)
+	for p in players:
 		if p["flush_cd"] > 0:
 			h = feed.call(p["flush_cd"], h)   # c3 2v: conditional — flush_cd is 0 unless camping grass near a threat (never in either torture window)
 	if not rocks.is_empty():
@@ -7797,6 +8068,8 @@ func checksum() -> int:
 			h = feed.call(sb.get("player", 0), h)
 			h = feed.call(sb.get("vertical", 0), h)
 			h = feed.call(sb.get("nest", 0), h)
+			if sb.get("scorch", 0) > 0:
+				h = feed.call(sb["scorch"], h)   # flamethrower heat; conditional, absent on every unburnt bag
 	if not vents.is_empty():
 		# Conditional feed (sandbags precedent): vents exist only past seg 4 —
 		# neither torture window ever streams one, so goldens hold.
@@ -7804,6 +8077,12 @@ func checksum() -> int:
 		for vt in vents:
 			h = feed.call(vt["x"], h)
 			h = feed.call(vt["y"], h)
+	if not rockets.is_empty():
+		# Conditional feed (sandbags precedent): no rocket in flight leaves the stream untouched.
+		h = feed.call(rockets.size(), h)
+		for rk in rockets:
+			for v in [rk["x"], rk["y"], rk["vx"], rk["vy"], rk["ttl"], rk["owner"]]:
+				h = feed.call(v, h)
 	if not colossus.is_empty():
 		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"]),
 				colossus.get("core_open", 0), colossus.get("core_cd", 0)]:
