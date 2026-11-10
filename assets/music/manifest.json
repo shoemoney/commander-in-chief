@@ -1,0 +1,68 @@
+{
+  "stingers": {
+    "boss_intro": {
+      "seconds": 4.0
+    },
+    "defeat": {
+      "seconds": 4.0
+    },
+    "sector_clear": {
+      "seconds": 3.2
+    },
+    "victory": {
+      "seconds": 5.0
+    }
+  },
+  "tracks": {
+    "boss": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 140
+    },
+    "laststand": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 144
+    },
+    "sector1": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 112
+    },
+    "sector2": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 100
+    },
+    "sector3": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 126
+    },
+    "sector4": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 118
+    },
+    "sector5": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 124
+    },
+    "sector6": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 132
+    },
+    "shop": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 92
+    },
+    "title": {
+      "bars": 16,
+      "beats_per_bar": 4,
+      "bpm": 104
+    }
+  }
+}

@@ -48,6 +48,7 @@ sprites carry a separate source note and final prompt. Original canvas sizes and
 | `assets/vo/intro_crawl.mp3` | 1 mp3 | Commit `024ea55` identifies the character voice but not the service; matching commander-bark format does not confirm the pipeline | Generation pipeline and permissions unconfirmed |
 | `assets/audio/{enemy_death,enemy_spawn}/` | 88 mp3 | Synthesized speech — ElevenLabs hosted TTS, stock voice roster (see each folder's `README.md`) | ✅ owned (verify service terms) |
 | `assets/audio/ya_chants/` | 30 mp3 | The **audition reel** the death bank was cast from — 15 stock voices, ElevenLabs multilingual model (`language_code=ar`), no delivery direction. `enemy_death/` re-cut the 6 approved voices with agony tags, so these are source material, not spare content. `.gdignore`d: kept for provenance, **excluded from the build** | ✅ owned (verify service terms) |
+| `assets/music/*.ogg` | 24 ogg + `manifest.json` | Original score: composed as note data and rendered by `tools/compose_music.py` (numpy additive synth + ffmpeg libvorbis). No samples, no external audio. See `assets/music/README.md` | ✅ owned (procedurally composed; validated by measurement only, needs a listening pass) |
 
 The current inventory is 144 game-intended recordings plus 30 development-only
 audition recordings, not 174 shipping voice lines. Confirm the actual uploaded
