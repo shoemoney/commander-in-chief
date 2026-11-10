@@ -10209,6 +10209,13 @@ func _draw_terrain() -> void:
 				var world_y := sim.camera_top + int(wy_px / PX)
 				if _in_wbands(wbands, world_x, world_y):
 					continue
+				# ground-polish: a desert cactus does not stand in the marsh or on a concrete deck.
+				# Dress the same (view-only) grid cell as that biome's own litter instead.
+				var dec_b := GroundStructure.biome_at(_ground_campaign, ground_biome(sim.current_sector()),
+					cam_y + wy_px, _ground_biome_map)
+				if GroundDecor.replaces_cactus(dec_b):
+					GroundDecor.paint(self, dec_b, Vector2(px, wy_px), h2)
+					continue
 				var big := h2 % 5 == 0
 				var tsway := sin(float(Engine.get_physics_frames()) * 0.03 + float(h2)) * 0.04 * _motion
 				# a3-04 AD#4/ENV#2: a large soft canopy dapple pooled under each LIVING tree —
@@ -11013,9 +11020,21 @@ func _draw_water() -> void:
 		# wherever the offset dips inward (r2 fix — was drawn after and covered it).
 		# Alpha 0.75 -> 0.92 (c2 3v: half-speed ground must not read as a
 		# translucent decal you can ignore).
-		var mud_c := Color(0.42, 0.32, 0.2, 0.92).lerp(Color(0.3, 0.25, 0.2, 0.92), soot)
-		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy - 6 - 40, 640, 40), true, mud_c)
-		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy + wh + 2, 640, 40), true, mud_c)
+		# ground-polish: the fill is the sector's own earth (GroundStructure.mud_bank_color) with
+		# churned dark/pale blobs over it, not one flat saturated orange slab. Same rects, same alpha.
+		var mud_b := GroundStructure.biome_at(_ground_campaign, ground_biome(sim.current_sector()),
+			float(w["y"]) * PX, _ground_biome_map)
+		var mud_p := GroundStructure.mud_bank_plan(mud_b, int(w["y"] / 4096), Vector2(640.0, 40.0), soot)
+		var mud_c: Color = mud_p["base"]
+		# The fill is the sector's OWN ground card darkened (the old shared "dirt" texture is a
+		# saturated orange that no modulate could desaturate), so the half-speed strip stays
+		# readable as a darker, churned band yet shares the biome's hue.
+		var mud_tex := Art.tex(ground_biome_source(mud_b))
+		var mud_mod: Color = mud_p["tex_mod"]
+		draw_texture_rect(mud_tex, Rect2(0, wy - 6 - 40, 640, 40), true, mud_mod)
+		draw_texture_rect(mud_tex, Rect2(0, wy + wh + 2, 640, 40), true, mud_mod)
+		GroundStructure.paint_mud_bank(self, mud_p, Vector2(0.0, wy - 6 - 40))
+		GroundStructure.paint_mud_bank(self, mud_p, Vector2(0.0, wy + wh + 2))
 		# Banks: a wobbling polygon (not a ruler-straight strip) that shares the
 		# exact sine curve the shader displaces its shoreline by, so sand and water
 		# edge track each other instead of drifting into two parallel tells.

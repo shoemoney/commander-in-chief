@@ -217,9 +217,14 @@ func test_gate_apron_sits_in_front_of_the_gate_and_stays_flat() -> void:
 func test_ford_banks_get_plank_approaches_only_where_there_is_a_river() -> void:
 	var near := _plan_for(-1560.0)
 	Runner.T.ok((near["planks"] as Array).size() > 0, "ford-bank planking is planned for a visible river")
+	# ground-polish: planks are now irregular boards with frayed ends (so the ford bank is not a
+	# flat ruled slab); the SPAN of the planking must still be centred on the ford.
+	var lo := 9999.0
+	var hi := -9999.0
 	for p in near["planks"]:
-		Runner.T.ok(absf(((p["x0"] as float) + (p["x1"] as float)) * 0.5 - 480.0) < 0.5, "planks are centred on the sim's ford x")
-		break
+		lo = minf(lo, p["x0"] as float)
+		hi = maxf(hi, p["x1"] as float)
+	Runner.T.ok(absf((lo + hi) * 0.5 - 480.0) < 5.0, "planks are centred on the sim's ford x (span %.0f..%.0f)" % [lo, hi])
 	var far := _plan_for(-300.0)
 	Runner.T.eq((far["planks"] as Array).size(), 0, "no planking where no river is in frame")
 

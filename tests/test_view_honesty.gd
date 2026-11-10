@@ -4974,11 +4974,26 @@ const WORLD_TEXT_SITES := {
 const OPAQUE_GROUND_ALLOW := {
 	# MUD_BANK_H half-speed bands: full 640px wide, no corners on screen, and the edge
 	# IS the sim's wading boundary (with a deliberate lip) — art == collision.
-	"_draw_water:dirt": "mud-bank band edge is the half-speed sim boundary",
+	# ground-polish: the bands no longer paint the shared saturated-orange "dirt" card; they
+	# paint the sector's own ground card through a RUNTIME key (ground_biome_source(mud_b)), so
+	# there is no Art.tex("dirt") literal left to license. The same art == collision licence
+	# now rides on that dynamic fill: test_mud_bank_fill_keeps_the_half_speed_licence below pins it.
 	# Shore polygon + ford dry rects from ford_visual: the hard edge is where the
 	# water collision starts and stops — art == collision.
 	"_draw_water:sand": "shore / ford dry ground edge is the water collision edge",
 }
+
+
+func test_mud_bank_fill_keeps_the_half_speed_licence() -> void:
+	var body := _fn_src(_view_src(), "_draw_water")
+	Runner.T.ok(body.contains("Art.tex(ground_biome_source(mud_b))") and body.contains("mud_p[\"tex_mod\"]"),
+		"_draw_water fills the mud bank from the sector's own card via mud_bank_plan (the licence moved here)")
+	Runner.T.ok(body.contains("mud_lip"), "the half-speed edge keeps its dark lip, so the boundary still reads")
+	for biome in range(0, 7):
+		var p: Dictionary = preload("res://src/view/ground_structure.gd").mud_bank_plan(biome, 3, Vector2(640.0, 40.0), 0.0)
+		var tm: Color = p["tex_mod"]
+		Runner.T.ok(tm.a >= 0.9 and tm.v <= 0.75,
+			"biome %d bank is a near-opaque DARKENED card (a %.2f, v %.2f): readable as the half-speed band" % [biome, tm.a, tm.v])
 
 
 func _fn_src(src: String, fn: String) -> String:
