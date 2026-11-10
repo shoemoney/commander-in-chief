@@ -58,13 +58,22 @@ func test_a_real_save_load_migrates_and_persists_the_counters() -> void:
 		Runner.T.eq(main._captions, case[1] != CuePolicy.CAP_OFF, "the derived on/off bool agrees")
 		Runner.T.eq(int(main._cue_seen.get("cap:strike_warn", 0)), 2, "exposure counters load beside _seen")
 		main.free()
+	# a1y: a settings section without the key predates the toggle (captions were always on) -> ALL;
+	# a file with no settings at all is a new install -> the SMART default.
 	var legacy := ConfigFile.new()
+	legacy.set_value("settings", "sfx_vol", 10)
 	legacy.save(MainScript.SAVE_PATH)
+	var old := MainScript.new()
+	old._load_bests()
+	Runner.T.eq(old._caption_mode, CuePolicy.CAP_ALL, "a save with settings but no captions key stays ALL")
+	old.free()
+	var newcf := ConfigFile.new()
+	newcf.save(MainScript.SAVE_PATH)
 	var fresh := MainScript.new()
 	fresh._load_bests()
-	Runner.T.eq(fresh._caption_mode, CuePolicy.CAP_ALL, "a save with no captions key defaults to ALL")
-	Runner.T.eq(MainScript.SETTINGS_DEFAULTS["captions"], CuePolicy.CAP_ALL, "the shipped default is ALL")
-	Runner.T.eq(fresh._settings_snapshot()["captions"], CuePolicy.CAP_ALL, "the snapshot writes the mode, not a bool")
+	Runner.T.eq(fresh._caption_mode, CuePolicy.CAP_SMART, "a file with no settings (new install) defaults to SMART")
+	Runner.T.eq(MainScript.SETTINGS_DEFAULTS["captions"], CuePolicy.CAP_SMART, "the shipped default is SMART")
+	Runner.T.eq(fresh._settings_snapshot()["captions"], CuePolicy.CAP_SMART, "the snapshot writes the mode, not a bool")
 	fresh.free()
 	_unstash(s)
 
@@ -78,35 +87,26 @@ func _fire(sfx: Sfx, key: String) -> String:
 	return String(sfx.active_caption()["text"])
 
 
-func test_smart_fades_a_cue_after_three_exposures() -> void:
+func test_smart_retires_the_word_never_the_cue() -> void:
+	# a1y: SMART used to drop the 4th showing entirely. A lethal warning is never hidden now: the
+	# caption is still armed at exposure 50, only the HUD's WORD retires (CuePolicy.caption_form).
 	var sfx := Sfx.new()
 	sfx.caption_mode = CuePolicy.CAP_SMART
 	sfx.sfx_step = 10
-	for i in 3:
-		Runner.T.eq(_fire(sfx, "strike_warn"), Sfx.SFX_CAPTIONS["strike_warn"], "SMART exposure %d still captions" % (i + 1))
-	Runner.T.eq(_fire(sfx, "strike_warn"), "", "the 4th exposure of the same cue is silent")
-	Runner.T.eq(_fire(sfx, "sniper_paint"), Sfx.SFX_CAPTIONS["sniper_paint"], "the fade is per cue key, not global")
-	Runner.T.eq(int(sfx.cue_counts["cap:strike_warn"]), 3, "the counter stops at the exposures it actually showed")
+	for i in 50:
+		Runner.T.eq(_fire(sfx, "strike_warn"), Sfx.SFX_CAPTIONS["strike_warn"], "SMART exposure %d is still drawn" % (i + 1))
+	Runner.T.eq(int(sfx.cue_counts["cap:strike_warn"]), 50, "every showing is counted")
 	sfx.free()
-
-
-func test_smart_never_fades_when_the_sfx_bus_is_muted_or_quiet() -> void:
+	for n in [1, 2, 3]:
+		Runner.T.eq(CuePolicy.caption_form(CuePolicy.CAP_SMART, n, 10, 1.0), "chip", "exposure %d keeps the word" % n)
+	Runner.T.eq(CuePolicy.caption_form(CuePolicy.CAP_SMART, 4, 10, 1.0), "glyph", "the 4th is glyph-only")
+	Runner.T.eq(CuePolicy.caption_form(CuePolicy.CAP_SMART, 50, 10, 1.0), "glyph", "and stays glyph-only")
 	for step in [0, 1]:
-		var sfx := Sfx.new()
-		sfx.caption_mode = CuePolicy.CAP_SMART
-		sfx.sfx_step = step
-		for i in 8:
-			_fire(sfx, "rear_warn")
-		Runner.T.eq(_fire(sfx, "rear_warn"), Sfx.SFX_CAPTIONS["rear_warn"],
-			"SFX step %d (under 20%%): the caption is the only warning, so it never fades" % step)
-		sfx.free()
-	var loud := Sfx.new()
-	loud.caption_mode = CuePolicy.CAP_SMART
-	loud.sfx_step = 2
-	for i in 3:
-		_fire(loud, "rear_warn")
-	Runner.T.eq(_fire(loud, "rear_warn"), "", "at 20%% volume the fade is allowed")
-	loud.free()
+		Runner.T.eq(CuePolicy.caption_form(CuePolicy.CAP_SMART, 50, step, 1.0), "chip",
+			"SFX step %d (under 20%%): the word comes back" % step)
+	Runner.T.eq(CuePolicy.caption_form(CuePolicy.CAP_SMART, 50, 10, 1.5), "full", "enlarged text forces the words")
+	Runner.T.eq(CuePolicy.caption_form(CuePolicy.CAP_ALL, 50, 10, 1.0), "full", "ALL is always the full text")
+	Runner.T.eq(CuePolicy.caption_form(CuePolicy.CAP_OFF, 1, 10, 1.0), "none", "OFF draws nothing")
 
 
 func test_all_mode_is_unchanged_and_off_shows_nothing() -> void:
@@ -118,7 +118,7 @@ func test_all_mode_is_unchanged_and_off_shows_nothing() -> void:
 	for key in Sfx.SFX_CAPTIONS:
 		Runner.T.eq(_fire(sfx, key), Sfx.SFX_CAPTIONS[key], "ALL shows every cue (%s)" % key)
 	sfx.free()
-	Runner.T.ok(not CuePolicy.caption_allowed(CuePolicy.CAP_OFF, 0, 10), "OFF allows no cue")
+	Runner.T.ok(not CuePolicy.caption_allowed(CuePolicy.CAP_OFF), "OFF allows no cue")
 
 
 # --- the chip ----------------------------------------------------------------------------------
@@ -144,6 +144,7 @@ class _CapMain extends Node2D:
 	var _menu = null
 	var _motion := 1.0
 	var _captions := true
+	var _caption_mode := 1   # CuePolicy.CAP_SMART: the chip form under test
 	var _sfx = null
 	var _grenade_dry: Array = [0, 0]
 	var _token_loss_t := 0.0
@@ -196,6 +197,7 @@ func _floats(m: Object) -> Array:
 
 func test_pickup_word_shows_for_the_first_two_grabs_then_an_icon() -> void:
 	var m := _playing_main()
+	m._caption_mode = CuePolicy.CAP_SMART   # ALL never retires a word
 	m.sim = SimWorld.new(3, 1)
 	var words: Array = []
 	for i in 4:
@@ -221,6 +223,7 @@ func test_pickup_word_shows_for_the_first_two_grabs_then_an_icon() -> void:
 
 func test_armor_up_is_an_icon_after_two_boardings() -> void:
 	var m := _playing_main()
+	m._caption_mode = CuePolicy.CAP_SMART
 	m.sim = SimWorld.new(3, 1)
 	var icons: Array = []
 	for i in 3:

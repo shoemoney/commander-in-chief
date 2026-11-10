@@ -5555,7 +5555,10 @@ func _load_bests() -> void:
 			# so a chosen scale never survived a restart). Legacy saves lack the key -> ship 2x.
 			"window_scale": cf.get_value("settings", "window_scale", SETTINGS_DEFAULTS["window_scale"]),
 			# audio-identity: captions default ON; a save predating the toggle lands there too.
-			"captions": cf.get_value("settings", "captions", SETTINGS_DEFAULTS["captions"]),
+			# A save that has a settings section but no captions key predates the toggle, when
+			# captions were always on: that is ALL, not the new-install SMART.
+			"captions": cf.get_value("settings", "captions",
+				CuePolicy.CAP_ALL if cf.has_section("settings") else SETTINGS_DEFAULTS["captions"]),
 			# accessibility: a save predating TEXT SIZE lands at 100% (the shipped sizes).
 			"text_scale": cf.get_value("settings", "text_scale", SETTINGS_DEFAULTS["text_scale"]),
 			"single_stick_p1": cf.get_value("settings", "single_stick_p1", SETTINGS_DEFAULTS["single_stick_p1"]),
@@ -5623,7 +5626,7 @@ const SETTINGS_DEFAULTS := {
 	"music_vol": 10,
 	"fullscreen": false,
 	"window_scale": 2,
-	"captions": CuePolicy.CAP_ALL,   # was a bool (true == on): CuePolicy.migrate_caption_mode reads both
+	"captions": CuePolicy.CAP_SMART,   # a NEW install; saves keep theirs (_load_bests). Was a bool: migrate_caption_mode reads both
 	"text_scale": TEXT_SCALE_MIN,
 }
 
@@ -6729,7 +6732,7 @@ func _pickup_word_due(key: String) -> bool:
 	var prior := CuePolicy.count_of(_cue_seen, CuePolicy.KEY_PICK + key)
 	CuePolicy.bump(_cue_seen, CuePolicy.KEY_PICK + key)
 	_seen_dirty = true
-	return CuePolicy.show_word(prior)
+	return CuePolicy.pickup_word(_caption_mode, prior, Art.text_scale)
 
 
 ## One armor_block the player caused. After ARMOR_BLOCKS_TO_REARM of them with no grenade ever
@@ -11816,7 +11819,7 @@ func _draw_pickups() -> void:
 			Art.line(self, ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
 			# CUES NOT WORDS: the ground word is for the first WORD_PICKUPS grabs of this kind only;
 			# afterwards the pulsing ring and beam above already say "a capsule" and the sprite says which.
-			if CuePolicy.show_word(CuePolicy.count_of(_cue_seen, CuePolicy.KEY_PICK + str(int(pk["kind"])))):
+			if CuePolicy.pickup_word(_caption_mode, CuePolicy.count_of(_cue_seen, CuePolicy.KEY_PICK + str(int(pk["kind"]))), Art.text_scale):
 				_world_label_centered(_CAPSULE_LABEL[cap_i], ppos.x, ppos.y - 24.0, pcol, ppos)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]

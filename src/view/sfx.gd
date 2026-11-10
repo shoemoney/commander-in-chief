@@ -870,12 +870,9 @@ func caption_sfx(key: String) -> void:
 	var f := Engine.get_physics_frames()
 	if f < int(_sfx_cap_next.get(key, 0)):
 		return
-	# SMART fades a cue the player has met enough times, unless they cannot hear it. ALL (the
-	# default) never reaches the fade branch, so it is behaviourally the shipped path.
+	# SMART never drops a lethal cue: after SMART_EXPOSURES showings only its WORD retires (the HUD
+	# draws the glyph alone, see CuePolicy.caption_form). So every cue is armed, and counted.
 	var cap_key: String = CuePolicy.KEY_CAP + key
-	if caption_mode == CuePolicy.CAP_SMART \
-			and CuePolicy.smart_suppresses(CuePolicy.count_of(cue_counts, cap_key), sfx_step):
-		return
 	_sfx_cap_next[key] = f + SFX_CAPTION_GAP
 	if caption_mode != CuePolicy.CAP_OFF:
 		CuePolicy.bump(cue_counts, cap_key)
@@ -886,6 +883,14 @@ func caption_sfx(key: String) -> void:
 # bracket line -> chip word, so the strip can draw the compact form without the caption queue
 # having to carry a second field through its preempt/resume copies.
 var _cap_chip_by_text: Dictionary = _build_chip_index()
+var _cap_key_by_text: Dictionary = _build_key_index()
+
+
+static func _build_key_index() -> Dictionary:
+	var out := {}
+	for k in SFX_CAPTION_CHIPS:
+		out[SFX_CAPTIONS[k]] = k
+	return out
 
 
 static func _build_chip_index() -> Dictionary:
@@ -908,6 +913,7 @@ func active_caption() -> Dictionary:
 		"fade": minf(float(left) / CAPTION_FADE_FRAMES, 1.0)}
 	if not _cap_is_vo and _cap_chip_by_text.has(_cap_text):
 		out["chip"] = _cap_chip_by_text[_cap_text]
+		out["cue"] = _cap_key_by_text[_cap_text]
 	return out
 
 

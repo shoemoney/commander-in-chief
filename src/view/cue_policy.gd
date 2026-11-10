@@ -8,9 +8,10 @@ extends RefCounted
 ##
 ## State is plain Dictionaries of ints keyed by short strings, persisted beside main._seen.
 
-## CAPTIONS setting. ALL is the accessibility guarantee: every cue, every time (the shipped
-## behaviour). SMART lets a cue key fade once the player has met it SMART_EXPOSURES times, but
-## never when the player cannot hear it. OFF is OFF.
+## CAPTIONS setting. ALL is the accessibility guarantee: the full bracketed caption, every cue,
+## every time, and pickup words never retire. SMART is the compact chip (glyph plus one word); a
+## cue's WORD retires after SMART_EXPOSURES showings and the glyph alone remains, and the word
+## returns when the SFX bus is muted or quiet. OFF is no sound-cue captions.
 enum CaptionMode { ALL, SMART, OFF }
 const CAP_ALL := CaptionMode.ALL
 const CAP_SMART := CaptionMode.SMART
@@ -58,21 +59,38 @@ static func mode_label(mode: int) -> String:
 	return "ALL"
 
 
-## True when SMART mode should stay silent about a cue it has already shown `count` times. The
-## player who has muted or nearly muted the SFX bus cannot hear the cue, so for them the caption
-## IS the cue and never fades.
-static func smart_suppresses(count: int, sfx_step: int) -> bool:
-	if count < SMART_EXPOSURES:
+## True when SMART mode has retired a cue's WORD (glyph alone remains; the cue itself is never
+## hidden). `count` is the exposures INCLUDING the one being drawn, so the word is spelled for
+## exposures 1..SMART_EXPOSURES and retires from the next. The player who has muted or nearly
+## muted the SFX bus cannot hear the cue, so for them the word always comes back.
+static func word_retired(count: int, sfx_step: int) -> bool:
+	if count <= SMART_EXPOSURES:
 		return false
 	return sfx_step >= QUIET_SFX_STEP
 
 
-static func caption_allowed(mode: int, count: int, sfx_step: int) -> bool:
+## The three modes, as the HUD resolves one cue's presentation. "full" is the whole bracketed
+## caption at the full caption size (ALL, or any mode under an enlarged TEXT SIZE: a player who
+## asked for bigger text asked for text); "chip" is glyph plus one word; "glyph" is the glyph
+## alone; "none" is OFF. A lethal cue is never "none" outside OFF.
+static func caption_form(mode: int, count: int, sfx_step: int, text_scale: float) -> String:
 	if mode == CAP_OFF:
-		return false
-	if mode == CAP_SMART:
-		return not smart_suppresses(count, sfx_step)
-	return true
+		return "none"
+	if mode == CAP_ALL or text_scale > 1.001:
+		return "full"
+	return "glyph" if word_retired(count, sfx_step) else "chip"
+
+
+## Does this pickup/status grab still spell its word? ALL always does; so does any mode under an
+## enlarged TEXT SIZE. Otherwise only the first WORD_PICKUPS grabs of each kind.
+static func pickup_word(mode: int, prior_pickups: int, text_scale: float) -> bool:
+	if mode == CAP_ALL or text_scale > 1.001:
+		return true
+	return show_word(prior_pickups)
+
+
+static func caption_allowed(mode: int) -> bool:
+	return mode != CAP_OFF
 
 
 static func bump(counts: Dictionary, key: String) -> int:

@@ -271,8 +271,8 @@ msgstr "側面"
 msgid "ARMOR"
 msgstr "装甲"
 
-msgid "CAPTIONS: ALL, SMART (FADES SEEN CUES) OR OFF. SAVE IN OPTIONS."
-msgstr "字幕: ALL、SMART(見た警告を薄く)、OFF。オプションで保存。"
+msgid "CAPTIONS: ALL = FULL TEXT. SMART = SHORT TAG, WORD FADES. OFF = NONE. SAVE IN OPTIONS."
+msgstr "字幕：ALL＝全文。SMART＝短いタグ、見慣れた語は消える。OFF＝なし。オプションで保存。"
 msgid "FLAMETHROWER — BURNS INFANTRY + SANDBAGS UP CLOSE. ARMOR LAUGHS"
 msgstr "火炎放射器 — 近距離で歩兵と土のうを焼く。装甲には無力"
 

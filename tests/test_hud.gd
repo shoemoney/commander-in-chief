@@ -227,6 +227,7 @@ class _MainStub extends Node2D:
 	var _token_loss_t := 0.0
 	var _sfx = null        # no audio in a headless HUD test; _draw_caption bails on the null
 	var _captions := true
+	var _caption_mode := 0   # CuePolicy.CAP_ALL: caption_layout reads the mode
 	# drain-view: the row-0 record chip asks main._record_fired, NOT (score > best_score) —
 	# main.gd ratchets best_score up to sim.score in the same frame it detects the crossing,
 	# so the comparison the chip used to make was already destroyed by the time _draw ran.

@@ -1833,9 +1833,12 @@ func _telegraph_spec(sim: SimWorld) -> Dictionary:
 
 
 ## HUD DIET alpha for a static top-bar chip: full while new/changing, eased down once idle.
-func _diet_alpha(id: String, value: Variant, sim: SimWorld) -> float:
+## `hold` is for a chip in a WARNING state (the run-ending reinforcements budget): it is observed
+## like any other but never dims, so a rule that ends the run is never shown at 28% alpha.
+func _diet_alpha(id: String, value: Variant, sim: SimWorld, hold := false) -> float:
 	diet.sync(sim.get_instance_id())
-	return diet.chip_alpha(id, value, sim.tick_count)
+	var a := diet.chip_alpha(id, value, sim.tick_count)
+	return 1.0 if hold else a
 
 
 # c1-06: scrim seam for the telegraph's dark backing rect — default draws; a capture
@@ -2337,7 +2340,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				# Red at two or fewer: the same "this is the run now" cast _dead_chips gives
 				# LAST BREATH, reached before the last body rather than on it.
 				var rcol := Color(0.95, 0.82, 0.5) if rleft > 2 else Art.safe(Color(1.0, 0.42, 0.36))
-				rcol.a *= _diet_alpha("reinforcements", rleft, sim)
+				rcol.a *= _diet_alpha("reinforcements", rleft, sim, rleft <= 2)
 				x = _text(rtxt, x, y + ICON - 3.0, rcol) + 8.0
 	# Discoverability: the supply wheel exists (hold to open).
 	# c2-16: suppressed for the WHOLE run whenever the endless shop strip is eligible (shop_row) — the
@@ -2692,8 +2695,16 @@ func caption_layout() -> Dictionary:
 	# glyph plus one or two words on a slim scrim, hung from the same baseline so the arbiters'
 	# reservation (bottom_rail_rects reads this very layout) is unchanged. Voice subtitles carry
 	# no "chip" and keep the full wrapped text below.
+	var form := "full"
 	if String(cap.get("chip", "")) != "":
-		return _chip_layout(String(cap["chip"]), col, a)
+		var cmode = main.get("_caption_mode")
+		var counts = sfx.get("cue_counts")
+		var cue_n: int = CuePolicy.count_of(counts if counts is Dictionary else {}, CuePolicy.KEY_CAP + String(cap.get("cue", "")))
+		var step = sfx.get("sfx_step")
+		form = CuePolicy.caption_form(CuePolicy.CAP_ALL if cmode == null else int(cmode), cue_n,
+			10 if step == null else int(step), Art.text_scale)
+		if form == "chip" or form == "glyph":
+			return _chip_layout(String(cap["chip"]) if form == "chip" else "", col, a)
 	var font := Art.font()
 	# accessibility: subtitles are the one HUD element a player may be reading INSTEAD of hearing
 	# the game, so TEXT SIZE scales them. Wrap, measure, leading, scrim and draw all key off this
@@ -2723,17 +2734,17 @@ func _chip_layout(word: String, col: Color, a: float) -> Dictionary:
 	var font := Art.font()
 	var cs := Art.fs(TYPE_MICRO)
 	var scale := float(cs) / float(TYPE_MICRO)
-	var txt := TranslationServer.translate(word)
+	var txt: String = TranslationServer.translate(word) if word != "" else ""
 	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, cs).x
 	var iw := CHIP_ICON_W * scale
-	var total := iw + CHIP_GAP + tw
+	var total := iw + (CHIP_GAP + tw if txt != "" else 0.0)
 	var y_bottom := VERB_LEGEND_Y - 20.0 - bottom_band_lift(main.get("sim"))
 	var x0 := 320.0 - total / 2.0
 	var bg := Rect2(x0 - CHIP_PAD, y_bottom - CHIP_ABOVE * scale, total + CHIP_PAD * 2.0,
 		CHIP_ABOVE * scale + CAPTION_BG_BELOW)
 	var icon := Rect2(x0, y_bottom - iw + 1.0, iw, iw)
 	return {"lines": [txt] as Array[String], "cs": cs, "line_h": CAPTION_LINE_H * scale, "y0": y_bottom,
-		"bg": bg, "col": col, "a": a, "icon": icon, "cx": x0 + iw + CHIP_GAP + tw / 2.0}
+		"bg": bg, "col": col, "a": a, "icon": icon, "cx": x0 + iw + CHIP_GAP + tw / 2.0, "glyph_only": txt == ""}
 
 
 func _draw_chip_glyph(icon: Rect2, col: Color) -> void:
@@ -2761,7 +2772,8 @@ func _draw_caption() -> void:
 		_emit_bg_rect(cbg, Color(CAPTION_SCRIM_FILL.r, CAPTION_SCRIM_FILL.g, CAPTION_SCRIM_FILL.b, CAPTION_SCRIM_FILL.a * ca))
 		draw_texture_rect(Art.tex("fx_softspot"), csoft, false, Color(0.02, 0.03, 0.02, 0.7 * ca))
 		_draw_chip_glyph(lay["icon"], Color(ccol.r, ccol.g, ccol.b, ca))
-		Art.text_center(self, (lay["lines"] as Array)[0], lay["cx"], lay["y0"], lay["cs"], Color(ccol.r, ccol.g, ccol.b, ca))
+		if not lay.get("glyph_only", false):
+			Art.text_center(self, (lay["lines"] as Array)[0], lay["cx"], lay["y0"], lay["cs"], Color(ccol.r, ccol.g, ccol.b, ca))
 		return
 	var lines: Array[String] = lay["lines"]
 	var cs: int = lay["cs"]
