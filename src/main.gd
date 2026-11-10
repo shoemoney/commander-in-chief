@@ -1881,6 +1881,48 @@ func _process(_delta: float) -> void:
 		if absf(_grade_breather - _grade_mat_breather_prev) > 0.001:
 			_grade_mat.set_shader_parameter("breather", _grade_breather)
 			_grade_mat_breather_prev = _grade_breather
+		_update_sector_look(_delta)
+	_update_crt_vignette(_delta)
+
+
+# Sector look: eased toward the table entry for the sector on screen (src/view/sector_look.gd).
+# Reduce-motion snaps, like the breather above: no animated grade reaches the shader.
+var _look_cur := SectorLook.look(0)
+var _look_key := Vector3(-1, -1, -1)
+const _LOOK_EASE_K := 1.6
+const _CRT_VIG_REST := 0.18
+const _CRT_VIG_COMBAT := 0.09
+var _crt_vig := _CRT_VIG_REST
+var _crt_vig_prev := -1.0
+
+
+func _update_sector_look(dt: float) -> void:
+	if sim == null:
+		return
+	var tgt := SectorLook.look(SectorLook.index_for(sim.is_campaign_world(), _sector_march(), sim.wave))
+	_look_cur = tgt if _motion < 0.5 else SectorLook.mix(_look_cur, tgt, 1.0 - exp(-_LOOK_EASE_K * dt))
+	var lk: Vector3 = _look_cur["gain"]
+	var key := Vector3(lk.x + (_look_cur["lift"] as Vector3).z, lk.z + (_look_cur["gamma"] as Vector3).x, _look_cur["sat"])
+	if key.distance_to(_look_key) > 0.0005:
+		SectorLook.push(_grade_mat, _look_cur)
+		_look_key = key
+
+
+## The always-on CRT corner darkening eases down while enemies are live so the edges of the
+## play field keep their contrast in a fight, and back up in the lulls.
+func _update_crt_vignette(dt: float) -> void:
+	if _scan_mat == null or sim == null:
+		return
+	var fighting := false
+	for e in sim.enemies:
+		if e["alive"]:
+			fighting = true
+			break
+	var want := _CRT_VIG_COMBAT if fighting else _CRT_VIG_REST
+	_crt_vig = want if _motion < 0.5 else lerpf(_crt_vig, want, 1.0 - exp(-2.5 * dt))
+	if absf(_crt_vig - _crt_vig_prev) > 0.002:
+		_scan_mat.set_shader_parameter("vignette_strength", _crt_vig)
+		_crt_vig_prev = _crt_vig
 
 
 func start_game(endless: bool) -> void:
