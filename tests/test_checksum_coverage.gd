@@ -49,7 +49,7 @@ const KNOWN := {
 	# max_hp: spawn-time constant (same rationale as the colossus's, below) — it
 	# only sizes _damage_boss's arena-crack thirds, so it is NOT in checksum().
 	"boss": ["alive", "hp", "max_hp", "x", "dir", "phase_t", "gate_y", "stx", "sty", "st_at",
-		"kind", "y", "fx", "fy", "st", "st_t", "wp", "wpm", "rv", "sx", "sy", "ex", "ey", "cn"],   # Siege Tank (SiegeBoss.HASHED_KEYS fed conditionally; kind is the tag)
+		"kind", "y", "fx", "fy", "st", "st_t", "wp", "wpm", "rv", "sx", "sy", "ex", "ey", "cn", "sc"],   # Siege Tank (SiegeBoss.HASHED_KEYS fed conditionally; kind is the tag)
 	"strike": ["x", "y", "ticks", "obs", "crater"],   # crater: Siege Tank shell flag, breaks bags in its ring (the bags are hashed)
 	"water": ["y", "ford_x"],
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],

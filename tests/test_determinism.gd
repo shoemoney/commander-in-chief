@@ -808,13 +808,17 @@ const SEED := 0xDEADBEEF
 ## the four merged sim packages reaches this stream (bisected too: fairness, economy and
 ## gunship are each green against the fairness-recorded values). The run opens 2 gates and
 ## still wipes (13 knockdowns); SURVIVOR_GOLDEN remains the live-state arm.
+## RE-RECORDED (2026-11-10 -- REVIEW FIXES, SIM): sample 5 ONLY again, same cause: the player holds a
+## special from tick 3073, and a special that has nothing to hit now falls through to the MG
+## (so a held flamethrower no longer stands mute: it shoots MG rounds) + the rocket's lead /
+## proximity fuse. Samples 0-4 are byte-identical (no special in hand before 3072).
 const GOLDEN: Array[int] = [
 	4777686421406228267,
 	6331385278001629063,
 	5720059147807561410,
 	6422984499686730060,
 	3092976764520280189,
-	1667085400203293580,
+	7512635039189011389,
 ]
 
 

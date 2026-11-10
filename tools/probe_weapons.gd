@@ -5,6 +5,7 @@ extends SceneTree
 ##   tools/run_tests.sh -s res://tools/probe_weapons.gd
 
 const Suite := preload("res://tests/test_weapons.gd")
+const Review := preload("res://tests/test_review_fixes.gd")
 
 
 func _init() -> void:
@@ -18,4 +19,9 @@ func _init() -> void:
 			var r: Array = s.ttk(wid, sc)
 			cells.append("%d [%d]" % [r[0], r[1]])
 		print("%-22s %-14s %-14s %-14s" % [sc, cells[0], cells[1], cells[2]])
+	# Rockets vs a drifting gunship (same scenario code as tests/test_review_fixes.gd).
+	var rv := Review.new()
+	print("\nrocket launcher vs the drifting gunship, 900 ticks: [rockets fired, hull hp lost (6 per hit), hull hp]")
+	for rng in [60, 120, 200]:
+		print("  range %3d px: %s" % [rng, str(rv._gunship_duel(rng, 900))])
 	quit()

@@ -3170,7 +3170,8 @@ func _buff_chip_specs(p: Dictionary) -> Array:
 		# Icon is the non-colour channel; the number is its magazine.
 		var flamer: bool = p.get("weapon", 0) == Weapons.FLAME
 		chips.append({"icon": "icon_flame" if flamer else "icon_rocket", "txt": "%d" % p["wpn_ammo"],
-			"col": Color(1.0, 0.62, 0.25) if flamer else Color(1.0, 0.5, 0.42), "prio": BUFF_PRIO_PERSIST + 2 + BUFF_TICK_CAP})
+			"col": Color(0.92, 1.0, 0.78) if flamer else Color(0.45, 0.62, 0.85),
+			"prio": BUFF_PRIO_PERSIST + 2 + BUFF_TICK_CAP})   # col == main._CAPSULE_COL[8] / [9]: pale lime-white / steel blue
 	if p["rend_ticks"] > 0:
 		# icon_rend — Rend owns a baked icon now (was wep_rifle=Pierce's, then
 		# wep_mg=Triple's; tint-only splits failed protan eyes — both loops' catch).

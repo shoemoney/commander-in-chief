@@ -344,7 +344,11 @@ func test_neither_special_dominates_the_mg() -> void:
 			table[[wid, sc]] = ttk(wid, sc)[0]
 	# Flame: best on a close pack, useless on armor (never kills the heavies), beaten by the MG at range.
 	Runner.T.ok(table[[Weapons.FLAME, "pack of 5 @50"]] > 0 and table[[Weapons.FLAME, "pack of 5 @50"]] < table[[Weapons.NONE, "pack of 5 @50"]], "flame clears a close pack faster than the MG")
-	Runner.T.eq(table[[Weapons.FLAME, "mg_nest hp3 @100"]], -1, "flame cannot touch a nest")
+	# Review fix: the flame still cannot cook a nest, but a holder no longer stands mute in front of
+	# one - with nothing to burn the same trigger falls through to the MG, so the kill takes exactly
+	# the MG's time and burns no fuel (it was -1: the MG branch was unreachable behind the special).
+	Runner.T.eq(table[[Weapons.FLAME, "mg_nest hp3 @100"]], table[[Weapons.NONE, "mg_nest hp3 @100"]], "flame holder kills a nest with the MG, in the MG's time")
+	Runner.T.eq(ttk(Weapons.FLAME, "mg_nest hp3 @100")[1], 0, "...without burning a drop of fuel")
 	Runner.T.eq(table[[Weapons.FLAME, "bunker @100"]], -1, "flame cannot open a bunker")
 	# Rocket: the only non-grenade answer to a bunker; clears the pack; but loses to the MG on a lone grunt.
 	Runner.T.eq(table[[Weapons.NONE, "bunker @100"]], -1, "the MG cannot open a bunker")

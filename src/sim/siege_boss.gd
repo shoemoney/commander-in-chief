@@ -45,6 +45,11 @@ const X_MIN := 90 * F
 const X_MAX := 550 * F
 const Y_LIMIT_DY := 300 * F               # a charge never ends further south than the gate + this
 const MUZZLE := 22 * F                    # MG / strike origin ahead of the hull centre
+## Act 1 has no charge and no stun, so the rear plate never opens and only grenades (8) and
+## rockets (6) hurt the hull. The arena's one free grenade crate therefore RE-ARMS this many
+## ticks after the last of everyone's grenades / loaded launchers is gone (see step_supply).
+const RESUPPLY_TICKS := 180
+const CRATE_POS := [120, 160]             # px, x / y below the gate wall: where _stamp_siege_cover puts it
 const COVER_SNAP := 120 * F               # a bag this close to the player is "his cover"
 
 # Arena dressing (px relative to the gate wall): cover the shells crater, wrecks that stop a
@@ -52,7 +57,7 @@ const COVER_SNAP := 120 * F               # a bag this close to the player is "h
 const COVER_BAGS := [[170, 150], [210, 150], [430, 190], [470, 190]]
 const WRECKS := [[96, 130, 2], [544, 130, 2]]
 # Every gameplay field the gunship dict does not already carry: fed to SimWorld.checksum().
-const HASHED_KEYS := ["y", "fx", "fy", "st", "st_t", "wp", "wpm", "rv", "sx", "sy", "ex", "ey", "cn"]
+const HASHED_KEYS := ["y", "fx", "fy", "st", "st_t", "wp", "wpm", "rv", "sx", "sy", "ex", "ey", "cn", "sc"]
 
 enum St { SHELL, SWEEP_WARN, SWEEP, REV, CHARGE, STUN, RETURN }
 const ST_NAMES := ["SHELL", "SWEEP_WARN", "SWEEP", "REV", "CHARGE", "STUN", "RETURN"]
@@ -95,7 +100,7 @@ static func make(gate_y: int, max_hp: int) -> Dictionary:
 	return {"alive": true, "hp": max_hp, "max_hp": max_hp, "x": 320 * F, "dir": 1,
 		"phase_t": 0, "gate_y": gate_y, "kind": "siege",
 		"y": gate_y + REST_DY, "fx": 0, "fy": F, "st": St.SHELL, "st_t": 0,
-		"wp": 0, "wpm": 0, "rv": 0, "sx": 0, "sy": 0, "ex": 0, "ey": 0, "cn": 0}
+		"wp": 0, "wpm": 0, "rv": 0, "sx": 0, "sy": 0, "ex": 0, "ey": 0, "cn": 0, "sc": 0}
 
 
 static func act_of(boss: Dictionary) -> int:
@@ -173,10 +178,36 @@ static func act_name(act: int) -> String:
 
 # --- the state machine ----------------------------------------------------------------
 
+static func step_supply(sim, boss: Dictionary) -> void:
+	## Progress without dying. While nobody alive holds a grenade or a loaded rocket launcher
+	## (the only two things that hurt the hull in act 1) and no free grenade crate is lying in
+	## the arena, count up; at RESUPPLY_TICKS the arena crate is stamped again at its home spot.
+	## boss["sc"] is hashed state. A single crate at a time, so it never stacks.
+	var starved := false
+	for p in sim.players:
+		if not p["alive"]:
+			continue
+		if p["grenade_ammo"] > 0 or (p["weapon"] == Weapons.ROCKET and p["wpn_ammo"] > 0):
+			boss["sc"] = 0
+			return
+		starved = true
+	if not starved:
+		return
+	for pk in sim.pickups:
+		if pk["kind"] == 1 and int(pk.get("cost", 0)) == 0:
+			boss["sc"] = 0
+			return
+	boss["sc"] = boss["sc"] + 1
+	if boss["sc"] >= RESUPPLY_TICKS:
+		boss["sc"] = 0
+		sim.pickups.append({"x": CRATE_POS[0] * F, "y": boss["gate_y"] + CRATE_POS[1] * F, "kind": 1, "cost": 0})
+
+
 static func step(sim, boss: Dictionary) -> void:
 	boss["phase_t"] = boss["phase_t"] + 1
 	boss["st_t"] = boss["st_t"] + 1
 	var act: int = act_of(boss)
+	step_supply(sim, boss)
 	match boss["st"]:
 		St.SHELL:
 			_step_shell(sim, boss, act)

@@ -1539,7 +1539,8 @@ func _step_players(inputs: Array) -> void:
 		# dry in a swarm still buys survival and nothing else. `fire_prev` is kept (hashed
 		# state, and the honest record of the wire input) even though nothing reads it.
 		p["fire_prev"] = inp.fire
-		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0 and p["weapon"] == Weapons.NONE:
+		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0 \
+				and (p["weapon"] == Weapons.NONE or p["in_tank"] >= 0 or not _special_has_target(p)):
 			# Empty-clip bash: one enemy in reach dies (no coin), on a long
 			# cooldown — running dry is a beat of danger, not pure helplessness.
 			var bashed := false
@@ -1601,9 +1602,13 @@ func _step_players(inputs: Array) -> void:
 				# fire is gone: with the edge gate removed its condition is now identical
 				# to the branch above, so it was unreachable.)
 				events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
+		# A held special OWNS the trigger only while it has something to hit; with nothing in
+		# its cone / lane the same tick falls through to the MG (a flamethrower holder under
+		# a gunship used to stand mute: the flame cannot hurt it and the MG branch was dead).
+		var special_engaged := false
 		if inp.fire and p["weapon"] != Weapons.NONE and p["in_tank"] < 0:
-			_fire_special(p, i)
-		elif inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
+			special_engaged = _fire_special(p, i)
+		if not special_engaged and inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
 			p["fire_cd"] = FIRE_COOLDOWN_TICKS
 			p["mg_ammo"] = p["mg_ammo"] - 1
 			events.append({"t": "shot", "x": p["x"], "y": p["y"], "i": i})
@@ -4939,32 +4944,44 @@ func _flame_target_ok(e: Dictionary) -> bool:
 	return _enemy_strikeable(e) and e["kind"] != "pilot" and not (e["kind"] in Weapons.FLAME_IMMUNE)
 
 
-func _fire_special(p: Dictionary, i: int) -> void:
+func _special_has_target(p: Dictionary) -> bool:
+	## Something the held special would fire at right now (cooldown ignored): a flameable body
+	## in the cone, or a rocket target in the lane. Shared by the trigger, the MG fall-through
+	## and the empty-clip bash so the three can never disagree about who owns the trigger.
+	if p["weapon"] == Weapons.FLAME:
+		var wt: Dictionary = Weapons.TABLE[Weapons.FLAME]
+		var reach: int = flame_reach(p)
+		for e in enemies:
+			if _flame_target_ok(e) and Weapons.in_cone(e["x"] - p["x"], e["y"] - p["y"], p["aim_x"], p["aim_y"],
+					reach, wt["tan"], wt["pad"]):
+				return true
+		return false
+	if p["weapon"] == Weapons.ROCKET:
+		return _rocket_lane_has_target(p, Weapons.TABLE[Weapons.ROCKET])
+	return false
+
+
+func _fire_special(p: Dictionary, i: int) -> bool:
 	## One call per tick while a special is held and fire is down (always-fire). It only
 	## spends the magazine when there is something to hit: the player has no trigger.
+	## Returns true while the special OWNS the trigger this tick (it fired, is cooling down,
+	## or its rocket is still in flight at a live target); false means it has nothing to hit
+	## and the caller lets the MG shoot instead.
 	if p["fire_cd"] > 0:
-		return
+		return true
 	var wt: Dictionary = Weapons.TABLE[p["weapon"]]
 	var ax: int = p["aim_x"]
 	var ay: int = p["aim_y"]
+	if not _special_has_target(p):
+		return false
 	if p["weapon"] == Weapons.FLAME:
-		var found := false
-		for e in enemies:
-			if _flame_target_ok(e) and Weapons.in_cone(e["x"] - p["x"], e["y"] - p["y"], ax, ay,
-					wt["reach"], wt["tan"], wt["pad"]):
-				found = true
-				break
-		if not found:
-			return
 		_flame_burst(p, i)
 	else:
 		# One rocket in the air per launcher: without this the 36-tick cooldown re-fires at the
 		# very target the first rocket is still flying toward and wastes the second.
 		for fr in rockets:
 			if fr["owner"] == i:
-				return
-		if not _rocket_lane_has_target(p, wt):
-			return
+				return true
 		rockets.append({"x": p["x"] + Fixed.mul(ax, 8 * F_ONE), "y": p["y"] + Fixed.mul(ay, 8 * F_ONE),
 			"vx": Fixed.mul(ax, wt["speed"]), "vy": Fixed.mul(ay, wt["speed"]),
 			"ttl": wt["ttl"], "owner": i})
@@ -4975,6 +4992,38 @@ func _fire_special(p: Dictionary, i: int) -> void:
 		p["wpn_ammo"] = 0
 		p["weapon"] = Weapons.NONE   # magazine spent: back to the MG (its mods wake up)
 		events.append({"t": "weapon_empty", "x": p["x"], "y": p["y"], "i": i})
+	return true
+
+
+func flame_reach(p: Dictionary) -> int:
+	## How far the flame cone really runs from this player, fixed px: the open-field reach,
+	## clipped at the near face of the first INDESTRUCTIBLE blocker (stone, hero wreck: solid and
+	## not _rk_burnable) on the aim line. Sandbags, grass and wall slabs burn, so they never
+	## clip it. The view draws the cone with this same number (WeaponFx).
+	var wt: Dictionary = Weapons.TABLE[Weapons.FLAME]
+	var reach: int = wt["reach"]
+	var ax: int = p["aim_x"]
+	var ay: int = p["aim_y"]
+	var pad: int = wt["pad"]
+	var aax: int = absi(ax)
+	var aay: int = absi(ay)
+	for rk in rocks:
+		if not _rk_solid(rk) or _rk_burnable(rk):
+			continue
+		var dx: int = rk["x"] - p["x"]
+		var dy: int = rk["y"] - p["y"]
+		if absi(dx) > reach + ROCK_HALF_W_MAX or absi(dy) > reach + ROCK_HALF_W_MAX:
+			continue
+		var hw: int = _rk_hw(rk)
+		var hh: int = _rk_hh(rk)
+		var along: int = Fixed.mul(dx, ax) + Fixed.mul(dy, ay)
+		var cross: int = Fixed.mul(dx, ay) - Fixed.mul(dy, ax)
+		var ext_along: int = Fixed.mul(hw, aax) + Fixed.mul(hh, aay)
+		var ext_cross: int = Fixed.mul(hw, aay) + Fixed.mul(hh, aax)
+		if absi(cross) > ext_cross + pad or along + ext_along < 0:
+			continue
+		reach = mini(reach, maxi(0, along - ext_along))
+	return reach
 
 
 func _flame_burst(p: Dictionary, i: int) -> void:
@@ -4983,6 +5032,7 @@ func _flame_burst(p: Dictionary, i: int) -> void:
 	var wt: Dictionary = Weapons.TABLE[Weapons.FLAME]
 	var ax: int = p["aim_x"]
 	var ay: int = p["aim_y"]
+	var reach: int = flame_reach(p)
 	events.append({"t": "flame", "x": p["x"], "y": p["y"], "i": i, "ax": ax, "ay": ay})
 	var shrugged := false
 	for e in enemies:
@@ -4990,7 +5040,7 @@ func _flame_burst(p: Dictionary, i: int) -> void:
 			continue
 		var dx: int = e["x"] - p["x"]
 		var dy: int = e["y"] - p["y"]
-		if not Weapons.in_cone(dx, dy, ax, ay, wt["reach"], wt["tan"], wt["pad"]):
+		if not Weapons.in_cone(dx, dy, ax, ay, reach, wt["tan"], wt["pad"]):
 			continue
 		if e["kind"] in Weapons.FLAME_IMMUNE or (e["kind"] == "shield" and _shield_blocks(e, {"vx": dx, "vy": dy})):
 			shrugged = true
@@ -5002,12 +5052,12 @@ func _flame_burst(p: Dictionary, i: int) -> void:
 				continue
 		_kill_enemy(e)
 	if shrugged:
-		events.append({"t": "armor_block", "x": p["x"] + Fixed.mul(ax, wt["reach"] / 2),
-			"y": p["y"] + Fixed.mul(ay, wt["reach"] / 2)})
+		events.append({"t": "armor_block", "x": p["x"] + Fixed.mul(ax, reach / 2),
+			"y": p["y"] + Fixed.mul(ay, reach / 2)})
 	var si := sandbags.size() - 1
 	while si >= 0:
 		var sb := sandbags[si]
-		if Weapons.in_cone(sb["x"] - p["x"], sb["y"] - p["y"], ax, ay, wt["reach"], wt["tan"], SANDBAG_HALF_W):
+		if Weapons.in_cone(sb["x"] - p["x"], sb["y"] - p["y"], ax, ay, reach, wt["tan"], SANDBAG_HALF_W):
 			sb["scorch"] = sb.get("scorch", 0) + 1
 			if sb["scorch"] >= wt["cover_hits"]:
 				events.append({"t": "bag_burn", "x": sb["x"], "y": sb["y"]})
@@ -5021,7 +5071,7 @@ func _flame_burst(p: Dictionary, i: int) -> void:
 		var brk := rocks[ri]
 		if not _rk_burnable(brk):
 			continue
-		if Weapons.in_cone(brk["x"] - p["x"], brk["y"] - p["y"], ax, ay, wt["reach"], wt["tan"], _rk_hw(brk)):
+		if Weapons.in_cone(brk["x"] - p["x"], brk["y"] - p["y"], ax, ay, reach, wt["tan"], _rk_hw(brk)):
 			brk["burn_ticks"] = brk.get("burn_ticks", 0) + 1
 			if brk["burn_ticks"] >= wt["cover_hits"]:
 				events.append({"t": "cover_burn" if brk.get("kind", 0) == 1 else "cover_crack",
@@ -5043,17 +5093,57 @@ func _rocket_lane_has_target(p: Dictionary, wt: Dictionary) -> bool:
 			return true
 	for g in gates:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
-				and Weapons.in_lane(g["boss"]["x"] - p["x"], boss_cy(g["boss"]) - p["y"],
-					ax, ay, wt["reach"], wt["lane"] + boss_hr(g["boss"])):
+				and Weapons.in_lane(_rocket_lead_x(p, g["boss"], g["boss"]["x"], boss_cy(g["boss"]), wt) - p["x"],
+					boss_cy(g["boss"]) - p["y"], ax, ay, wt["reach"], wt["lane"] + boss_hr(g["boss"])):
 			return true
 	if not endless_boss.is_empty() and endless_boss["alive"] \
-			and Weapons.in_lane(endless_boss["x"] - p["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET - p["y"],
-				ax, ay, wt["reach"], wt["lane"] + BOSS_HIT_RADIUS):
+			and Weapons.in_lane(_rocket_lead_x(p, endless_boss, endless_boss["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET, wt) - p["x"],
+				endless_boss["gate_y"] - BOSS_Y_OFFSET - p["y"], ax, ay, wt["reach"], wt["lane"] + BOSS_HIT_RADIUS):
 		return true
 	if not colossus.is_empty() and colossus["alive"] \
 			and Weapons.in_lane(colossus["x"] - p["x"], colossus["y"] - p["y"], ax, ay, wt["reach"],
 				wt["lane"] + COLOSSUS_HIT_RADIUS):
 		return true
+	return false
+
+
+func _boss_vx(boss: Dictionary) -> int:
+	## The gunship's sideways drift in fixed px per tick (the same expression _step_one_boss
+	## integrates). The Siege Tank drives in bursts it telegraphs, so it reports 0 here.
+	if SiegeBoss.is_siege(boss):
+		return 0
+	var act: int = EndlessRoster.boss_act(wave / 5, boss["hp"], boss.get("max_hp", _scaled_boss_hp(BOSS_HP)))
+	return GunshipPhases.speed(act, BOSS_SPEED) * boss["dir"]
+
+
+func _rocket_lead_x(p: Dictionary, boss: Dictionary, bx: int, by: int, wt: Dictionary) -> int:
+	## Where a drifting hull will be when a rocket launched now along the aim reaches it:
+	## its x advanced by (distance / rocket speed) ticks of its own drift, kept inside the
+	## rails it bounces between. Used by the auto-trigger only, so the rocket is released
+	## when the hull will MEET it rather than when the hull is merely in the lane.
+	var vx: int = _boss_vx(boss)
+	if vx == 0:
+		return bx
+	var along: int = Fixed.mul(bx - p["x"], p["aim_x"]) + Fixed.mul(by - p["y"], p["aim_y"])
+	var ticks: int = clampi(along / wt["speed"], 0, wt["ttl"])
+	return clampi(bx + vx * ticks, 60 * F_ONE, 580 * F_ONE)
+
+
+## Proximity fuse reach past a big hull's edge: a rocket that passes within this of a gate
+## boss's hull detonates (the splash, `blast`, still reaches the hull from here).
+const ROCKET_FUSE_PAD := 14 * F_ONE
+
+
+func _rocket_fuses(x: int, y: int) -> bool:
+	for g in gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
+				and _dist_lte(x, y, g["boss"]["x"], boss_cy(g["boss"]), boss_hr(g["boss"]) + ROCKET_FUSE_PAD):
+			return true
+	if not endless_boss.is_empty() and endless_boss["alive"]:
+		var goff: Array = boss_flyin_offset(endless_boss["phase_t"])
+		if _dist_lte(x, y, endless_boss["x"] + int(goff[0]),
+				endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1]), BOSS_HIT_RADIUS + ROCKET_FUSE_PAD):
+			return true
 	return false
 
 
@@ -5107,7 +5197,7 @@ func _step_rockets() -> void:
 		if r["y"] < ylo or r["y"] > yhi or r["x"] < 0 or r["x"] > SCREEN_W_FP:
 			rockets.remove_at(i)   # left the arena unspent
 			continue
-		if r["ttl"] <= 0 or _rocket_hits(r["x"], r["y"]):
+		if r["ttl"] <= 0 or _rocket_hits(r["x"], r["y"]) or _rocket_fuses(r["x"], r["y"]):
 			var bx: int = r["x"]
 			var by: int = r["y"]
 			rockets.remove_at(i)

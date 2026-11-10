@@ -26,9 +26,11 @@ static func cone_polygon(origin: Vector2, aim: Vector2, reach: float, tan_half: 
 	])
 
 
-static func flame_cone(origin: Vector2, aim: Vector2) -> PackedVector2Array:
+static func flame_cone(origin: Vector2, aim: Vector2, reach_px := -1.0) -> PackedVector2Array:
+	## reach_px < 0 = the open-field reach; the live draw passes SimWorld.flame_reach(p) so the
+	## cone stops where the sim's does (indestructible cover clips it).
 	var wt: Dictionary = Weapons.TABLE[Weapons.FLAME]
-	return cone_polygon(origin, aim, float(wt["reach"]) * PX, float(wt["tan"]) / float(Fixed.ONE), float(wt["pad"]) * PX)
+	return cone_polygon(origin, aim, float(wt["reach"]) * PX if reach_px < 0.0 else reach_px, float(wt["tan"]) / float(Fixed.ONE), float(wt["pad"]) * PX)
 
 
 static func blast_radius_px() -> float:
@@ -53,7 +55,8 @@ static func draw_world(c: CanvasItem, sim: SimWorld, to_screen: Callable, motion
 	for pi in sim.players.size():
 		var p: Dictionary = sim.players[pi]
 		if p["alive"] and p.get("weapon", 0) == Weapons.FLAME and p["fire_cd"] > 0:
-			_draw_flame(c, to_screen.call(p["x"], p["y"]), Vector2(p["aim_x"], p["aim_y"]) * PX, frame, pi, motion)
+			_draw_flame(c, to_screen.call(p["x"], p["y"]), Vector2(p["aim_x"], p["aim_y"]) * PX, frame, pi, motion,
+				float(sim.flame_reach(p)) * PX)
 	for r in sim.rockets:
 		var pos: Vector2 = to_screen.call(r["x"], r["y"])
 		if pos.y < -20.0 or pos.y > 380.0 or pos.x < -20.0 or pos.x > 660.0:
@@ -61,11 +64,10 @@ static func draw_world(c: CanvasItem, sim: SimWorld, to_screen: Callable, motion
 		_draw_rocket(c, pos, Vector2(r["vx"], r["vy"]).normalized(), frame)
 
 
-static func _draw_flame(c: CanvasItem, origin: Vector2, aim: Vector2, frame: int, pi: int, motion: float) -> void:
+static func _draw_flame(c: CanvasItem, origin: Vector2, aim: Vector2, frame: int, pi: int, motion: float, reach: float) -> void:
 	var wt: Dictionary = Weapons.TABLE[Weapons.FLAME]
-	var reach := float(wt["reach"]) * PX
 	var tan_half := float(wt["tan"]) / float(Fixed.ONE)
-	var poly := flame_cone(origin, aim)
+	var poly := flame_cone(origin, aim, reach)
 	var hot := Color(1.0, 0.55, 0.15, 0.16)
 	c.draw_colored_polygon(poly, hot)
 	var a := aim.normalized()

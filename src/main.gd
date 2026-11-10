@@ -8627,7 +8627,7 @@ const ELITE_AURA_ALPHA := {"base": 0.12, "pulse": 0.07}   # a3-12: base holds un
 const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
 	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
-	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65), Color(0.8, 0.7, 0.5), Color(1.0, 0.55, 0.2), Color(1.0, 0.4, 0.35)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family
+	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65), Color(0.8, 0.7, 0.5), Color(0.92, 1.0, 0.78), Color(0.45, 0.62, 0.85)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family; [8] flame / [9] rocket left the red/amber band too: pale lime-white vs steel blue (hue 130 deg and 0.5 luminance apart)
 
 
 static func _tiny_decor_no_rim(tex_name: String, screen_w: float) -> bool:
