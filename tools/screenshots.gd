@@ -309,6 +309,9 @@ func _build_shots() -> void:
 		{"name": "bridge-gunship", "build": _shot_gunship},
 		{"name": "gunship-act2-cover-denial", "build": _shot_gunship_act2},
 		{"name": "gunship-act3-carpet", "build": _shot_gunship_act3},
+		{"name": "siege-tank-charge-lane", "build": _shot_siege_charge},
+		{"name": "siege-tank-rear-window", "build": _shot_siege_window},
+		{"name": "siege-tank-sweep-fan", "build": _shot_siege_sweep},
 		{"name": "foundry-colossus-last-stand", "build": _shot_colossus, "dress": _dress_colossus},
 		{"name": "victoly", "build": _shot_victoly, "dress": _dress_victoly},
 		# retry-meta: the Campaign K.I.A. card with its VP line and RETRY SECTOR row.
@@ -337,7 +340,7 @@ func _shot_firefight() -> SimWorld:
 	var sim := SimWorld.new(7, 1)
 	var p := sim.players[0]
 	p["x"] = 300 * F
-	p["y"] = _cam(sim, 270)
+	p["y"] = _cam(sim, 300)
 	p["aim_x"] = 0
 	p["aim_y"] = -F
 	p["mg_ammo"] = 64
@@ -463,6 +466,44 @@ func _shot_gunship_act(hp: int, t_from: int, t_to: int) -> SimWorld:
 	for st in sim.strikes:
 		st["ticks"] = 20
 	return sim
+
+
+func _siege_staged(hp: int, until_state: int, extra_ticks: int) -> SimWorld:
+	## Stage the REAL Siege Tank state: drive SiegeBoss.step until it reaches `until_state`,
+	## then `extra_ticks` more, so the lane / fan / plate on screen are the sim's own.
+	var sim := SimWorld.new(7, 1)
+	var gy := _cam(sim, 60)
+	sim.rocks.clear()
+	sim.sandbags.clear()
+	var boss := SiegeBoss.make(gy, 80)
+	boss["hp"] = hp
+	sim.gates.append({"y": gy, "open": false, "b1": {}, "b2": {}, "final": false, "boss": boss})
+	sim._stamp_siege_cover(gy)
+	var p := sim.players[0]
+	p["x"] = 250 * F
+	p["y"] = _cam(sim, 300)
+	p["aim_x"] = 0
+	p["aim_y"] = -F
+	var guard := 0
+	while boss["st"] != until_state and guard < 4000:
+		SiegeBoss.step(sim, boss)
+		guard += 1
+	for i in extra_ticks:
+		SiegeBoss.step(sim, boss)
+	sim.events.clear()
+	return sim
+
+
+func _shot_siege_charge() -> SimWorld:
+	return _siege_staged(50, SiegeBoss.St.REV, 14)
+
+
+func _shot_siege_window() -> SimWorld:
+	return _siege_staged(50, SiegeBoss.St.STUN, 20)
+
+
+func _shot_siege_sweep() -> SimWorld:
+	return _siege_staged(20, SiegeBoss.St.SWEEP, 24)
 
 
 func _shot_gunship_act2() -> SimWorld:

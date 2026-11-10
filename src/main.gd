@@ -629,6 +629,10 @@ const _EVENT_SOUND := {
 	"rend_pierce": ["vest_break", -8.0, 2.0],      # metal shear (KIMK: pitch 2.0 clears the true-break band)
 	"mg_nest_aim": ["alarm_air", -12.0, 0.85],   # a1-13: aerial paint-whine, pitched below sniper_paint
 	"technical_rev": ["rev", -8.0, 1.0],   # rising engine growl: a charge is coming (own synth — the tank_board clunk at 0.75 couldn't read as a rev)
+	"siege_fire": ["explosion", -9.0, 0.6],       # the Siege Tank's turret thump: a shell is in the air (its ring is the strike_warn telegraph)
+	"siege_vent": ["vest_break", -6.0, 0.55],    # the hull winds down after the charge: the rear plate just opened
+	"siege_slam": ["rubble", -3.0, 0.7],         # the charge hit a wreck head-on
+	"siege_dismount": ["click_dry", -7.0, 0.9],  # escorts spill out of the rear hatches
 	"technical_stall": ["splash", -8.0, 0.7],      # charge dies at the bank — wheels don't swim, audibly
 	"pilot_down": ["avenge", -8.0, 0.8],           # crash-site ransom ping — friendly rising two-note (the alarm voice at 1.1 was byte-identical to tank_ignite's 'bail out now')
 	"pilot_lost": ["alarm", -14.0, 0.6],           # low fail tone — he's gone
@@ -5322,7 +5326,9 @@ func _check_boss_intro() -> void:
 		if _seen_bosses.has(g["y"]):
 			continue
 		_seen_bosses[g["y"]] = true
-		show_banner("BRIDGE GUNSHIP", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
+		show_banner(SiegeView.BANNER if SiegeBoss.is_siege(g["boss"]) else "BRIDGE GUNSHIP", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
+		if SiegeBoss.is_siege(g["boss"]):
+			_hint("siege", TranslationServer.translate("SIEGE TANK — BULLETS PING OFF. GRENADE IT, OR SHOOT THE REAR PLATE WHEN IT VENTS"))
 		_sfx.play("alarm", -2.0, 0.85)
 		if _menu.mode != GameMenu.Mode.TITLE: _sfx.play_sting("boss_intro")   # audio-director
 		_cmd_bark("rally", 60)   # Commander rallies the troops at the boss arrival
@@ -7621,6 +7627,12 @@ static func _demo_boss_target(dsim: SimWorld, p: Dictionary) -> Dictionary:
 			continue
 		if g["y"] < dsim.camera_top or g["y"] > dsim.camera_top + SimWorld.VIEW_H:
 			continue
+		if SiegeBoss.is_siege(g["boss"]):
+			# The ground boss: shoot the rear plate while it is open (the one place a bullet
+			# counts), the hull otherwise (grenades). "siege" asks demo_input to hold range.
+			var sp: Array = SiegeBoss.weak_point(g["boss"]) if SiegeBoss.weak_open(g["boss"]) \
+				else [g["boss"]["x"], g["boss"]["y"]]
+			return {"x": sp[0], "y": sp[1], "siege": true}
 		return {"x": g["boss"]["x"], "y": g["boss"]["gate_y"] - SimWorld.BOSS_Y_OFFSET}
 	# Base infantry used to body-rush into the open-loop sweep, so campaign
 	# deliberately ignored loose bodies while the bot sapped objectives. Riflemen
@@ -7740,6 +7752,10 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 		if llen > Fixed.ONE:
 			inp.aim_x = clampi(Fixed.div(ldx, llen) / 256, -256, 256)
 			inp.aim_y = clampi(Fixed.div(ldy, llen) / 256, -256, 256)
+		if lock.get("siege", false):
+			# A tap-lobbed grenade lands ~99 px out, so a bot that marches into the hull's lap
+			# (its default north push) never connects: stand ~100 px south of the Siege Tank.
+			inp.move_y = clampi((lock["y"] + 100 * Fixed.ONE - p["y"]) / Fixed.ONE * 8, -256, 256)
 	if p["in_tank"] >= 0:
 		if dsim.tanks[p["in_tank"]]["burning"]:
 			# Hull's on fire and the crew is exposed from ignition on, so riding it
@@ -12697,7 +12713,10 @@ func _draw_gunships() -> void:
 	for g in sim.gates:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
-		_draw_one_gunship(g["boss"], "BRIDGE GUNSHIP", slot)
+		if SiegeBoss.is_siege(g["boss"]):
+			SiegeView.draw(self, g["boss"], slot)
+		else:
+			_draw_one_gunship(g["boss"], "BRIDGE GUNSHIP", slot)
 		slot += 1
 	if not sim.endless_boss.is_empty() and sim.endless_boss["alive"]:
 		# Endless miniboss wears the attack-heli bake so it reads as its own threat,
@@ -13407,7 +13426,7 @@ func _boss_bar(boss: Dictionary, label: String, slot: int, pt: int) -> void:
 	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * HudIcons.BOSS_BAR_STRIDE
 	# a2-17 HUD#6: name the phase (actionable) instead of "PHASE 1/2"; HUD#1: plate it
 	# so the highest-stakes read has the plate language the rest of the top band has.
-	var gplabel := gunship_phase_label(label, pt, EndlessRoster.boss_act(sim.wave / 5 if is_same(boss, sim.endless_boss) else 0,
+	var gplabel := SiegeView.label(boss) if SiegeBoss.is_siege(boss) else gunship_phase_label(label, pt, EndlessRoster.boss_act(sim.wave / 5 if is_same(boss, sim.endless_boss) else 0,
 		boss["hp"], boss.get("max_hp", int(_boss_hpmax[bkey]))))
 	var gpw := Art.tw(gplabel, 10)
 	draw_rect(_label_plate_rect(bar_x, bar_y, gpw), LABEL_PLATE_FILL)
@@ -15198,7 +15217,7 @@ func _draw_threat_edges() -> void:
 	for g in sim.gates:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
-		var gsy: float = (g["boss"]["gate_y"] - SimWorld.BOSS_Y_OFFSET - sim.camera_top) * PX
+		var gsy: float = (SimWorld.boss_cy(g["boss"]) - sim.camera_top) * PX
 		if gsy < 0.0 and gsy > near_sy:
 			near_sy = gsy
 			near_x = clampf(g["boss"]["x"] * PX, 8.0, 632.0)
@@ -15935,7 +15954,7 @@ func _band_top_text(top_msg: String) -> Dictionary:
 					continue
 				if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
 					continue
-				return {"text": "DESTROY THE GUNSHIP TO ADVANCE" if not g["boss"].is_empty()
+				return {"text": (SiegeView.BAND if SiegeBoss.is_siege(g["boss"]) else "DESTROY THE GUNSHIP TO ADVANCE") if not g["boss"].is_empty()
 					else "GRENADE THE BUNKERS TO ADVANCE", "size": 11}
 			return {}
 		"mortar":

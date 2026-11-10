@@ -281,3 +281,5 @@ msgstr "ロケットランチャー — 低速、装甲を砕く。射線が合�
 
 msgid "THE GUNSHIP IS STILL ARRIVING — SHOTS BOUNCE OFF UNTIL IT LANDS"
 msgstr "ガンシップはまだ接近中 — 着陸するまで弾は弾かれる"
+msgid "SIEGE TANK — BULLETS PING OFF. GRENADE IT, OR SHOOT THE REAR PLATE WHEN IT VENTS"
+msgstr "攻城戦車 — 弾は弾かれる。手榴弾か、排気中の後部装甲を撃て"

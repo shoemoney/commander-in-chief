@@ -794,6 +794,7 @@ const FROGMAN_SURFACE_TICKS := 30
 # Bridge Gunship: every 3rd gate is a bridge boss fight. Bullets chip it,
 # grenades chunk it; strafe sprays and mortar volleys alternate.
 const BOSS_GATE_EVERY := 3
+const SIEGE_GATE_INDEX := 5   # CRASHED CONVOY: the convoy's surviving armor (SiegeBoss) holds this gate
 const BOSS_HP := 40
 const BOSS_GRENADE_DAMAGE := 8
 const BOSS_HIT_RADIUS := 20 * F_ONE
@@ -3620,8 +3621,8 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		_kill_observer()
 	for g in gates:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
-				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": g["boss"]["gate_y"] - BOSS_Y_OFFSET})
+				and _dist_lte(x, y, g["boss"]["x"], boss_cy(g["boss"]), GRENADE_RADIUS + boss_hr(g["boss"])):
+			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": boss_cy(g["boss"])})
 			_damage_boss(g["boss"], BOSS_GRENADE_DAMAGE)
 	# EVERY explosive (grenades, airbursts, barrels, mines/claymores, tank-death
 	# blasts) routes through this one branch, so tracking the approach here makes
@@ -5042,8 +5043,8 @@ func _rocket_lane_has_target(p: Dictionary, wt: Dictionary) -> bool:
 			return true
 	for g in gates:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
-				and Weapons.in_lane(g["boss"]["x"] - p["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET - p["y"],
-					ax, ay, wt["reach"], wt["lane"] + BOSS_HIT_RADIUS):
+				and Weapons.in_lane(g["boss"]["x"] - p["x"], boss_cy(g["boss"]) - p["y"],
+					ax, ay, wt["reach"], wt["lane"] + boss_hr(g["boss"])):
 			return true
 	if not endless_boss.is_empty() and endless_boss["alive"] \
 			and Weapons.in_lane(endless_boss["x"] - p["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET - p["y"],
@@ -5081,7 +5082,7 @@ func _rocket_hits(x: int, y: int) -> bool:
 			return true
 	for g in gates:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
-				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, BOSS_HIT_RADIUS):
+				and _dist_lte(x, y, g["boss"]["x"], boss_cy(g["boss"]), boss_hr(g["boss"])):
 			return true
 	if not endless_boss.is_empty() and endless_boss["alive"]:
 		var goff: Array = boss_flyin_offset(endless_boss["phase_t"])
@@ -5152,8 +5153,8 @@ func _rocket_blast(x: int, y: int) -> void:
 			bl["fuse_ticks"] = BARREL_FUSE_TICKS
 	for g in gates:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
-				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, rad + BOSS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": g["boss"]["gate_y"] - BOSS_Y_OFFSET})
+				and _dist_lte(x, y, g["boss"]["x"], boss_cy(g["boss"]), rad + boss_hr(g["boss"])):
+			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": boss_cy(g["boss"])})
 			_damage_boss(g["boss"], wt["boss_dmg"])
 	if not endless_boss.is_empty() and endless_boss["alive"]:
 		var goff: Array = boss_flyin_offset(endless_boss["phase_t"])
@@ -6035,6 +6036,10 @@ func _step_camera() -> void:
 			_stamp_gunship_gate(_next_gate_y, 0, true)
 			# Boss stretches compose too (c2 3v — see _stamp_stretch_setpieces).
 			_stamp_stretch_setpieces()
+		elif _gate_counter == SIEGE_GATE_INDEX:
+			# Crashed Convoy: a ground boss holds this gate instead of two bunkers.
+			_stamp_gunship_gate(_next_gate_y, 0, true, "siege")
+			_stamp_stretch_setpieces()
 		else:
 			# Arena template lookup (unlisted indexes fall back to classic —
 			# future-proof if FINAL_GATE_INDEX ever grows).
@@ -6394,7 +6399,7 @@ func _step_camera() -> void:
 		_next_rear_y -= REAR_TRICKLE_SPACING
 
 
-func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void:
+func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool, kind := "gunship") -> void:
 	## Bridge Gunship gate: no arena bunkers -- the Gunship IS the lock. Shared
 	## by the campaign gate-3 stream and Boss Rush (authored-campaign-and-
 	## modes), which restamps this exact arena back-to-back with an escalating
@@ -6403,6 +6408,15 @@ func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void
 	## stripped-down stand-in. include_approach skips the MG-nest approach ramp
 	## for Boss Rush (a deliberate "no field filler between fights" design
 	## choice -- see _setup_boss_rush) while the campaign stream keeps it.
+	if kind == "siege":
+		# Boss-kind parameter (not a copy of this function): the SiegeBoss gets the same
+		# gate record, the same approach ramp and the same death -> gate-open plumbing.
+		gates.append({"y": gy, "open": false, "b1": {}, "b2": {},
+			"boss": SiegeBoss.make(gy, _scaled_boss_hp(SiegeBoss.HP + hp_bonus))})
+		_stamp_siege_cover(gy)
+		if include_approach:
+			_stamp_boss_approach(gy)
+		return
 	gates.append({"y": gy, "open": false, "b1": {}, "b2": {},
 		"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + hp_bonus),
 			"max_hp": _scaled_boss_hp(BOSS_HP + hp_bonus), "x": SCREEN_CX,
@@ -6432,8 +6446,26 @@ func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void
 	barrels.append({"x": 110 * F_ONE, "y": gy + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
 	barrels.append({"x": 128 * F_ONE, "y": gy + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
 	pickups.append({"x": 120 * F_ONE, "y": gy + 150 * F_ONE, "kind": 0, "cost": 0})
-	if not include_approach:
-		return
+	if include_approach:
+		_stamp_boss_approach(gy)
+
+
+func _stamp_siege_cover(gy: int) -> void:
+	## The Siege Tank's arena: the shelled convoy. Sandbag rows are the cover its shells
+	## crater; two wreck slabs flank a CLEAR centre lane (the charge runs down it and a
+	## slab stops it dead); an ammo cache and a free grenade crate on the left are the
+	## supply (grenades are what hurt the hull, bullets only the open rear plate).
+	for bag in SiegeBoss.COVER_BAGS:
+		sandbags.append({"x": bag[0] * F_ONE, "y": gy + bag[1] * F_ONE})
+	for wk in SiegeBoss.WRECKS:
+		rocks.append({"x": wk[0] * F_ONE, "y": gy + wk[1] * F_ONE, "kind": wk[2]})
+	barrels.append({"x": 110 * F_ONE, "y": gy + 130 * F_ONE, "armed": true, "fuse_ticks": 0})
+	barrels.append({"x": 128 * F_ONE, "y": gy + 130 * F_ONE, "armed": true, "fuse_ticks": 0})
+	pickups.append({"x": 120 * F_ONE, "y": gy + 160 * F_ONE, "kind": 1, "cost": 0})
+	pickups.append({"x": 520 * F_ONE, "y": gy + 170 * F_ONE, "kind": 0, "cost": 0})
+
+
+func _stamp_boss_approach(gy: int) -> void:
 	# c3 2v APPROACH RAMP (gate 3 / Bridge Gunship only — the final gate
 	# already ships the calm band + parapets + vents). Density ESCALATES
 	# toward the gate so the boss room does not appear with no warning: 1
@@ -7429,7 +7461,10 @@ func _step_boss() -> void:
 		# Engage only while the bridge is in view.
 		if g["y"] < camera_top or g["y"] > camera_top + VIEW_H:
 			continue
-		_step_one_boss(g["boss"])
+		if SiegeBoss.is_siege(g["boss"]):
+			SiegeBoss.step(self, g["boss"])
+		else:
+			_step_one_boss(g["boss"])
 
 
 static func boss_mortar_ticks(tier: int) -> Array:
@@ -7441,6 +7476,18 @@ static func boss_mortar_ticks(tier: int) -> Array:
 	if tier == 2:
 		return BOSS_MORTAR_TICKS_T2
 	return BOSS_MORTAR_TICKS
+
+
+static func boss_cy(boss: Dictionary) -> int:
+	## Where a gate boss IS on the y axis. The gunship hovers a fixed BOSS_Y_OFFSET above
+	## its gate; the SiegeBoss is a ground unit that drives, so it carries its own y.
+	if SiegeBoss.is_siege(boss):
+		return boss["y"]
+	return boss["gate_y"] - BOSS_Y_OFFSET
+
+
+static func boss_hr(boss: Dictionary) -> int:
+	return SiegeBoss.HIT_R if SiegeBoss.is_siege(boss) else BOSS_HIT_RADIUS
 
 
 static func boss_flyin_offset(phase_t: int) -> Array:
@@ -7590,6 +7637,17 @@ func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
 		var boss: Dictionary = g["boss"]
+		if SiegeBoss.is_siege(boss):
+			# Ground armor: the ONE rule is SiegeBoss.bullet_result (rear plate only, only while it is open).
+			var sres: String = SiegeBoss.bullet_result(boss, b["x"], b["y"])
+			if sres == "weak":
+				events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
+				_damage_boss(boss, SiegeBoss.WEAK_DAMAGE)
+				return true
+			if sres == "armor":
+				events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+				return true
+			continue
 		if _dist_lte(b["x"], b["y"], boss["x"], boss["gate_y"] - BOSS_Y_OFFSET, BOSS_HIT_RADIUS):
 			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
 			_damage_boss(boss, 1)
@@ -7688,7 +7746,7 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		# boss dicts. A boss with no phase field is an arrived one — offset [0, 0].
 		var doff: Array = boss_flyin_offset(boss.get("phase_t", 0))
 		var bx: int = boss["x"] + int(doff[0])
-		var by: int = boss["gate_y"] - BOSS_Y_OFFSET + int(doff[1])
+		var by: int = boss_cy(boss) + int(doff[1])
 		events.append({"t": "explosion", "x": bx, "y": by})
 		events.append({"t": "kill", "x": bx, "y": by, "coin": bounty, "kind": "boss"})
 		# The gunship's pilot punches out at the crash site and staggers for the
@@ -7966,6 +8024,15 @@ func _resolve_strikes() -> void:
 		for tank in tanks:
 			if tank["alive"] and _dist_lte(s["x"], s["y"], tank["x"], tank["y"], GRENADE_RADIUS):
 				_ignite_tank(tank, true)
+		if s.get("crater", false):
+			# Siege Tank shell: the ring that hurts you also breaks the bags inside it.
+			var cbi := sandbags.size() - 1
+			while cbi >= 0:
+				if _dist_lte(s["x"], s["y"], sandbags[cbi]["x"], sandbags[cbi]["y"], GRENADE_RADIUS):
+					_break_sandbag_at(cbi)
+					cbi = mini(cbi - 1, sandbags.size() - 1)
+				else:
+					cbi -= 1
 		strikes.remove_at(i)
 
 
@@ -8174,6 +8241,10 @@ func checksum() -> int:
 		if not g["boss"].is_empty():
 			for v in [g["boss"]["hp"], g["boss"]["x"], int(g["boss"]["alive"]), g["boss"]["phase_t"], g["boss"]["dir"]]:
 				h = feed.call(v, h)
+			if SiegeBoss.is_siege(g["boss"]):
+				# Conditional feed (sandbag-scorch precedent): the gunship's stream is untouched.
+				for k in SiegeBoss.HASHED_KEYS:
+					h = feed.call(g["boss"][k], h)
 	if not observer.is_empty():
 		h = feed.call(observer["x"], h)
 		h = feed.call(observer["strike_cd"], h)
