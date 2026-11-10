@@ -47,7 +47,7 @@ const TEX := {
 	"frogman": preload(BAKED + "frogman/base.png"),
 	"frogman_speargun": preload(BAKED + "frogman_speargun/base.png"),
 	"observer": preload(ART + "cast2/observer2.png"),
-	"bunker": preload(ART + "cast2/bunker.png"),
+	"bunker": preload(BAKED + "bunker/bunker.png"),
 	"trophy": preload(ART + "cast2/trophy.png"),
 	# nt-03: bespoke generated player-tank art (fal.ai + Replicate) replacing
 	# a plain camo rectangle with no hull/turret/track shape at all. tank_body
@@ -56,8 +56,8 @@ const TEX := {
 	# own sprite, independent of the hull). Both pre-rotated front-up to match
 	# the hull = dv.angle() + PI/2 correction _draw_tanks() applies -- same
 	# filenames, SCALE/TINT carry over unchanged.
-	"tank_body": preload(ART + "tank_body.png"),
-	"tank_barrel": preload(ART + "tank_barrel.png"),
+	"tank_body": preload(BAKED + "vehicle/tank_body.png"),
+	"tank_barrel": preload(BAKED + "vehicle/tank_barrel.png"),
 	# nt-02: bespoke generated boss art (fal.ai + Replicate) replacing the old
 	# gunship/colossus bakes, which literally shared tank_body/tank_barrel's
 	# camo material and read as up-scaled generic vehicles. gunship_body is
@@ -68,14 +68,14 @@ const TEX := {
 	# chin-turret/twin-barrel offsets in main.gd once the PI draw rotation
 	# flips them to face the players. Same filenames -> SCALE/TINT/BOSS_RIM
 	# below carry over unchanged.
-	"gunship_body": preload(ART + "gunship_body.png"),
-	"gunship_barrel": preload(ART + "gunship_barrel.png"),
-	"colossus_body": preload(ART + "colossus_body.png"),
-	"colossus_barrel": preload(ART + "colossus_barrel.png"),
-	"sandbag_beige": preload(ART + "sandbag.png"),
-	"crate_ammo": preload(ART + "crate_ammo.png"),
-	"crate_grenade": preload(ART + "crate_grenade.png"),
-	"crate_airstrike": preload(ART + "crate_airstrike.png"),
+	"gunship_body": preload(BAKED + "gunship/gunship_body.png"),
+	"gunship_barrel": preload(BAKED + "gunship/gunship_barrel.png"),
+	"colossus_body": preload(BAKED + "colossus/colossus_body.png"),
+	"colossus_barrel": preload(BAKED + "colossus/colossus_barrel.png"),
+	"sandbag_beige": preload(BAKED + "cover/sandbag_beige.png"),
+	"crate_ammo": preload(BAKED + "crate/crate_ammo.png"),
+	"crate_grenade": preload(BAKED + "crate/crate_grenade.png"),
+	"crate_airstrike": preload(BAKED + "crate/crate_airstrike.png"),
 	# Iran desert reskin: nano-banana cactus art (see desert_assets_source.md),
 	# baked to the same canvas size as the jungle tree_large/tree_small.png it
 	# replaces (120px/96px) so SCALE/TINT below carry over unchanged.
@@ -144,11 +144,11 @@ const TEX := {
 	# ~0.7 MB of VRAM at boot for zero drawn pixels. Files stay for when a
 	# damage-direction or glow pass actually wants them.
 	# --- the earlier art Military decor (war-torn battlefield litter) ---
-	"barrel": preload(ART + "decor/barrel.png"),
+	"barrel": preload(BAKED + "cover/barrel.png"),
 	"crate_stack": preload(ART + "decor/crate_stack.png"),
-	"rock1": preload(ART + "decor/rock1.png"),
-	"rock2": preload(ART + "decor/rock2.png"),
-	"wreck": preload(ART + "decor/wreck.png"),
+	"rock1": preload(BAKED + "rock/rock1.png"),
+	"rock2": preload(BAKED + "rock/rock2.png"),
+	"wreck": preload(BAKED + "cover/wreck.png"),
 	"tent": preload(ART + "decor/tent.png"),
 	"watchtower": preload(ART + "decor/watchtower.png"),
 	"barbedwire": preload(ART + "decor/barbedwire.png"),
@@ -163,7 +163,7 @@ const TEX := {
 	"skyline_mast": preload(ART + "decor/skyline_mast.png"),
 	"crater": preload(ART + "decor/crater.png"),
 	# --- POLYGON War / War_Map / Nature FBX bakes (p4 asset pass, forced-atlas) ---
-	"tank_trap": preload(ART + "decor/tank_trap.png"),
+	"tank_trap": preload(BAKED + "cover/tank_trap.png"),
 	"barricade": preload(ART + "decor/barricade.png"),
 	"flak_gun": preload(ART + "decor/flak_gun.png"),
 	"trench": preload(ART + "decor/trench.png"),
@@ -288,7 +288,7 @@ const TEX := {
 	"m_heli_attack2": preload(ART + "mil2/heli_attack2.png"),
 	"m_drone": preload(ART + "mil2/drone.png"),
 	#"m_light_tank": preload(ART + "mil2/light_tank.png"),
-	"m_technical": preload(ART + "mil2/technical.png"),
+	"m_technical": preload(BAKED + "vehicle/m_technical.png"),
 	# Wreck variants: same vehicle art, but muted/small/outlined for battlefield
 	# litter (see SCALE/TINT below) — dead hulks, not live vehicles.
 	"wreck_apc": preload(ART + "mil2/apc.png"),
@@ -314,7 +314,7 @@ const TEX := {
 	"sapper": preload(ART + "p2/sapper.png"),
 	"tank_shell": preload(ART + "p2/tank_shell.png"),
 	"pickup_vest": preload(ART + "p2/pickup_vest.png"),
-	"tank_hulk": preload(ART + "p2/tank_hulk.png"),
+	"tank_hulk": preload(BAKED + "vehicle/tank_hulk.png"),
 	# charred dead-cactus for the foundry/late-war canopy set (tree_dead1-3 retired,
 	# both from the registry and on disk — Iran has no jungle deadfall to burn).
 	"cactus_dead1": preload(ART + "p2/cactus_dead1.png"),
@@ -324,7 +324,7 @@ const TEX := {
 	"wall_sandbag_b": preload(ART + "p2/wall_sandbag_b.png"),
 	"wall_sandbag_c": preload(ART + "p2/wall_sandbag_c.png"),
 	"wall_sandbag_end": preload(ART + "p2/wall_sandbag_end.png"),
-	"bunker2": preload(ART + "p2/bunker2.png"),
+	"bunker2": preload(BAKED + "bunker/bunker2.png"),
 	"corpse_soldier1": preload(ART + "p2/corpse_soldier1.png"),
 	"corpse_soldier2": preload(ART + "p2/corpse_soldier2.png"),
 	# Front face toward viewer, shield-top = image-up; rotate to carrier facing.
@@ -500,6 +500,19 @@ const BAKED_HERO_SCALE := 1.0 / 0.52
 const BAKED_RIFLEMAN_SCALE := 1.0 / 0.52
 const BAKED_SNIPER_SCALE := 1.0 / 0.5
 
+## Non-infantry bakes (tools/bake_sprites.py PROP_FAMILIES): PNG is pre-sized to
+## its on-screen footprint, so SCALE = 1 / the draw site's canonical call scale.
+const BAKED_1_OVER_0_484 := 1.0 / 0.484
+const BAKED_1_OVER_0_55 := 1.0 / 0.55
+const BAKED_1_OVER_0_62 := 1.0 / 0.62
+const BAKED_1_OVER_0_78 := 1.0 / 0.78
+const BAKED_1_OVER_0_9 := 1.0 / 0.9
+const BAKED_1_OVER_1_0 := 1.0 / 1.0
+const BAKED_1_OVER_1_05 := 1.0 / 1.05
+const BAKED_1_OVER_1_3 := 1.0 / 1.3
+const BAKED_1_OVER_1_4 := 1.0 / 1.4
+const BAKED_1_OVER_1_9 := 1.0 / 1.9
+
 ## Per-sprite draw multiplier so a entity bake lands at the Kenney footprint the
 ## main.gd scale numbers were tuned for. Absent = 1.0.
 const SCALE := {
@@ -534,26 +547,26 @@ const SCALE := {
 	# invisible armour a full sprite-width off the drawn wall. 0.58 restores the
 	# authored ~58px footprint, which lands the opaque silhouette at 48px wide —
 	# exactly SimWorld.BUNKER_W. Pinned by test_hitbox_fairness.gd.
-	"bunker": 0.58,
-	"tank_body": 0.72, "tank_barrel": 0.69,
-	"gunship_body": 0.67, "colossus_body": 0.59,
+	"bunker": BAKED_1_OVER_0_78,
+	"tank_body": BAKED_1_OVER_0_62, "tank_barrel": BAKED_1_OVER_0_62,
+	"gunship_body": BAKED_1_OVER_1_3, "colossus_body": BAKED_1_OVER_1_9,
 	# Real barrel bakes replacing the 4x4 blanks: sized so the minigun sits
 	# under the ~60px hull and the twin turrets under the ~143px colossus body
 	# (main.gd draws them at 0.8 / 1.3). Tune visually.
-	"gunship_barrel": 0.5, "colossus_barrel": 0.6,
-	"sandbag_beige": 0.83,
-	"crate_ammo": 0.86, "crate_grenade": 0.86, "crate_airstrike": 0.86,
+	"gunship_barrel": BAKED_1_OVER_1_3, "colossus_barrel": BAKED_1_OVER_1_3,
+	"sandbag_beige": BAKED_1_OVER_0_484,
+	"crate_ammo": BAKED_1_OVER_0_55, "crate_grenade": BAKED_1_OVER_0_55, "crate_airstrike": BAKED_1_OVER_0_55,
 	"cactus_large": 0.89, "cactus_small": 0.91, "scrub": 0.9,
 	# Decor litter — folded to modest on-screen footprints (call _spr at 1.0).
-	"barrel": 0.11, "crate_stack": 0.13, "rock1": 0.13, "rock2": 0.14,
-	"wreck": 0.17, "tent": 0.19, "watchtower": 0.16, "barbedwire": 0.16,
+	"barrel": BAKED_1_OVER_1_4, "crate_stack": 0.13, "rock1": BAKED_1_OVER_1_3, "rock2": BAKED_1_OVER_1_05,
+	"wreck": BAKED_1_OVER_1_0, "tent": 0.19, "watchtower": 0.16, "barbedwire": 0.16,
 	"barrier": 0.13, "ammobox": 0.1,
 	# Terrain set is baked big (160-220px) but drawn at 1.0 like the litter;
 	# bridges fold to ~96px spans, crater ~48px, skyline to readable silhouettes
 	# (mast is a 1.5%-opaque lattice — below ~60px tall it aliases away).
 	"bridge_mid": 0.44, "bridge_ramp": 0.44, "crater": 0.3,
 	# p4 War/War_Map/Nature props — folded to litter footprints (retuned by eye).
-	"tank_trap": 0.14, "barricade": 0.15, "flak_gun": 0.16, "trench": 0.2,
+	"tank_trap": BAKED_1_OVER_0_9, "barricade": 0.15, "flak_gun": 0.16, "trench": 0.2,
 	"flag_marker": 0.16, "radio_tower": 0.18, "dry_shrub": 0.15, "tumbleweed": 0.14,
 	"flag_iran": 0.22,   # iran-flag: 306x600 banner -> ~132px tall behind a gunship (call-site scales up for the colossus)
 	"wreck_halftrack": 0.3, "crater_field": 0.3, "crater_water": 0.3, "mg_tripod": 0.12,
@@ -586,7 +599,7 @@ const SCALE := {
 	# native-64px placeholder blob used to.
 	"m_radar_tank": 0.72, "m_rocket_truck": 0.72, "m_jet": 0.62,
 	"m_heli_transport": 0.68, "m_heli_attack2": 0.67, "m_drone": 0.34,
-	"m_technical": 0.6,
+	"m_technical": BAKED_1_OVER_0_55,
 	"wreck_apc": 0.3, "wreck_technical": 0.28, "wreck_light_tank": 0.28,
 	"wep_grenade": 0.34, "wep_shotgun": 0.4, "wep_rifle": 0.4, "wep_mg": 0.4,
 	"wep_claymore": 0.3, "wep_smoke": 0.32, "wep_flashbang": 0.3,
@@ -607,11 +620,11 @@ const SCALE := {
 	"ghillie": 0.5, "courier": 1.05, "sapper": 0.5,
 	"tank_shell": 0.8,               # ~grenade footprint (26px)
 	"pickup_vest": 0.86,             # ~crate_ammo (same 56px canvas)
-	"tank_hulk": 0.72,               # ~tank_body (same 104px canvas)
+	"tank_hulk": BAKED_1_OVER_0_62,               # ~tank_body (same 104px canvas)
 	"cactus_dead1": 0.89, "cactus_dead2": 0.89, "cactus_dead3": 0.89,   # ~cactus_large
 	"wall_sandbag": 0.28, "wall_sandbag_b": 0.28, "wall_sandbag_c": 0.28,
 	"wall_sandbag_end": 0.55,   # fold to sandbag_beige's ~66px span
-	"bunker2": 0.58,                 # ~bunker (same 440px source, same 128px import — see the bunker note)
+	"bunker2": BAKED_1_OVER_0_78,                 # ~bunker (same 440px source, same 128px import — see the bunker note)
 	"corpse_soldier1": 0.21, "corpse_soldier2": 0.21,   # 140px canvas → ~29px, litter class (1.0 drew a tank-sized corpse)
 	"fx_flame": 0.46,                # 200px FX card, same norm as fx_smoke
 	# _spr sizes off the IMPORTED texture, so size_limit changes must land here
@@ -792,17 +805,21 @@ const TINT := {
 
 ## Sprites that get a 1px dark outline in _spr() for readability on any ground.
 const OUTLINE := {
+	# props-style: tank_body/tank_barrel/m_technical/bunker/sandbag_beige/crate_*/barrel/rock1/rock2/wreck
+	# are BAKED (tools/bake_sprites.py PROP_FAMILIES) with their own 1px ink keyline, so the 1.1px _spr rim
+	# is omitted (same as the hero): the double rim made a 3px black border and swallowed the thin barrel.
+	# Bosses keep theirs: _BOSS_RIM's warm rim + hit-flash is gameplay feedback, not just separation.
 	# sol-06: player1/player2 are OMITTED — the infantry set hero bakes its own thick black keyline,
 	# so the _spr 1.7px rim on top read as a fat sticker and swallowed the 18px silhouette. The baked
 	# contour carries the separation now (pin: test asserts the hero keys are NOT in OUTLINE).
 	"rusher": true, "elite": true,
-	"observer": true, "bunker": true,   # sol-12: frogman dropped — the pack diver bakes its own keyline (no double rim), matching hero/enemy
-	"tank_body": true, "tank_barrel": true, "gunship_body": true,
+	"observer": true,   # sol-12: frogman dropped — the pack diver bakes its own keyline (no double rim), matching hero/enemy
+	"gunship_body": true,
 	"gunship_barrel": true, "colossus_body": true, "colossus_barrel": true,
-	"sandbag_beige": true, "mg_stand": true, "riot_shield": true,
-	"crate_ammo": true, "crate_grenade": true, "crate_airstrike": true,
-	"barrel": true, "crate_stack": true, "rock1": true, "rock2": true,
-	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
+	"mg_stand": true, "riot_shield": true,
+	
+	"crate_stack": true, 
+	"watchtower": true, "barrier": true, "ammobox": true,
 	"m_pilot": true,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
 	# review tell 2 (overturns sol-11/sie-01's "baked keyline, no double rim" for these keys):
 	# the sol-08 red-team swap never added the enemy_* keys here, so the _spr rim gate drew
@@ -816,7 +833,7 @@ const OUTLINE := {
 	# own black keyline, matching the enemy_* red-team convention (no double rim).
 	"m_radar_tank": true, "m_rocket_truck": true, "m_jet": true,
 	"m_heli_transport": true, "m_heli_attack2": true, "m_drone": true,
-	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
+	"wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
 	"wep_grenade": true, "wep_claymore": true,
 	# The rare-capsule sprites (cap_*) below DO reach _spr (main.gd:11023) and stay.
 	#

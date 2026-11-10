@@ -15,6 +15,7 @@ from PIL import Image, ImageFilter
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BAKED = os.path.join(ROOT, "assets", "baked")
 INK = np.array([13, 15, 10])
+PROP_DIRS = {"vehicle", "gunship", "colossus", "bunker", "crate", "cover", "rock"}
 MAX_COLORS = 48          # shared palette (<=40) + the ink keyline
 
 
@@ -68,9 +69,17 @@ class Baked(unittest.TestCase):
             self.assertGreaterEqual(keyline_ratio(arr), 0.99, f)
 
     def test_screen_sized(self):
+        # infantry <=48px; the prop families (PROP_FAMILIES) include 144px bosses
         for f in files():
             w, h = Image.open(f).size
-            self.assertLessEqual(max(w, h), 48, f)
+            fam = os.path.basename(os.path.dirname(f))
+            self.assertLessEqual(max(w, h), 160 if fam in PROP_DIRS else 48, f)
+
+    def test_prop_canvases_are_even(self):
+        for f in files():
+            if os.path.basename(os.path.dirname(f)) in PROP_DIRS:
+                w, h = Image.open(f).size
+                self.assertEqual((w % 2, h % 2), (0, 0), f)
 
 
 class Controls(unittest.TestCase):

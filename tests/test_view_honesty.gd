@@ -583,30 +583,32 @@ func test_px_is_only_ever_applied_to_fixed_point_quantities() -> void:
 ## NOTE (sprite bake): player1/2, enemy_*, frogman* are now BAKED screen-sized
 ## canvases (tools/bake_sprites.py) whose SCALE is 1 / call scale (net 1.0), so their
 ## rows here are the baked canvas, not a master. Re-bake -> re-measure these rows.
+# props-style: bunker/crate/cover/rock/vehicle/boss keys are now BAKED PNGs (tools/bake_sprites.py
+# PROP_FAMILIES) whose canvas IS the on-screen size, with SCALE = 1/call scale (net 1.0).
 const SPRITE_CANVAS := {
 	"icon_flame": 64, "icon_rocket": 64,   # special-weapon chip + capsule art (tools/gen_ui_icons.py)
-	"ammobox": 160, "barbedwire": 220, "barrel": 160, "barricade": 200, "barrier": 220, "bridge_mid": 220,
-	"bridge_ramp": 220, "bunker": 128, "bunker2": 128, "cactus_dead1": 120, "cactus_dead2": 120,
+	"ammobox": 160, "barbedwire": 220, "barrel": 26, "barricade": 200, "barrier": 220, "bridge_mid": 220,
+	"bridge_ramp": 220, "bunker": 58, "bunker2": 58, "cactus_dead1": 120, "cactus_dead2": 120,
 	"cactus_dead3": 120, "cactus_large": 120, "cactus_small": 96, "cap_claymore": 128, "cap_flash": 128,
 	"cap_pierce": 128, "cap_rend": 128, "cap_smoke": 128, "cap_spread": 128, "cap_triple": 128,
-	"colossus_barrel": 72, "colossus_body": 128, "corpse_soldier1": 140, "corpse_soldier2": 140,
-	"courier": 64, "crate_airstrike": 56, "crate_ammo": 56, "crate_grenade": 56, "crate_stack": 220,
+	"colossus_barrel": 56, "colossus_body": 144, "corpse_soldier1": 140, "corpse_soldier2": 140,
+	"courier": 64, "crate_airstrike": 26, "crate_ammo": 26, "crate_grenade": 26, "crate_stack": 220,
 	"crater": 160, "crater_field": 240, "crater_water": 240, "dropped_shield": 140, "dry_shrub": 220,
 	"elite": 256, "enemy_assault": 28, "enemy_lmg": 32, "enemy_shotgun": 32, "enemy_smg": 30,
 	"enemy_sniper": 30, "explosion0": 128, "explosion1": 128, "explosion2": 128, "explosion3": 128,
 	"fallen_merc": 180, "flag_iran": 600, "flag_marker": 200, "flak_gun": 220, "frogman": 26,
 	"frogman_speargun": 32, "fx_bubble1": 64, "fx_bubble2": 64, "fx_flame": 200, "fx_fumes": 128,
-	"fx_impactdark": 200, "fx_muzzle_fan": 128, "fx_smoke": 200, "ghillie": 128, "gunship_barrel": 48,
-	"gunship_body": 112, "hud_flag": 128, "item_binoculars": 40, "item_bullet": 32, "item_bullet_shotgun": 32,
+	"fx_impactdark": 200, "fx_muzzle_fan": 128, "fx_smoke": 200, "ghillie": 128, "gunship_barrel": 32,
+	"gunship_body": 98, "hud_flag": 128, "item_binoculars": 40, "item_bullet": 32, "item_bullet_shotgun": 32,
 	"m_bombsuit": 128, "m_drone": 48, "m_heli_attack2": 112, "m_heli_transport": 112, "m_jet": 128,
-	"m_pilot": 56, "m_radar_tank": 104, "m_rocket_truck": 104, "m_soldier2": 128, "m_technical": 96,
+	"m_pilot": 56, "m_radar_tank": 104, "m_rocket_truck": 104, "m_soldier2": 128, "m_technical": 32,
 	"mg_stand": 160, "mg_tripod": 160, "mz_pop": 128, "observer": 128, "pickup_vest": 56, "player1": 36,
-	"player2": 36, "radio_tower": 220, "riot_shield": 64, "rock1": 220, "rock2": 260, "rusher": 256,
-	"sandbag_beige": 80, "sapper": 128, "scrub": 72, "skyline_chimney": 160, "skyline_mast": 200,
-	"tank_barrel": 72, "tank_body": 104, "tank_hulk": 104, "tank_shell": 32, "tank_trap": 200,
+	"player2": 36, "radio_tower": 220, "riot_shield": 64, "rock1": 38, "rock2": 38, "rusher": 256,
+	"sandbag_beige": 32, "sapper": 128, "scrub": 72, "skyline_chimney": 160, "skyline_mast": 200,
+	"tank_barrel": 32, "tank_body": 46, "tank_hulk": 46, "tank_shell": 32, "tank_trap": 26,
 	"tent": 260, "trench": 260, "tumbleweed": 200, "wall_sandbag": 240, "wall_sandbag_b": 240,
 	"wall_sandbag_c": 240, "wall_sandbag_end": 120, "watchtower": 260, "wep_claymore": 40, "wep_flashbang": 40,
-	"wep_grenade": 40, "wep_mg": 56, "wep_rifle": 56, "wep_shotgun": 56, "wep_smoke": 40, "wreck": 220,
+	"wep_grenade": 40, "wep_mg": 56, "wep_rifle": 56, "wep_shotgun": 56, "wep_smoke": 40, "wreck": 38,
 	"wreck_apc": 104, "wreck_halftrack": 240, "wreck_light_tank": 96, "wreck_technical": 96,
 }
 

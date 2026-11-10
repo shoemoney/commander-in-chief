@@ -1641,7 +1641,13 @@ func test_sol_guards() -> void:
 		# sol-15/16 reject: the watermarked/hollow large muzzle flash is never registered.
 		Runner.T.ok(not path.contains("muzzleflash_large"), "the rejected muzzleflash_large is unregistered (sol-15)")
 		# sol-18: every registered infantry set key resolves to a live, imported asset (no dead SOL row).
-		if path.contains("/troops/") or path.contains("/baked/"):   # baked/ = the same sprites, pre-shrunk by tools/bake_sprites.py
+		# baked/ = the same sprites, pre-shrunk by tools/bake_sprites.py. The props-style families
+		# (vehicle/gunship/colossus/bunker/crate/cover/rock) are NOT soldiers: they share the folder, not the pin.
+		var is_prop_bake := false
+		for fam in ["vehicle", "gunship", "colossus", "bunker", "crate", "cover", "rock"]:
+			if path.contains("/baked/%s/" % fam):
+				is_prop_bake = true
+		if path.contains("/troops/") or (path.contains("/baked/") and not is_prop_bake):
 			soldier_keys += 1
 			Runner.T.ok(ResourceLoader.exists(path), "soldier key '%s' resolves to a live asset (sol-18)" % k)
 	# sol-18: the ship-set is EXACTLY the intended subset — player1+player2 (2) + 5 enemy + 2 frogman +
@@ -3401,12 +3407,12 @@ const _LITTER_FAMILIES := {
 }
 const _LITTER_PATHS := {
 	"wreck_halftrack": "res://assets/art/decor/wreck_halftrack.png",
-	"wreck": "res://assets/art/decor/wreck.png",
+	"wreck": "res://assets/baked/cover/wreck.png",
 	"wreck_apc": "res://assets/art/mil2/apc.png",
 	"wreck_light_tank": "res://assets/art/mil2/light_tank.png",
-	"tank_hulk": "res://assets/art/p2/tank_hulk.png",
-	"rock1": "res://assets/art/decor/rock1.png",
-	"rock2": "res://assets/art/decor/rock2.png",
+	"tank_hulk": "res://assets/baked/vehicle/tank_hulk.png",
+	"rock1": "res://assets/baked/rock/rock1.png",
+	"rock2": "res://assets/baked/rock/rock2.png",
 	"corpse_soldier1": "res://assets/art/p2/corpse_soldier1.png",
 	"corpse_soldier2": "res://assets/art/p2/corpse_soldier2.png",
 	"fallen_merc": "res://assets/art/decor/fallen_merc.png",

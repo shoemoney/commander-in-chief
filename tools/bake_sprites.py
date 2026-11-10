@@ -178,12 +178,84 @@ def bake_set(s):
     return {p: im.size for p, im in shrunk.items()}
 
 
+# ---------------------------------------------------------------------------
+# NON-INFANTRY families (vehicles, bosses, bunkers, crates, cover, rocks, flora).
+# Each key: (source png under assets/, canonical CALL scale of its draw site,
+# old Art.SCALE row). The on-screen size is src * call * old_scale; the bake
+# is that size exactly and the NEW Art.SCALE row is 1/call (net 1.0). Sizes are
+# rounded to even so the canvas centre (the draw pivot) stays on a pixel edge,
+# and the canvas is NOT cropped, so the pivot and opaque footprint stay put.
+# Output: assets/baked/<family>/<key>.png
+# ---------------------------------------------------------------------------
+ART = os.path.join(ROOT, "assets", "art")
+
+PROP_FAMILIES = {
+    "vehicle": {"colors": 32, "items": {
+        "tank_body": ("tank_body.png", 0.62, 0.72),
+        "tank_barrel": ("tank_barrel.png", 0.62, 0.69),
+        "m_technical": ("mil2/technical.png", 0.55, 0.60),
+        "tank_hulk": ("p2/tank_hulk.png", 0.62, 0.72)}},
+    "gunship": {"colors": 32, "items": {
+        "gunship_body": ("gunship_body.png", 1.3, 0.67),
+        "gunship_barrel": ("gunship_barrel.png", 1.3, 0.5)}},
+    "colossus": {"colors": 40, "items": {
+        "colossus_body": ("colossus_body.png", 1.9, 0.59),
+        "colossus_barrel": ("colossus_barrel.png", 1.3, 0.6)}},
+    # bunker sources are 440px on disk (the import caps them to 128), so the
+    # bake reads the full-resolution master: sharper than the old path.
+    "bunker": {"colors": 36, "items": {
+        "bunker": ("cast2/bunker.png", 0.78, 0.58, 128),
+        "bunker2": ("p2/bunker2.png", 0.78, 0.58, 128)}},
+    "crate": {"colors": 28, "items": {
+        "crate_ammo": ("crate_ammo.png", 0.55, 0.86),
+        "crate_grenade": ("crate_grenade.png", 0.55, 0.86),
+        "crate_airstrike": ("crate_airstrike.png", 0.55, 0.86)}},
+    "cover": {"colors": 36, "items": {
+        "sandbag_beige": ("sandbag.png", 0.484, 0.83),
+        "barrel": ("decor/barrel.png", 1.4, 0.11),
+        "tank_trap": ("decor/tank_trap.png", 0.9, 0.14),
+        "wreck": ("decor/wreck.png", 1.0, 0.17)}},
+    "rock": {"colors": 20, "items": {
+        "rock1": ("decor/rock1.png", 1.3, 0.13),
+        "rock2": ("decor/rock2.png", 1.05, 0.14)}},
+}
+
+
+def bake_prop_family(name, fam):
+    shrunk = {}
+    for key, spec in fam["items"].items():
+        rel, call, old = spec[:3]
+        src = Image.open(os.path.join(ART, rel)).convert("RGBA")
+        # 4th field: the import size_limit the old path drew through (bunker 128)
+        eff = min(max(src.size), spec[3]) if len(spec) > 3 else max(src.size)
+        t = call * old * eff / max(src.size)
+        w, h = _even(src.size[0] * t), _even(src.size[1] * t)
+        shrunk[key] = src.resize((w, h), Image.BOX)
+    pal = shared_palette(list(shrunk.values()), fam["colors"])
+    d = os.path.join(OUT, name)
+    os.makedirs(d, exist_ok=True)
+    for key, im in shrunk.items():
+        finish(im, pal).save(os.path.join(d, f"{key}.png"), optimize=True)
+    return {k: im.size for k, im in shrunk.items()}
+
+
 def main():
+    only = os.environ.get("BAKE_ONLY")
+    for name, fam in PROP_FAMILIES.items():
+        if only and only != name:
+            continue
+        sizes = bake_prop_family(name, fam)
+        print(f"{name:10s} -> " + ", ".join(f"{k}={w}x{h}" for k, (w, h) in sizes.items()))
+    if only:
+        return 0
+    # Props, vehicles and bosses are still BAKED here from their masters. The infantry is
+    # not: those sprites are designed at native size by tools/gen_infantry.py, and baking
+    # the old shrunk masters over them would silently undo that. Asking for it by name is
+    # the only way to get the old behaviour.
     if "--legacy-masters" not in sys.argv:
-        print("bake_sprites.py would overwrite the designed sprites in assets/baked/.\n"
-              "Regenerate them with tools/gen_infantry.py, or pass --legacy-masters "
-              "to bake the old shrunk masters on purpose.")
-        return 2
+        print("infantry sets skipped: they are designed sprites (tools/gen_infantry.py). "
+              "Pass --legacy-masters to overwrite them with the old shrunk masters on purpose.")
+        return 0
     for s in sets():
         sizes = bake_set(s)
         print(f"{s['name']:18s} t={s['t']:.4f} xs={s['xs']:.2f} -> "
