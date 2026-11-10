@@ -146,6 +146,11 @@ var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to 
 # to the SAME 4-bar/110 BPM grid, so the score reads as composed, not just louder drums.
 var _music_riff := AudioStreamPlayer.new()        # combat riff, phase-locked to _music
 var _music_riff_lull := AudioStreamPlayer.new()   # sparse calm riff, phase-locked to _music_lull
+var _dir := MusicDirector.new()   # audio-director: per-place stem tracks + stingers (falls back to the beds above)
+var last_hit_sound := ""         # audio-director: hit-confirm state, readable by tests
+var last_hit_db := 0.0
+var _hit_rr := {"flesh": 0, "wall": 0}
+var _hit_next_frame := -1000
 var _river := AudioStreamPlayer.new()        # a3-15: river burble bed, up near water
 var _foundry := AudioStreamPlayer.new()      # a3-15: machinery bed, up deep in the march
 var _shop := AudioStreamPlayer.new()         # a3-15: calm pad, up in the intermission shop
@@ -300,6 +305,7 @@ func _notification(what: int) -> void:
 		_music_riff_lull, _amb, _vo, _vo_dry, _cmd, _river, _foundry, _shop]
 	owned.append_array(_pool)
 	owned.append_array(_engines.values())
+	owned.append_array(_dir.players())
 	for n in owned:
 		if is_instance_valid(n) and n.get_parent() == null:
 			n.free()
@@ -515,6 +521,8 @@ func _finish_boot_audio() -> void:
 		pl.bus = "Music"
 		pl.volume_db = -60.0
 		add_child(pl)
+	_dir.attach(self)
+	_load_hit_bank()
 	_boot_audio_ready = true
 	_start_bed_loops_if_ready()
 
@@ -1076,10 +1084,14 @@ func set_music_intensity(level: float, duck := 0.0, boss := false) -> void:
 	## Equal-power crossfade between the two phase-locked loops; mix by volume
 	## only — never stop/restart one, or the bars lose phase alignment.
 	level = clampf(level, 0.0, 1.0)
+	duck = maxf(duck, _dir.sting_duck())   # audio-director: a stinger ducks the whole score
+	_dir.update(1.0 / 60.0, _dir_pos())
+	_dir.mix(level, duck, boss)
+	var so := _dir.synth_offset_db()   # the synth beds step aside while a stem track owns the score
 	var rate := 0.15 if duck > 0.3 else 0.04
 	var base_db := lerpf(-24.0, -9.0, level) - duck * 16.0
-	var combat_db := base_db + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0)   # a1-15 AUD#7: boss music sits a touch louder
-	var lull_db := base_db + linear_to_db(maxf(0.001, cos(level * PI / 2.0)))
+	var combat_db := base_db + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0) + so   # a1-15 AUD#7: boss music sits a touch louder
+	var lull_db := base_db + linear_to_db(maxf(0.001, cos(level * PI / 2.0))) + so
 	_music.volume_db = lerpf(_music.volume_db, combat_db, rate)
 	# Wind is the lull's voice: -24 dB in dead calm, fading UNDER the drum
 	# floor (-36) at full combat; same duck as the drums.
@@ -1090,8 +1102,8 @@ func set_music_intensity(level: float, duck := 0.0, boss := false) -> void:
 	# sits ~8dB under them and a touch quieter still in the lull, so it reads as the score's
 	# melodic hook riding IN on top of the drums, not a third competing rhythm.
 	var riff_base := lerpf(-32.0, -17.0, level) - duck * 16.0
-	var riff_combat_db := riff_base + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0)
-	var riff_lull_db := riff_base + linear_to_db(maxf(0.001, cos(level * PI / 2.0))) - 6.0
+	var riff_combat_db := riff_base + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0) + so
+	var riff_lull_db := riff_base + linear_to_db(maxf(0.001, cos(level * PI / 2.0))) - 6.0 + so
 	_music_riff.volume_db = lerpf(_music_riff.volume_db, riff_combat_db, rate)
 	_music_riff_lull.volume_db = lerpf(_music_riff_lull.volume_db, riff_lull_db, rate)
 	# a1-15 AUD#7: a boss fight drops the pitch FLOOR (heavier kick/low-tom) so it
@@ -1101,6 +1113,64 @@ func set_music_intensity(level: float, duck := 0.0, boss := false) -> void:
 	_music_lull.pitch_scale = p   # identical playback speed = zero drift
 	_music_riff.pitch_scale = p        # same key change as the drums — the riff can never drift sharp/flat
 	_music_riff_lull.pitch_scale = p
+
+
+func music_director() -> MusicDirector:
+	return _dir
+
+
+func stems_active() -> bool:
+	return _dir.stems_on
+
+
+func set_music_track(id: String) -> void:
+	## audio-director: which place the score is for. Changes land on a bar line.
+	_dir.request(id)
+
+
+func play_sting(name: String) -> void:
+	## One-shot stinger on the UI bus; ducks the score and hands it back on the next bar.
+	_dir.play_sting(name)
+
+
+func _dir_pos() -> float:
+	var src := _dir.position_source()
+	if src != null:
+		return src.get_playback_position()
+	return _music.get_playback_position() if _music.playing else -1.0
+
+
+const _HIT_FILES := {
+	"flesh": ["impactPunch_heavy_000", "impactSoft_heavy_000", "impactWood_heavy_000"],
+	"wall": ["impactMetal_medium_000", "impactMetal_medium_002", "impactPlate_medium_000"],
+}
+const HIT_GAP_FRAMES := 3
+
+
+func _load_hit_bank() -> void:
+	## audio-director: the Kenney CC0 impacts (assets/cc0_extra/sfx_impact), 3 variants each.
+	for kind in _HIT_FILES:
+		var files: Array = _HIT_FILES[kind]
+		for v in files.size():
+			var path := "res://assets/cc0_extra/sfx_impact/%s.ogg" % files[v]
+			if ResourceLoader.exists(path):
+				_sounds["hit_%s%d" % [kind, v]] = load(path)
+
+
+func play_hit(kind: String, screen_pos: Vector2, frame := -1) -> bool:
+	## Hit-confirm: a non-lethal bullet landed. Round-robin 3 variants, +-pitch, -14..-18 dB,
+	## positional, and at most one per HIT_GAP_FRAMES so a stream of rounds is a texture, not a roar.
+	if frame < 0:
+		frame = Engine.get_physics_frames()
+	if frame < _hit_next_frame + HIT_GAP_FRAMES or not _hit_rr.has(kind):
+		return false
+	_hit_next_frame = frame
+	var v: int = _hit_rr[kind]
+	_hit_rr[kind] = (v + 1) % 3
+	last_hit_sound = "hit_%s%d" % [kind, v]
+	last_hit_db = randf_range(-18.0, -14.0)
+	play_at(last_hit_sound, screen_pos, last_hit_db, randf_range(0.9, 1.12))
+	return true
 
 
 func set_ambience_march(march: float, near_water := false, in_shop := false) -> void:

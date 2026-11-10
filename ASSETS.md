@@ -331,3 +331,11 @@ python3 tools/fetch_cc0.py --check     # verify only; exit 1 on any drift
 Kenney members are copied byte-for-byte from the archives in the shared library (`$GAMEASSETS_LIBRARY`, default `~/gameassets`). Ground tiles are re-derived from ambientCG's public JSON API: 1K-JPG archive → **colour map only** → centre-crop to 512 → half-offset wrap-blend (so both axes tile) → LANCZOS to 128 → PNG. No normal, roughness, displacement, AO, HDRI or USD data is ever downloaded.
 
 <!-- END generated: assets/cc0_extra -->
+
+## Audio director (hit-confirm bank and stem-track contract)
+
+| Use | Files | Provenance |
+|---|---|---|
+| `hit_flesh0..2` (non-lethal hit on infantry-class targets) | `assets/cc0_extra/sfx_impact/impactPunch_heavy_000.ogg`, `impactSoft_heavy_000.ogg`, `impactWood_heavy_000.ogg` | Kenney `Impact Sounds (1.0)`, CC0 1.0 (rows above; licence copy in `assets/cc0_extra/licenses/source-licence-sfx_impact.txt`). Already imported (`.import` sidecars committed); `Sfx._load_hit_bank` is the first loader. |
+| `hit_wall0..2` (non-lethal hit on structures/vehicles) | `impactMetal_medium_000.ogg`, `impactMetal_medium_002.ogg`, `impactPlate_medium_000.ogg` | same |
+| Per-place music stems and stingers | `assets/music/<id>_combat.ogg` + `<id>_lull.ogg` (ids: title, sector1-6, boss, shop, laststand), `sting_{boss_intro,sector_clear,victory,defeat}.ogg`, `manifest.json` | Supplied by the soundtrack package; `MusicDirector` falls back to the synthesized beds per track while a stem is absent. |

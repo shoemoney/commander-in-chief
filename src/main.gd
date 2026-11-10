@@ -3970,6 +3970,7 @@ func _consume_events() -> void:
 				_buzz(1.0)
 				show_banner("OVERRUN — RUN OVER")
 				_sfx.play("wiped", -2.0)
+				if _menu.mode != GameMenu.Mode.TITLE: _sfx.play_sting("defeat")   # audio-director
 			"victory":
 				_ev_victory(ev)
 				# ONE voice on the win. These two lines are the same sentence — the Spotter's
@@ -4032,6 +4033,7 @@ func _check_enemy_hits() -> void:
 		var ehp: int = e.get("hp", 1)
 		if ehp < int(_enemy_hp_prev.get(eidx, ehp)):
 			_enemy_flash[eidx] = 1.0
+			_sfx.play_hit("flesh" if ekind == "elite" else "wall", _to_screen(e["x"], e["y"]))   # audio-director: a landed non-lethal bullet has a sound
 			# a2-15: the non-lethal half of the same fix. Landing real damage on a
 			# multi-HP target is a hit the player watched succeed — and it had no
 			# weight either, only a flash and some sparks. `maxi` means a hit that
@@ -4884,6 +4886,7 @@ func _boss_death_finale(x: int, y: int) -> void:
 
 
 func _ev_gate_open(ev: Dictionary) -> void:
+	if _menu.mode != GameMenu.Mode.TITLE: _sfx.play_sting("sector_clear")   # audio-director
 	_trauma = minf(1.0, _trauma + 0.2)
 	_kick += Vector2(0, 6)   # the wall gives way — a forward lurch
 	_punch = maxf(_punch, 0.04)
@@ -4987,6 +4990,7 @@ func _ev_vest_break(ev: Dictionary) -> void:
 
 
 func _ev_victory(ev: Dictionary) -> void:
+	if _menu.mode != GameMenu.Mode.TITLE: _sfx.play_sting("victory")   # audio-director
 	_victory_banked = int(ev.get("banked", 0))
 	_victory_banked_score = int(ev.get("banked_score", 0))
 	_trauma = 1.0
@@ -5026,6 +5030,7 @@ func _check_boss_intro() -> void:
 		_seen_bosses[g["y"]] = true
 		show_banner("BRIDGE GUNSHIP", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
 		_sfx.play("alarm", -2.0, 0.85)
+		if _menu.mode != GameMenu.Mode.TITLE: _sfx.play_sting("boss_intro")   # audio-director
 		_cmd_bark("rally", 60)   # Commander rallies the troops at the boss arrival
 		_trauma = minf(1.0, _trauma + 0.3)
 		_punch = maxf(_punch, 0.12)   # boss sighting gets a zoom hit, not just shake
@@ -7116,6 +7121,9 @@ func _drive_audio() -> void:
 	var intensity := minf(1.0, alive_enemies / 12.0) * 0.6 + _trauma * 0.4
 	if boss_on:
 		intensity = maxf(intensity, 0.85)
+	# audio-director: a thin line sounds thin even when few enemies are alive.
+	if _menu.mode != GameMenu.Mode.TITLE:
+		intensity = maxf(intensity, MusicDirector.danger_intensity(sim.last_stand, sim.standups_left()))
 	# Held-breath dropout before a big beat; drums duck out under last-stand
 	# so the heartbeat plays alone.
 	if _music_hold > 0:
@@ -7130,7 +7138,7 @@ func _drive_audio() -> void:
 	if sim.wiped or sim.victory or _debrief:
 		intensity = 0.0
 	if _tension > 0.4:
-		intensity = minf(intensity, 0.15)
+		intensity = minf(intensity, 0.55 if _sfx.stems_active() else 0.15)   # audio-director: a composed last-stand track plays; the bare synth bed leaves the heartbeat alone
 	# Last Stand engage: the flag flips once; the radio marks the moment.
 	if sim.last_stand and not _last_stand_prev:
 		_vo("vo_last_stand", 3, 600)
@@ -7139,6 +7147,13 @@ func _drive_audio() -> void:
 	if _vo_plea_at >= 0 and int(Engine.get_physics_frames()) >= _vo_plea_at:
 		_vo_plea_at = -1
 		_vo("vo_pilot_plea", 2, 600, true)
+	# audio-director: which place is this? (title / sector N / boss / shop / last stand)
+	var scr := MusicDirector.SCREEN_TITLE if _menu.mode == GameMenu.Mode.TITLE \
+		else (MusicDirector.SCREEN_DEBRIEF if _debrief else MusicDirector.SCREEN_PLAY)
+	var trk_sector := sim.current_sector() if sim.is_campaign_world() else clampi(sim.wave / 3, 0, 5)
+	_sfx.set_music_track(MusicDirector.pick_track(scr, trk_sector, _boss_music_on(sim),
+		sim.mode == "endless" and sim.intermission_ticks > 0, sim.last_stand and not sim.victory and not sim.wiped,
+		_sfx.music_director().current_id))
 	# VO owns the mix while speaking: rides the existing duck channel.
 	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0), _boss_music_on(sim))
 	_sfx.duck_sfx_under_vo(_sfx.vo_active(), _sfx_base_db)   # a1-14 AUD#6: dip under radio, rest at the user's SFX level (c4-fix)
