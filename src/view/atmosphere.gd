@@ -132,7 +132,16 @@ static func plan(sector: int, frames: int, motion: float, cam_px: float, layer: 
 	return ops
 
 
+## Capture tools that need a still frame turn the whole layer off here. The air is driven by
+## Engine.get_physics_frames() like every other ambient view animation, so it keeps drifting
+## while a tool holds the sim frozen — which is right for the game and wrong for a probe that
+## compares two "identical" frames. plan() stays pure; only the painting is gated.
+static var enabled := true
+
+
 static func draw(ci: CanvasItem, ops: Array) -> void:
+	if not enabled:
+		return
 	for op in ops:
 		if op["tex"]:
 			ci.draw_texture_rect(Art.tex("fx_softspot"), op["r"], false, op["c"])
