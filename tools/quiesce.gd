@@ -38,6 +38,8 @@ static func teardown(tree: SceneTree, node: Node) -> void:
 		return
 	node.process_mode = Node.PROCESS_MODE_DISABLED
 	for n in node.find_children("*", "", true, false):
+		if n.has_method("shutdown_audio"):
+			n.shutdown_audio()
 		if n is AudioStreamPlayer or n is AudioStreamPlayer2D or n is AudioStreamPlayer3D:
 			n.stop()
 			n.stream = null

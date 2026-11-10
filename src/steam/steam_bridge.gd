@@ -34,6 +34,23 @@ const ACHIEVEMENTS_SCHEMA := 1
 # methods: nothing about `_steam`'s real shape is knowable at parse time).
 const LB_SORT_DESCENDING := 2   # ELeaderboardSortMethod::k_ELeaderboardSortMethodDescending
 const LB_DISPLAY_NUMERIC := 1   # ELeaderboardDisplayType::k_ELeaderboardDisplayTypeNumeric
+const SCORE_DETAILS_SCHEMA := 1
+const SCORE_MODES: Array[String] = ["campaign", "arcade", "endless", "boss_rush", "daily"]
+const ASSIST_BITS := {
+	"vest": 1 << 0,
+	"single_stick_p1": 1 << 1,
+	"single_stick_p2": 1 << 2,
+	"classic_aim_p1": 1 << 3,
+	"classic_aim_p2": 1 << 4,
+	"aim_low": 1 << 5,
+	"aim_high": 1 << 6,
+	"toggle_grenade": 1 << 7,
+	"toggle_roll": 1 << 8,
+	"toggle_interact": 1 << 9,
+	"toggle_revive": 1 << 10,
+	"toggle_buy": 1 << 11,
+	"slow_mode": 1 << 12,
+}
 
 ## id -> {name, desc} -- the "API Name" must match the Achievements admin page
 ## on the Steamworks app once one exists. Kept here so _record_run (main.gd)
@@ -63,6 +80,9 @@ var _cache_primary_valid := false
 var _unlocked: Dictionary = {}  # local cache: achievement id -> true, so an offline unlock
                                  # is never lost and never re-fires once Steam does light up
 var _pending_score := 0         # score queued for the leaderboard whose async find is in flight
+var _pending_score_details := PackedInt32Array()
+var _pending_board_name := ""
+var _pending_board_handle := 0
 var _lb_busy := false           # true while a find->upload round trip is in flight -- guards
                                  # against a second upload_score() racing the first, since
                                  # find_leaderboard/uploadLeaderboardScore are both async
@@ -409,22 +429,56 @@ func flush_stats() -> void:
 		_call("storeStats")
 
 
-## Posts a run's score to that mode's leaderboard (created server-side on
-## first upload). findOrCreateLeaderboard is async on real Steam; the
-## upload itself happens in _on_leaderboard_found once the result signal
-## fires. A call that arrives while one is already in flight is dropped
-## (ponytail: a run only ends once today; queueing multiple in-flight
-## uploads is unneeded until a caller can actually race itself).
-func upload_score(mode: String, score: int) -> void:
+static func _score_word(value: int) -> int:
+	var word := value & 0xffffffff
+	return word - 0x100000000 if word > 0x7fffffff else word
+
+
+static func score_identity(mode: String, context: Dictionary = {}) -> Dictionary:
+	if context.is_empty():
+		return {"name": "scores_%s" % mode, "details": PackedInt32Array()}
+	if mode not in SCORE_MODES or typeof(context.get("player_count")) != TYPE_INT \
+			or int(context["player_count"]) not in [1, 2] \
+			or typeof(context.get("hard")) != TYPE_BOOL \
+			or typeof(context.get("assist_tags")) != TYPE_ARRAY \
+			or typeof(context.get("seed")) != TYPE_INT \
+			or typeof(context.get("ticks")) != TYPE_INT or int(context["ticks"]) < 0:
+		return {}
+	var mask := 0
+	for tag in context["assist_tags"]:
+		if typeof(tag) != TYPE_STRING or not ASSIST_BITS.has(tag):
+			return {}
+		mask |= int(ASSIST_BITS[tag])
+	var players: int = context["player_count"]
+	var hard: bool = context["hard"]
+	var seed: int = context["seed"]
+	var ticks: int = context["ticks"]
+	var name := "scores_v2_%s_p%d_%s_%s" % [mode, players,
+		"hard" if hard else "standard", "assisted" if mask != 0 else "unassisted"]
+	var details := PackedInt32Array([SCORE_DETAILS_SCHEMA, players, int(hard), mask,
+		_score_word(seed), _score_word(seed >> 32), _score_word(ticks), _score_word(ticks >> 32)])
+	return {"name": name, "details": details}
+
+
+## The find and upload callbacks share one captured score identity. A second
+## in-flight request is dropped so it cannot change the pending board details.
+func upload_score(mode: String, score: int, context: Dictionary = {}) -> void:
 	if not available or _lb_busy:
+		return
+	var identity := score_identity(mode, context)
+	if identity.is_empty() or (not context.is_empty() and (score < 0 or score > 0x7fffffff)):
+		push_warning("SteamBridge: invalid contextual score identity, score not uploaded")
 		return
 	_lb_busy = true
 	_pending_score = score
+	_pending_score_details = identity["details"]
+	_pending_board_name = identity["name"]
+	_pending_board_handle = 0
 	if not _call("is_connected", ["leaderboard_find_result", _on_leaderboard_found]):
 		_call("connect", ["leaderboard_find_result", _on_leaderboard_found])
 	# find_or_create (not a plain find): the leaderboard doesn't exist on Steam's
 	# side until something creates it, and this bridge is that first upload.
-	_call("findOrCreateLeaderboard", ["scores_%s" % mode, LB_SORT_DESCENDING, LB_DISPLAY_NUMERIC])
+	_call("findOrCreateLeaderboard", [identity["name"], LB_SORT_DESCENDING, LB_DISPLAY_NUMERIC])
 
 
 ## Expected GodotSteam signal shape: leaderboard_find_result(handle: int,
@@ -433,17 +487,28 @@ func upload_score(mode: String, score: int) -> void:
 ## a signal that emits fewer args than declared here would otherwise error
 ## instead of just landing on the safe "not found" branch below.
 func _on_leaderboard_found(handle: int = 0, found: int = 0) -> void:
-	if found == 0:
+	if not _lb_busy or _pending_board_handle != 0:
+		return
+	if found == 0 or handle <= 0:
 		push_warning("SteamBridge: leaderboard not found, score not uploaded")
 		_lb_busy = false
+		_pending_board_name = ""
+		_pending_score_details.clear()
 		return
-	_call("uploadLeaderboardScore", [_pending_score, true, PackedInt32Array(), handle])
+	var name: Variant = _call("getLeaderboardName", [handle])
+	if typeof(name) != TYPE_STRING or name != _pending_board_name:
+		push_warning("SteamBridge: unrelated leaderboard result ignored")
+		return
+	_pending_board_handle = handle
+	_call("uploadLeaderboardScore", [_pending_score, true, _pending_score_details, handle])
 
 
 ## Verified 4.22.1 signal: leaderboard_score_uploaded(success: bool,
 ## this_handle: int, this_score: Dictionary). Consume all three arguments.
 ## The null default rejects an incomplete direct call rather than claiming success.
 func _on_leaderboard_uploaded(result: Variant = null, _handle: int = 0, _details: Dictionary = {}) -> void:
+	if not _lb_busy or _pending_board_handle == 0 or _handle != _pending_board_handle:
+		return
 	# A failed OR ambiguous (null -- no usable arg came through) upload is
 	# logged, not retried: the score is already safe in the local Hall of
 	# Fame (main.gd), so this only ever costs a leaderboard entry, never
@@ -455,6 +520,9 @@ func _on_leaderboard_uploaded(result: Variant = null, _handle: int = 0, _details
 	if failed:
 		push_warning("SteamBridge: leaderboard score upload failed")
 	_lb_busy = false
+	_pending_board_handle = 0
+	_pending_board_name = ""
+	_pending_score_details.clear()
 
 
 ## Rich Presence: a short "what are they doing" string for the friends list

@@ -76,23 +76,25 @@ func test_unowned_perks_leave_a_fresh_endless_run_untouched() -> void:
 	main.free()
 
 
-func test_perk_levels_never_touch_a_non_endless_run() -> void:
-	# The bitmask-turned-tier system must stay Endless-only -- Campaign/Arcade/
-	# Boss Rush must never see a perk-boosted vest/chest/token.
-	var main: Node2D = MainScript.new()
-	main._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
-	main._sfx = _NullSfx.new()
-	main._perk_levels = {MainScript.PERK_VEST: 1, MainScript.PERK_CHEST: 3, MainScript.PERK_TOKEN: 2}
-	main._endless = false
-	main._boss_rush = false
-	main._arcade_chapter = -1
-	main._reset()
-	Runner.T.eq(main.sim.mode, "campaign", "sanity: this run is Campaign, not Endless")
-	for p in main.sim.players:
-		Runner.T.ok(not p["vest"], "owned perks must never leak a free vest into Campaign")
-	Runner.T.eq(main.sim.war_chest, 0, "owned HEAD START tiers must never leak into Campaign's War Chest")
-	Runner.T.eq(main.sim.tokens, 0, "owned SIGNAL FLARE tiers must never leak into Campaign's tokens")
-	main.free()
+func test_perk_levels_never_touch_boss_rush_or_the_daily() -> void:
+	# retry-meta CHANGED THIS: perks used to be Endless-only. Campaign and Arcade now take them
+	# (see test_campaign_meta.gd), so the fence moves to the modes that must stay vanilla:
+	# Boss Rush and the shared-seed daily.
+	for which in ["boss_rush", "daily"]:
+		var main: Node2D = MainScript.new()
+		main._sfx.free()   # drop the real Sfx first: overwriting orphans it unreachably
+		main._sfx = _NullSfx.new()
+		main._perk_levels = {MainScript.PERK_VEST: 1, MainScript.PERK_CHEST: 3, MainScript.PERK_TOKEN: 2}
+		main._endless = false
+		main._boss_rush = which == "boss_rush"
+		main._daily = which == "daily"
+		main._arcade_chapter = -1
+		main._reset()
+		for p in main.sim.players:
+			Runner.T.ok(not p["vest"], "owned perks must never leak a free vest into %s" % which)
+		Runner.T.eq(main.sim.war_chest, 0, "owned HEAD START tiers must never leak into %s" % which)
+		Runner.T.eq(main.sim.tokens, 0, "owned SIGNAL FLARE tiers must never leak into %s" % which)
+		main.free()
 
 
 func test_buy_perk_spends_vp_tiers_up_and_denies_when_short_or_maxed() -> void:
@@ -147,19 +149,22 @@ func test_vp_awarded_only_for_endless_and_scales_with_wave() -> void:
 	main.sim = SimWorld.new(0x5EED, 1, "campaign")
 	main.sim.score = 500
 	main._record_run(500)
-	Runner.T.eq(main.vet_points, 0, "a Campaign run banks zero Veteran Points -- VP is an Endless-only carrot")
+	# retry-meta CHANGED THIS: Campaign used to bank 0. It now banks VP_PER_SECTOR per sector
+	# reached (a fresh sim = sector 1 = 2 VP); the Endless assertions below are re-based on that
+	# 2 but still pin the unchanged +wave delta.
+	Runner.T.eq(main.vet_points, 2, "a sector-1 Campaign run banks 2 VP (retry-meta)")
 
 	main.sim = SimWorld.new(0x5EED, 1, "endless")
 	main.sim.wave = 7
 	main.sim.score = 700
 	main._record_run(700)
-	Runner.T.eq(main.vet_points, 7, "an Endless run banks 1 VP per wave survived")
+	Runner.T.eq(main.vet_points, 2 + 7, "an Endless run banks 1 VP per wave survived (+7 on top of the Campaign 2)")
 
 	main.sim = SimWorld.new(0x5EED, 1, "endless")
 	main.sim.wave = 3
 	main.sim.score = 300
 	main._record_run(300)
-	Runner.T.eq(main.vet_points, 10, "VP accumulates across separate Endless runs (7 + 3)")
+	Runner.T.eq(main.vet_points, 2 + 7 + 3, "VP accumulates across separate Endless runs (7 + 3)")
 
 	main.free()
 	_restore_save(s)

@@ -19,7 +19,9 @@ extends RefCounted
 
 const ART := "res://assets/art/"
 const KN := "res://assets/cc0/"
+const BAKED := "res://assets/baked/"   # native-size sprites at net draw scale 1.0: infantry from tools/gen_infantry.py, props/vehicles/bosses from tools/bake_sprites.py
 const SOL := "res://assets/troops/"   # owned top-down infantry sprites, size-limited for VRAM
+const FA := "res://assets/fontawesome/solid/"
 
 const TEX := {
 	# --- Top-down entity bakes ---
@@ -28,24 +30,24 @@ const TEX := {
 	# sol-03: the pale the earlier art hero read as a blob at gameplay zoom — swapped for the authored
 	# infantry set top-down infantry. No sim weapon field exists, so ONE canonical class (assault)
 	# for both slots; P1/P2 stay distinct via the ident ring + _body_ident_lean + the TINT split below.
-	"player1": preload(SOL + "soldier_assault_rifle.png"),
-	"player2": preload(SOL + "soldier_assault_rifle.png"),
+	"player1": preload(BAKED + "hero/base.png"),
+	"player2": preload(BAKED + "hero/base.png"),
 	"rusher": preload(ART + "cast2/insurgent1.png"),
 	"elite": preload(ART + "cast2/insurgent2.png"),
 	# sol-08: authored RED-team pack sprites for the shooting infantry (rusher skins / elite / sniper).
 	# Team-color is baked in (crimson vs the olive hero) — friend/foe read for free, colorblind-safer
 	# than the old warm-tinted insurgents. Single-authorship rotation (all cel) so no cel/the earlier art strobe.
-	"enemy_assault": preload(SOL + "enemy/enemy_assault_rifle.png"),
-	"enemy_smg": preload(SOL + "enemy/enemy_smg.png"),
-	"enemy_shotgun": preload(SOL + "enemy/enemy_shotgun.png"),
-	"enemy_lmg": preload(SOL + "enemy/enemy_lmg.png"),
-	"enemy_sniper": preload(SOL + "enemy/enemy_sniper.png"),
+	"enemy_assault": preload(BAKED + "enemy_assault/base.png"),
+	"enemy_smg": preload(BAKED + "enemy_smg/base.png"),
+	"enemy_shotgun": preload(BAKED + "enemy_shotgun/base.png"),
+	"enemy_lmg": preload(BAKED + "enemy_lmg/base.png"),
+	"enemy_sniper": preload(BAKED + "enemy_sniper/base.png"),
 	# sol-12: authored pack diver replaces the earlier frogman bake. "frogman" is the SURFACED (rifle) pose
 	# — the canonical key so corpse/bestiary/markers follow for free; the submerged variant is its own key.
-	"frogman": preload(SOL + "frogman_rifle.png"),
-	"frogman_speargun": preload(SOL + "frogman_speargun.png"),
+	"frogman": preload(BAKED + "frogman/base.png"),
+	"frogman_speargun": preload(BAKED + "frogman_speargun/base.png"),
 	"observer": preload(ART + "cast2/observer2.png"),
-	"bunker": preload(ART + "cast2/bunker.png"),
+	"bunker": preload(BAKED + "bunker/bunker.png"),
 	"trophy": preload(ART + "cast2/trophy.png"),
 	# nt-03: bespoke generated player-tank art (fal.ai + Replicate) replacing
 	# a plain camo rectangle with no hull/turret/track shape at all. tank_body
@@ -54,8 +56,8 @@ const TEX := {
 	# own sprite, independent of the hull). Both pre-rotated front-up to match
 	# the hull = dv.angle() + PI/2 correction _draw_tanks() applies -- same
 	# filenames, SCALE/TINT carry over unchanged.
-	"tank_body": preload(ART + "tank_body.png"),
-	"tank_barrel": preload(ART + "tank_barrel.png"),
+	"tank_body": preload(BAKED + "vehicle/tank_body.png"),
+	"tank_barrel": preload(BAKED + "vehicle/tank_barrel.png"),
 	# nt-02: bespoke generated boss art (fal.ai + Replicate) replacing the old
 	# gunship/colossus bakes, which literally shared tank_body/tank_barrel's
 	# camo material and read as up-scaled generic vehicles. gunship_body is
@@ -66,14 +68,14 @@ const TEX := {
 	# chin-turret/twin-barrel offsets in main.gd once the PI draw rotation
 	# flips them to face the players. Same filenames -> SCALE/TINT/BOSS_RIM
 	# below carry over unchanged.
-	"gunship_body": preload(ART + "gunship_body.png"),
-	"gunship_barrel": preload(ART + "gunship_barrel.png"),
-	"colossus_body": preload(ART + "colossus_body.png"),
-	"colossus_barrel": preload(ART + "colossus_barrel.png"),
-	"sandbag_beige": preload(ART + "sandbag.png"),
-	"crate_ammo": preload(ART + "crate_ammo.png"),
-	"crate_grenade": preload(ART + "crate_grenade.png"),
-	"crate_airstrike": preload(ART + "crate_airstrike.png"),
+	"gunship_body": preload(BAKED + "gunship/gunship_body.png"),
+	"gunship_barrel": preload(BAKED + "gunship/gunship_barrel.png"),
+	"colossus_body": preload(BAKED + "colossus/colossus_body.png"),
+	"colossus_barrel": preload(BAKED + "colossus/colossus_barrel.png"),
+	"sandbag_beige": preload(BAKED + "cover/sandbag_beige.png"),
+	"crate_ammo": preload(BAKED + "crate/crate_ammo.png"),
+	"crate_grenade": preload(BAKED + "crate/crate_grenade.png"),
+	"crate_airstrike": preload(BAKED + "crate/crate_airstrike.png"),
 	# Iran desert reskin: nano-banana cactus art (see desert_assets_source.md),
 	# baked to the same canvas size as the jungle tree_large/tree_small.png it
 	# replaces (120px/96px) so SCALE/TINT below carry over unchanged.
@@ -92,6 +94,8 @@ const TEX := {
 	"icon_medal": preload(ART + "icons/icon_medal.png"),
 	"icon_airstrike": preload(ART + "icons/icon_airstrike.png"),
 	"icon_rend": preload(ART + "icons/icon_rend.png"),  # 64px canvas (siblings 128) — drawn scaled
+	"icon_flame": preload(ART + "icons/icon_flame.png"),    # special-weapon chip + capsule (64px)
+	"icon_rocket": preload(ART + "icons/icon_rocket.png"),
 	# Apocalypse HUD sprites (imported 2D kit, assets/art/hud/).
 	"hud_star": preload(ART + "hud/ICON_Map_Star.png"),
 	"hud_flag": preload(ART + "hud/ICON_Map_Flag.png"),
@@ -140,11 +144,11 @@ const TEX := {
 	# ~0.7 MB of VRAM at boot for zero drawn pixels. Files stay for when a
 	# damage-direction or glow pass actually wants them.
 	# --- the earlier art Military decor (war-torn battlefield litter) ---
-	"barrel": preload(ART + "decor/barrel.png"),
+	"barrel": preload(BAKED + "cover/barrel.png"),
 	"crate_stack": preload(ART + "decor/crate_stack.png"),
-	"rock1": preload(ART + "decor/rock1.png"),
-	"rock2": preload(ART + "decor/rock2.png"),
-	"wreck": preload(ART + "decor/wreck.png"),
+	"rock1": preload(BAKED + "rock/rock1.png"),
+	"rock2": preload(BAKED + "rock/rock2.png"),
+	"wreck": preload(BAKED + "cover/wreck.png"),
 	"tent": preload(ART + "decor/tent.png"),
 	"watchtower": preload(ART + "decor/watchtower.png"),
 	"barbedwire": preload(ART + "decor/barbedwire.png"),
@@ -159,7 +163,7 @@ const TEX := {
 	"skyline_mast": preload(ART + "decor/skyline_mast.png"),
 	"crater": preload(ART + "decor/crater.png"),
 	# --- POLYGON War / War_Map / Nature FBX bakes (p4 asset pass, forced-atlas) ---
-	"tank_trap": preload(ART + "decor/tank_trap.png"),
+	"tank_trap": preload(BAKED + "cover/tank_trap.png"),
 	"barricade": preload(ART + "decor/barricade.png"),
 	"flak_gun": preload(ART + "decor/flak_gun.png"),
 	"trench": preload(ART + "decor/trench.png"),
@@ -213,6 +217,12 @@ const TEX := {
 	"jungle_floor": preload("res://assets/cc0_extra/ground/grass-001-deep-forest-floor.png"),
 	"jungle_moss": preload("res://assets/cc0_extra/ground/ground-037-mossy-grass-mix.png"),
 	"jungle_mud": preload("res://assets/cc0_extra/ground/ground-106-wet-mud.png"),
+	# Owned procedural ground cards for sectors 2-6 (tools/gen_ground.py, seeded).
+	"ground_marsh": preload("res://assets/art/ground/ground_marsh.png"),
+	"ground_deck": preload("res://assets/art/ground/ground_deck.png"),
+	"ground_gravel": preload("res://assets/art/ground/ground_gravel.png"),
+	"ground_asphalt": preload("res://assets/art/ground/ground_asphalt.png"),
+	"ground_slag": preload("res://assets/art/ground/ground_slag.png"),
 	# bullet/enemy_bullet/grenade/smoke: Kenney keys RETIRED (files kept) — every
 	# live draw site moved on long ago: player rounds are procedural tracers +
 	# fx_bullettrail streaks, enemy fire is the red-streak orb, thrown frags wear
@@ -278,7 +288,7 @@ const TEX := {
 	"m_heli_attack2": preload(ART + "mil2/heli_attack2.png"),
 	"m_drone": preload(ART + "mil2/drone.png"),
 	#"m_light_tank": preload(ART + "mil2/light_tank.png"),
-	"m_technical": preload(ART + "mil2/technical.png"),
+	"m_technical": preload(BAKED + "vehicle/m_technical.png"),
 	# Wreck variants: same vehicle art, but muted/small/outlined for battlefield
 	# litter (see SCALE/TINT below) — dead hulks, not live vehicles.
 	"wreck_apc": preload(ART + "mil2/apc.png"),
@@ -304,7 +314,7 @@ const TEX := {
 	"sapper": preload(ART + "p2/sapper.png"),
 	"tank_shell": preload(ART + "p2/tank_shell.png"),
 	"pickup_vest": preload(ART + "p2/pickup_vest.png"),
-	"tank_hulk": preload(ART + "p2/tank_hulk.png"),
+	"tank_hulk": preload(BAKED + "vehicle/tank_hulk.png"),
 	# charred dead-cactus for the foundry/late-war canopy set (tree_dead1-3 retired,
 	# both from the registry and on disk — Iran has no jungle deadfall to burn).
 	"cactus_dead1": preload(ART + "p2/cactus_dead1.png"),
@@ -314,7 +324,7 @@ const TEX := {
 	"wall_sandbag_b": preload(ART + "p2/wall_sandbag_b.png"),
 	"wall_sandbag_c": preload(ART + "p2/wall_sandbag_c.png"),
 	"wall_sandbag_end": preload(ART + "p2/wall_sandbag_end.png"),
-	"bunker2": preload(ART + "p2/bunker2.png"),
+	"bunker2": preload(BAKED + "bunker/bunker2.png"),
 	"corpse_soldier1": preload(ART + "p2/corpse_soldier1.png"),
 	"corpse_soldier2": preload(ART + "p2/corpse_soldier2.png"),
 	# Front face toward viewer, shield-top = image-up; rotate to carrier facing.
@@ -356,32 +366,41 @@ const TEX := {
 	"glyph_sw_back": preload(ART + "ui/glyphs/sw_back.png"),
 	"glyph_sw_dpad_lr": preload(ART + "ui/glyphs/sw_dpad_lr.png"),
 	# --- Modern Menus ortho icons (menu rows / toggles) ---
-	"mi_snd_on": preload(ART + "ui/menuicons/snd_on.png"),
-	"mi_snd_off": preload(ART + "ui/menuicons/snd_off.png"),
-	"mi_mus_on": preload(ART + "ui/menuicons/mus_on.png"),
-	"mi_mus_off": preload(ART + "ui/menuicons/mus_off.png"),
-	"mi_trophy": preload(ART + "ui/menuicons/trophy.png"),
-	"mi_book": preload(ART + "ui/menuicons/book.png"),
-	"mi_play": preload(ART + "ui/menuicons/play.png"),
-	"mi_controller": preload(ART + "ui/menuicons/controller.png"),
+	"mi_snd_on": preload(FA + "volume-high.svg"),
+	"mi_snd_off": preload(FA + "volume-xmark.svg"),
+	"mi_mus_on": preload(FA + "music.svg"),
+	"mi_mus_off": preload(FA + "volume-xmark.svg"),
+	"mi_trophy": preload(FA + "trophy.svg"),
+	"mi_book": preload(FA + "book-open.svg"),
+	"mi_play": preload(FA + "play.svg"),
+	"mi_controller": preload(FA + "gamepad.svg"),
 	#"mi_keyboard": preload(ART + "ui/menuicons/keyboard.png"),
 	# Modern Menus batch 2 (256px, white with alpha — modulate for color).
 	# NOTE: mi_controller.png also landed on disk but the "mi_controller" key
 	# above already serves controller.png — kept as-is, duplicate art unregistered.
-	"mi_arrow": preload(ART + "ui/menuicons/mi_arrow.png"),  # points RIGHT — flip/rotate at call site
-	"mi_medal_1": preload(ART + "ui/menuicons/mi_medal_1.png"),
-	"mi_medal_2": preload(ART + "ui/menuicons/mi_medal_2.png"),
-	"mi_medal_3": preload(ART + "ui/menuicons/mi_medal_3.png"),
-	"mi_medal_4": preload(ART + "ui/menuicons/mi_medal_4.png"),
-	"mi_medal_5": preload(ART + "ui/menuicons/mi_medal_5.png"),
-	"mi_settings": preload(ART + "ui/menuicons/mi_settings.png"),
-	"mi_reload": preload(ART + "ui/menuicons/mi_reload.png"),
-	"mi_home": preload(ART + "ui/menuicons/mi_home.png"),
-	"mi_camera": preload(ART + "ui/menuicons/mi_camera.png"),
-	"mi_back": preload(ART + "ui/menuicons/mi_back.png"),
-	"mi_combat": preload(ART + "ui/menuicons/mi_combat.png"),
-	"mi_timer": preload(ART + "ui/menuicons/mi_timer.png"),
-	"mi_cancel": preload(ART + "ui/menuicons/mi_cancel.png"),
+	"mi_medal_1": preload(FA + "medal.svg"),
+	"mi_medal_2": preload(FA + "medal.svg"),
+	"mi_medal_3": preload(FA + "medal.svg"),
+	"mi_medal_4": preload(FA + "medal.svg"),
+	"mi_medal_5": preload(FA + "medal.svg"),
+	"medal_flawless": preload(ART + "ui/menuicons/medal_flawless.png"),   # service-record medals (tools/gen_ui_icons.py)
+	"medal_swift": preload(ART + "ui/menuicons/medal_swift.png"),
+	"medal_hoarder": preload(ART + "ui/menuicons/medal_hoarder.png"),
+	"mi_settings": preload(FA + "gear.svg"),
+	"mi_reload": preload(FA + "rotate.svg"),
+	"mi_home": preload(FA + "house.svg"),
+	"mi_camera": preload(FA + "desktop.svg"),
+	"mi_back": preload(FA + "door-open.svg"),
+	"mi_combat": preload(FA + "person-rifle.svg"),
+	"mi_timer": preload(FA + "stopwatch.svg"),
+	"mi_cancel": preload(FA + "circle-xmark.svg"),
+	"fa_minus": preload(FA + "minus.svg"),
+	"fa_plus": preload(FA + "plus.svg"),
+	"fa_filter": preload(FA + "filter.svg"),
+	"fa_file": preload(FA + "file-lines.svg"),
+	"fa_captions": preload(FA + "closed-captioning.svg"),
+	"fa_text": preload(FA + "text-height.svg"),
+	"fa_film": preload(FA + "film.svg"),
 	# --- Apocalypse HUD chrome (tooltip plate, frames, wheel plate, cursor) ---
 	"ui_tooltip": preload(ART + "hud/SPR_HUD_Tooltip.png"),
 	"ui_frame_lrg": preload(ART + "hud/SPR_HUD_Frame_Lrg.png"),
@@ -399,72 +418,103 @@ const TEX := {
 # The registry is explicit to make missing action art fail at import/test time
 # instead of hitching on a dynamic load during combat.
 const PLAYER_ANIM := {
-	"idle": preload(SOL + "anim/player/idle.png"),
-	"move_forward_0": preload(SOL + "anim/player/move_forward_0.png"),
-	"move_forward_1": preload(SOL + "anim/player/move_forward_1.png"),
-	"move_backward_0": preload(SOL + "anim/player/move_backward_0.png"),
-	"move_backward_1": preload(SOL + "anim/player/move_backward_1.png"),
-	"crouch": preload(SOL + "anim/player/crouch.png"),
-	"shoot": preload(SOL + "anim/player/shoot.png"),
-	"throw": preload(SOL + "anim/player/throw.png"),
-	"roll": preload(SOL + "anim/player/roll.png"),
-	"downed": preload(SOL + "anim/player/downed.png"),
-	"interact": preload(SOL + "anim/player/interact.png"),
-	"bash": preload(SOL + "anim/player/bash.png"),
+	"idle": preload(BAKED + "hero/idle.png"),
+	"move_forward_0": preload(BAKED + "hero/move_forward_0.png"),
+	"move_forward_1": preload(BAKED + "hero/move_forward_1.png"),
+	"move_backward_0": preload(BAKED + "hero/move_backward_0.png"),
+	"move_backward_1": preload(BAKED + "hero/move_backward_1.png"),
+	"crouch": preload(BAKED + "hero/crouch.png"),
+	"shoot": preload(BAKED + "hero/shoot.png"),
+	"throw": preload(BAKED + "hero/throw.png"),
+	"roll": preload(BAKED + "hero/roll.png"),
+	"downed": preload(BAKED + "hero/downed.png"),
+	"interact": preload(BAKED + "hero/interact.png"),
+	"bash": preload(BAKED + "hero/bash.png"),
 }
 
 const ENEMY_ANIM := {
 	"enemy_assault": {
-		"idle": preload(SOL + "anim/enemy_assault/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_assault/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_assault/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_assault/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_assault/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_assault/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_assault/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_assault/downed.png"),
+		"idle": preload(BAKED + "enemy_assault/idle.png"),
+		"move_0": preload(BAKED + "enemy_assault/move_0.png"),
+		"move_1": preload(BAKED + "enemy_assault/move_1.png"),
+		"crouch": preload(BAKED + "enemy_assault/crouch.png"),
+		"windup": preload(BAKED + "enemy_assault/windup.png"),
+		"shoot": preload(BAKED + "enemy_assault/shoot.png"),
+		"stunned": preload(BAKED + "enemy_assault/stunned.png"),
+		"downed": preload(BAKED + "enemy_assault/downed.png"),
 	},
 	"enemy_smg": {
-		"idle": preload(SOL + "anim/enemy_smg/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_smg/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_smg/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_smg/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_smg/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_smg/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_smg/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_smg/downed.png"),
+		"idle": preload(BAKED + "enemy_smg/idle.png"),
+		"move_0": preload(BAKED + "enemy_smg/move_0.png"),
+		"move_1": preload(BAKED + "enemy_smg/move_1.png"),
+		"crouch": preload(BAKED + "enemy_smg/crouch.png"),
+		"windup": preload(BAKED + "enemy_smg/windup.png"),
+		"shoot": preload(BAKED + "enemy_smg/shoot.png"),
+		"stunned": preload(BAKED + "enemy_smg/stunned.png"),
+		"downed": preload(BAKED + "enemy_smg/downed.png"),
 	},
 	"enemy_shotgun": {
-		"idle": preload(SOL + "anim/enemy_shotgun/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_shotgun/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_shotgun/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_shotgun/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_shotgun/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_shotgun/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_shotgun/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_shotgun/downed.png"),
+		"idle": preload(BAKED + "enemy_shotgun/idle.png"),
+		"move_0": preload(BAKED + "enemy_shotgun/move_0.png"),
+		"move_1": preload(BAKED + "enemy_shotgun/move_1.png"),
+		"crouch": preload(BAKED + "enemy_shotgun/crouch.png"),
+		"windup": preload(BAKED + "enemy_shotgun/windup.png"),
+		"shoot": preload(BAKED + "enemy_shotgun/shoot.png"),
+		"stunned": preload(BAKED + "enemy_shotgun/stunned.png"),
+		"downed": preload(BAKED + "enemy_shotgun/downed.png"),
 	},
 	"enemy_lmg": {
-		"idle": preload(SOL + "anim/enemy_lmg/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_lmg/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_lmg/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_lmg/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_lmg/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_lmg/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_lmg/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_lmg/downed.png"),
+		"idle": preload(BAKED + "enemy_lmg/idle.png"),
+		"move_0": preload(BAKED + "enemy_lmg/move_0.png"),
+		"move_1": preload(BAKED + "enemy_lmg/move_1.png"),
+		"crouch": preload(BAKED + "enemy_lmg/crouch.png"),
+		"windup": preload(BAKED + "enemy_lmg/windup.png"),
+		"shoot": preload(BAKED + "enemy_lmg/shoot.png"),
+		"stunned": preload(BAKED + "enemy_lmg/stunned.png"),
+		"downed": preload(BAKED + "enemy_lmg/downed.png"),
 	},
 	"enemy_sniper": {
-		"idle": preload(SOL + "anim/enemy_sniper/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_sniper/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_sniper/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_sniper/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_sniper/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_sniper/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_sniper/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_sniper/downed.png"),
+		"idle": preload(BAKED + "enemy_sniper/idle.png"),
+		"move_0": preload(BAKED + "enemy_sniper/move_0.png"),
+		"move_1": preload(BAKED + "enemy_sniper/move_1.png"),
+		"crouch": preload(BAKED + "enemy_sniper/crouch.png"),
+		"windup": preload(BAKED + "enemy_sniper/windup.png"),
+		"shoot": preload(BAKED + "enemy_sniper/shoot.png"),
+		"stunned": preload(BAKED + "enemy_sniper/stunned.png"),
+		"downed": preload(BAKED + "enemy_sniper/downed.png"),
+	},
+	"enemy_elite": {
+		"idle": preload(BAKED + "enemy_elite/idle.png"),
+		"move_0": preload(BAKED + "enemy_elite/move_0.png"),
+		"move_1": preload(BAKED + "enemy_elite/move_1.png"),
+		"crouch": preload(BAKED + "enemy_elite/crouch.png"),
+		"windup": preload(BAKED + "enemy_elite/windup.png"),
+		"shoot": preload(BAKED + "enemy_elite/shoot.png"),
+		"stunned": preload(BAKED + "enemy_elite/stunned.png"),
+		"downed": preload(BAKED + "enemy_elite/downed.png"),
 	},
 }
+
+## BAKED infantry (tools/bake_sprites.py): the PNGs are pre-shrunk to their exact
+## on-screen size, so SCALE x the canonical call scale must be exactly 1.0 (no
+## draw-time resample, no nearest-neighbour noise). Hero: main.gd _draw_players
+## 0.52; rifleman skins + elite: LIVE_RIFLEMAN_SCALE 0.52; sniper/frogman: 0.5.
+const BAKED_HERO_SCALE := 1.0 / 0.52
+const BAKED_RIFLEMAN_SCALE := 1.0 / 0.52
+const BAKED_SNIPER_SCALE := 1.0 / 0.5
+
+## Non-infantry bakes (tools/bake_sprites.py PROP_FAMILIES): PNG is pre-sized to
+## its on-screen footprint, so SCALE = 1 / the draw site's canonical call scale.
+const BAKED_1_OVER_0_484 := 1.0 / 0.484
+const BAKED_1_OVER_0_55 := 1.0 / 0.55
+const BAKED_1_OVER_0_62 := 1.0 / 0.62
+const BAKED_1_OVER_0_78 := 1.0 / 0.78
+const BAKED_1_OVER_0_9 := 1.0 / 0.9
+const BAKED_1_OVER_1_0 := 1.0 / 1.0
+const BAKED_1_OVER_1_05 := 1.0 / 1.05
+const BAKED_1_OVER_1_3 := 1.0 / 1.3
+const BAKED_1_OVER_1_4 := 1.0 / 1.4
+const BAKED_1_OVER_1_9 := 1.0 / 1.9
 
 ## Per-sprite draw multiplier so a entity bake lands at the Kenney footprint the
 ## main.gd scale numbers were tuned for. Absent = 1.0.
@@ -487,10 +537,11 @@ const SCALE := {
 	# or is that a bullet?" — straight from playtest.
 	# Sizes per the 1986-anchor readability pass: heroes ~18px on screen,
 	# elites largest infantry (they shoot), sprites ≥3× bullet size.
-	"player1": 0.26, "player2": 0.26, "rusher": 0.53, "elite": 0.58,   # Asset-redesign: the slimmer authored hero needs 0.26 so enemy rounds stay visibly inside the body; hitbox-fairness pins the margin.
+	"player1": BAKED_HERO_SCALE, "player2": BAKED_HERO_SCALE, "rusher": 0.53, "elite": 0.58,   # Asset-redesign: the slimmer authored hero needs 0.26 so enemy rounds stay visibly inside the body; hitbox-fairness pins the margin.
 	# sol-08: enemy pack sprites fold the 128px canvas to the ~18-20px infantry footprint (call-scale 0.5 × 0.5 × 128 ≈ 32px canvas).
-	"enemy_assault": 0.5, "enemy_smg": 0.5, "enemy_shotgun": 0.5, "enemy_lmg": 0.5, "enemy_sniper": 0.5,
-	"frogman": 0.5, "frogman_speargun": 0.5, "observer": 0.24,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the entity bake)
+	"enemy_assault": BAKED_RIFLEMAN_SCALE, "enemy_smg": BAKED_RIFLEMAN_SCALE, "enemy_shotgun": BAKED_RIFLEMAN_SCALE,
+	"enemy_lmg": BAKED_RIFLEMAN_SCALE, "enemy_sniper": BAKED_SNIPER_SCALE,
+	"frogman": BAKED_SNIPER_SCALE, "frogman_speargun": BAKED_SNIPER_SCALE, "observer": 0.24,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the entity bake)
 	# HITBOX FAIRNESS (2026-07-25): 0.17 was tuned against a 440px canvas, then an
 	# import sweep added `process/size_limit=128` to bunker/bunker2 without
 	# re-tuning SCALE — and _spr sizes off the IMPORTED texture. The strongpoint
@@ -499,26 +550,26 @@ const SCALE := {
 	# invisible armour a full sprite-width off the drawn wall. 0.58 restores the
 	# authored ~58px footprint, which lands the opaque silhouette at 48px wide —
 	# exactly SimWorld.BUNKER_W. Pinned by test_hitbox_fairness.gd.
-	"bunker": 0.58,
-	"tank_body": 0.72, "tank_barrel": 0.69,
-	"gunship_body": 0.67, "colossus_body": 0.59,
+	"bunker": BAKED_1_OVER_0_78,
+	"tank_body": BAKED_1_OVER_0_62, "tank_barrel": BAKED_1_OVER_0_62,
+	"gunship_body": BAKED_1_OVER_1_3, "colossus_body": BAKED_1_OVER_1_9,
 	# Real barrel bakes replacing the 4x4 blanks: sized so the minigun sits
 	# under the ~60px hull and the twin turrets under the ~143px colossus body
 	# (main.gd draws them at 0.8 / 1.3). Tune visually.
-	"gunship_barrel": 0.5, "colossus_barrel": 0.6,
-	"sandbag_beige": 0.83,
-	"crate_ammo": 0.86, "crate_grenade": 0.86, "crate_airstrike": 0.86,
+	"gunship_barrel": BAKED_1_OVER_1_3, "colossus_barrel": BAKED_1_OVER_1_3,
+	"sandbag_beige": BAKED_1_OVER_0_484,
+	"crate_ammo": BAKED_1_OVER_0_55, "crate_grenade": BAKED_1_OVER_0_55, "crate_airstrike": BAKED_1_OVER_0_55,
 	"cactus_large": 0.89, "cactus_small": 0.91, "scrub": 0.9,
 	# Decor litter — folded to modest on-screen footprints (call _spr at 1.0).
-	"barrel": 0.11, "crate_stack": 0.13, "rock1": 0.13, "rock2": 0.14,
-	"wreck": 0.17, "tent": 0.19, "watchtower": 0.16, "barbedwire": 0.16,
+	"barrel": BAKED_1_OVER_1_4, "crate_stack": 0.13, "rock1": BAKED_1_OVER_1_3, "rock2": BAKED_1_OVER_1_05,
+	"wreck": BAKED_1_OVER_1_0, "tent": 0.19, "watchtower": 0.16, "barbedwire": 0.16,
 	"barrier": 0.13, "ammobox": 0.1,
 	# Terrain set is baked big (160-220px) but drawn at 1.0 like the litter;
 	# bridges fold to ~96px spans, crater ~48px, skyline to readable silhouettes
 	# (mast is a 1.5%-opaque lattice — below ~60px tall it aliases away).
 	"bridge_mid": 0.44, "bridge_ramp": 0.44, "crater": 0.3,
 	# p4 War/War_Map/Nature props — folded to litter footprints (retuned by eye).
-	"tank_trap": 0.14, "barricade": 0.15, "flak_gun": 0.16, "trench": 0.2,
+	"tank_trap": BAKED_1_OVER_0_9, "barricade": 0.15, "flak_gun": 0.16, "trench": 0.2,
 	"flag_marker": 0.16, "radio_tower": 0.18, "dry_shrub": 0.15, "tumbleweed": 0.14,
 	"flag_iran": 0.22,   # iran-flag: 306x600 banner -> ~132px tall behind a gunship (call-site scales up for the colossus)
 	"wreck_halftrack": 0.3, "crater_field": 0.3, "crater_water": 0.3, "mg_tripod": 0.12,
@@ -535,6 +586,7 @@ const SCALE := {
 	# whole pickup family shares. Pinned by test_view_honesty.gd::SPRITE_CANVAS.
 	"cap_pierce": 0.56, "cap_spread": 0.56, "cap_triple": 0.56, "cap_rend": 0.56,
 	"cap_claymore": 0.48, "cap_smoke": 0.48, "cap_flash": 0.48,
+	"icon_flame": 0.7, "icon_rocket": 0.7,   # 64px canvas -> ~25px ground capsule (the cap_* footprint)
 	# hud_flag is the ONE map-marker glyph that also draws through _spr (the pennant on
 	# the spotter's radar truck, main.gd at spr_scale 0.04). That 0.04 was authored against
 	# the uncapped 256px source; a later sweep set size_limit=128 and halved the flag to a
@@ -550,7 +602,7 @@ const SCALE := {
 	# native-64px placeholder blob used to.
 	"m_radar_tank": 0.72, "m_rocket_truck": 0.72, "m_jet": 0.62,
 	"m_heli_transport": 0.68, "m_heli_attack2": 0.67, "m_drone": 0.34,
-	"m_technical": 0.6,
+	"m_technical": BAKED_1_OVER_0_55,
 	"wreck_apc": 0.3, "wreck_technical": 0.28, "wreck_light_tank": 0.28,
 	"wep_grenade": 0.34, "wep_shotgun": 0.4, "wep_rifle": 0.4, "wep_mg": 0.4,
 	"wep_claymore": 0.3, "wep_smoke": 0.32, "wep_flashbang": 0.3,
@@ -571,11 +623,11 @@ const SCALE := {
 	"ghillie": 0.5, "courier": 1.05, "sapper": 0.5,
 	"tank_shell": 0.8,               # ~grenade footprint (26px)
 	"pickup_vest": 0.86,             # ~crate_ammo (same 56px canvas)
-	"tank_hulk": 0.72,               # ~tank_body (same 104px canvas)
+	"tank_hulk": BAKED_1_OVER_0_62,               # ~tank_body (same 104px canvas)
 	"cactus_dead1": 0.89, "cactus_dead2": 0.89, "cactus_dead3": 0.89,   # ~cactus_large
 	"wall_sandbag": 0.28, "wall_sandbag_b": 0.28, "wall_sandbag_c": 0.28,
 	"wall_sandbag_end": 0.55,   # fold to sandbag_beige's ~66px span
-	"bunker2": 0.58,                 # ~bunker (same 440px source, same 128px import — see the bunker note)
+	"bunker2": BAKED_1_OVER_0_78,                 # ~bunker (same 440px source, same 128px import — see the bunker note)
 	"corpse_soldier1": 0.21, "corpse_soldier2": 0.21,   # 140px canvas → ~29px, litter class (1.0 drew a tank-sized corpse)
 	"fx_flame": 0.46,                # 200px FX card, same norm as fx_smoke
 	# _spr sizes off the IMPORTED texture, so size_limit changes must land here
@@ -756,17 +808,21 @@ const TINT := {
 
 ## Sprites that get a 1px dark outline in _spr() for readability on any ground.
 const OUTLINE := {
+	# props-style: tank_body/tank_barrel/m_technical/bunker/sandbag_beige/crate_*/barrel/rock1/rock2/wreck
+	# are BAKED (tools/bake_sprites.py PROP_FAMILIES) with their own 1px ink keyline, so the 1.1px _spr rim
+	# is omitted (same as the hero): the double rim made a 3px black border and swallowed the thin barrel.
+	# Bosses keep theirs: _BOSS_RIM's warm rim + hit-flash is gameplay feedback, not just separation.
 	# sol-06: player1/player2 are OMITTED — the infantry set hero bakes its own thick black keyline,
 	# so the _spr 1.7px rim on top read as a fat sticker and swallowed the 18px silhouette. The baked
 	# contour carries the separation now (pin: test asserts the hero keys are NOT in OUTLINE).
 	"rusher": true, "elite": true,
-	"observer": true, "bunker": true,   # sol-12: frogman dropped — the pack diver bakes its own keyline (no double rim), matching hero/enemy
-	"tank_body": true, "tank_barrel": true, "gunship_body": true,
+	"observer": true,   # sol-12: frogman dropped — the pack diver bakes its own keyline (no double rim), matching hero/enemy
+	"gunship_body": true,
 	"gunship_barrel": true, "colossus_body": true, "colossus_barrel": true,
-	"sandbag_beige": true, "mg_stand": true, "riot_shield": true,
-	"crate_ammo": true, "crate_grenade": true, "crate_airstrike": true,
-	"barrel": true, "crate_stack": true, "rock1": true, "rock2": true,
-	"wreck": true, "watchtower": true, "barrier": true, "ammobox": true,
+	"mg_stand": true, "riot_shield": true,
+	
+	"crate_stack": true, 
+	"watchtower": true, "barrier": true, "ammobox": true,
 	"m_pilot": true,   # sol-08: dropped m_contractor2/m_insurgent3-5 (retired)
 	# review tell 2 (overturns sol-11/sie-01's "baked keyline, no double rim" for these keys):
 	# the sol-08 red-team swap never added the enemy_* keys here, so the _spr rim gate drew
@@ -780,7 +836,7 @@ const OUTLINE := {
 	# own black keyline, matching the enemy_* red-team convention (no double rim).
 	"m_radar_tank": true, "m_rocket_truck": true, "m_jet": true,
 	"m_heli_transport": true, "m_heli_attack2": true, "m_drone": true,
-	"m_technical": true, "wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
+	"wreck_apc": true, "wreck_technical": true, "wreck_light_tank": true,
 	"wep_grenade": true, "wep_claymore": true,
 	# The rare-capsule sprites (cap_*) below DO reach _spr (main.gd:11023) and stay.
 	#
@@ -1054,13 +1110,16 @@ static var _font: Font = null
 ## `colorblind` above is — every draw site reads it without threading a reference
 ## through — and main._set_text_scale is the ONE writer.
 static var text_scale := 1.0
+const MIN_TEXT_SIZE := 9
+const MIN_WINDOW_SCALE := 2
 
 
 ## The size a `size`-px label actually draws at. Whole pixels (the font is a bitmap face
 ## with no subpixel sizes) and never below the design size, so 100% is byte-identical to
 ## the pre-setting behavior.
 static func fs(size: int) -> int:
-	return maxi(size, int(round(float(size) * text_scale)))
+	var readable := maxi(MIN_TEXT_SIZE, size)
+	return maxi(readable, int(round(float(readable) * text_scale)))
 
 
 static func font() -> Font:
@@ -1100,6 +1159,7 @@ static func count_noun(n: int, singular: String, plural := "") -> String:
 
 
 static func tw(txt: String, size: int) -> float:
+	size = maxi(MIN_TEXT_SIZE, size)
 	var by_size: Dictionary = _tw_cache.get(size, {})
 	if by_size.is_empty():
 		_tw_cache[size] = by_size
@@ -1136,6 +1196,7 @@ static var text_capture = null
 ## drop-shadow pattern hand-inlined across the view, now in one place.
 ## max_w > 0 clips the string to that width instead of letting it bleed past the bound.
 static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0, outline := 0) -> void:
+	size = maxi(MIN_TEXT_SIZE, size)
 	var f := font()
 	var w := max_w if max_w > 0.0 else -1.0
 	# Snap to whole pixels: centered strings land on fractional x (cx - w/2 with
@@ -1229,7 +1290,7 @@ static func glyph_cap_w(action: String, size: float, keycode := -1, pad_button :
 	if use_pad or force_pad:
 		return size
 	var _pb := pad_button   # keyboard path ignores it; kept so callers pass one arg set
-	return maxf(size, tw(_glyph_letter(action, keycode), maxi(8, int(size * 0.62))) + size * 0.35)
+	return maxf(size, tw(_glyph_letter(action, keycode), maxi(MIN_TEXT_SIZE, int(size * 0.62))) + size * 0.35)
 
 
 static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false, keycode := -1, pad_button := -1) -> void:
@@ -1256,9 +1317,7 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 		# literal 7-char "UNBOUND", which used to get stamped across a ~12px keycap.
 		var letter := _glyph_letter(action, keycode)
 		var f := font()
-		# Floor at the font's native 8px: PixelOperator8 with AA/hinting off drops
-		# whole strokes below native scale (a 6px 'E' loses horizontals).
-		var fs := maxi(8, int(size * 0.62))
+		var fs := maxi(MIN_TEXT_SIZE, int(size * 0.62))
 		var w := tw(letter, fs)
 		# The square cap only ever fit the single-letter ship defaults. Now that callers
 		# pass the LIVE bind, key_label can hand back "Space"/"Shift"/"Escape" — 3x wider

@@ -227,6 +227,7 @@ class _MainStub extends Node2D:
 	var _token_loss_t := 0.0
 	var _sfx = null        # no audio in a headless HUD test; _draw_caption bails on the null
 	var _captions := true
+	var _caption_mode := 0   # CuePolicy.CAP_ALL: caption_layout reads the mode
 	# drain-view: the row-0 record chip asks main._record_fired, NOT (score > best_score) —
 	# main.gd ratchets best_score up to sim.score in the same frame it detects the crossing,
 	# so the comparison the chip used to make was already destroyed by the time _draw ran.
@@ -3774,12 +3775,21 @@ func test_every_boss_plate_owns_its_reserved_band() -> void:
 	for m in call_re.search_all(src):
 		if not gun_names.has(m.get_string(1)):
 			gun_names.append(m.get_string(1))
+	# The endless call site passes EndlessRoster.boss_name(...) (not a literal), so the
+	# four miniboss names are donated from their one source of truth.
+	Runner.T.ok(src.contains("_draw_one_gunship(sim.endless_boss, EndlessRoster.boss_name("),
+		"the endless plate is named from EndlessRoster.boss_name")
+	for bn in EndlessRoster.BOSS_NAMES:
+		if not gun_names.has(bn):
+			gun_names.append(bn)
 	Runner.T.ok(gun_names.size() >= 2,
 		"scraped every _draw_one_gunship label from source (got %s)" % str(gun_names))
 	var gun_labels: Array[String] = []
 	for n in gun_names:
-		for ph in MainScript.GUNSHIP_PHASE_NAMES:
-			gun_labels.append("%s — %s" % [n, ph])
+		# HP-third acts: every name a plate can show owns its reserved band too.
+		for names in MainScript.GUNSHIP_PHASE_NAMES_BY_HP:
+			for ph in names:
+				gun_labels.append("%s — %s" % [n, ph])
 	var col_labels: Array[String] = []
 	for ph in MainScript.COLOSSUS_PHASE_NAMES:
 		col_labels.append("FOUNDRY COLOSSUS — %s" % ph)
@@ -4553,21 +4563,10 @@ func test_keycap_width_is_single_sourced() -> void:
 
 
 func test_published_keycap_width_matches_the_font() -> void:
-	## An INDEPENDENT pin on Art.glyph_cap_w itself, against widths measured off the
-	## shipped PixelOperator8 at size 11 (fs = max(8, int(11*0.62)) = 8).
-	##
-	## Why this exists separately from the overlap sweep: that sweep's capture reads
-	## glyph_cap_w to record the rect, so a regression INSIDE glyph_cap_w moves the
-	## instrument and the subject together and the sweep stays green. (Verified by
-	## mutation: making glyph_cap_w return `size` unconditionally left the sweep
-	## green and was caught only by the single-source grep.) These are hard numbers
-	## from the font, so they cannot move with it.
 	var was_pad := Art.use_pad
 	Art.use_pad = false
-	var expect := {KEY_F: 11.0, KEY_SPACE: 38.85, KEY_SHIFT: 34.85, KEY_ENTER: 37.85,
-		KEY_DELETE: 42.85, KEY_ESCAPE: 45.85, KEY_CTRL: 28.85, KEY_BACKSPACE: 66.85}
-	# NB: key_label(KEY_CTRL) is "Ctrl" (28.85px), not "Control" (49.85px) — the wider
-	# figure is for a string the REBIND screen never produces. Measured, not assumed.
+	var expect := {KEY_F: 11.85, KEY_SPACE: 42.85, KEY_SHIFT: 38.85, KEY_ENTER: 41.85,
+		KEY_DELETE: 47.85, KEY_ESCAPE: 50.85, KEY_CTRL: 31.85, KEY_BACKSPACE: 74.85}
 	for kc in expect:
 		var got := Art.glyph_cap_w("revive", 11.0, int(kc))
 		Runner.T.ok(absf(got - float(expect[kc])) <= 0.05,
@@ -5355,7 +5354,7 @@ func test_plate_frame_is_sized_from_the_same_content_driven_rect() -> void:
 # a new one cannot be added off-grid while still looking like "part of the scale".
 func test_type_scale_display_tier_is_on_the_em_grid() -> void:
 	var display_tier := {
-		"TYPE_MICRO": HudIcons.TYPE_MICRO, "TYPE_LABEL": HudIcons.TYPE_LABEL,
+		"TYPE_LABEL": HudIcons.TYPE_LABEL,
 		"TYPE_HEAD": HudIcons.TYPE_HEAD, "TYPE_TITLE": HudIcons.TYPE_TITLE,
 	}
 	for name in display_tier:
@@ -5363,7 +5362,7 @@ func test_type_scale_display_tier_is_on_the_em_grid() -> void:
 		Runner.T.eq(v % 8, 0, "%s (%d) is a whole multiple of PixelOperator8's 8px em" % [name, v])
 		Runner.T.ok(HudIcons.TYPE_EM_GRID.has(v),
 			"%s (%d) is a declared rung of TYPE_EM_GRID" % [name, v])
-	Runner.T.eq(HudIcons.TYPE_EM_GRID, [8, 16, 24, 32],
+	Runner.T.eq(HudIcons.TYPE_EM_GRID, [16, 24, 32],
 		"the display tier is 1x/2x/3x/4x the 8px em — the only sizes clean at 1x, 2x AND 3x")
 	# Distinct rungs, strictly increasing: a scale with two names on one size is a scale with a lie.
 	var ladder := [HudIcons.TYPE_MICRO, HudIcons.TYPE_LABEL, HudIcons.TYPE_HEAD, HudIcons.TYPE_TITLE]
@@ -5466,13 +5465,13 @@ func test_hud_names_no_bare_font_size() -> void:
 	Runner.T.ok(scanned >= 14, "the scan actually reached every text call site (%d calls)" % scanned)
 	# The scale must be reachable, not just declared: prove the micro rung really is the one the
 	# verb legend draws at, and that the readout rung is what every HUD readout measures at.
-	Runner.T.eq(HudIcons.TYPE_MICRO, 8, "the micro rung is 8px (the em floor)")
+	Runner.T.eq(HudIcons.TYPE_MICRO * Art.MIN_WINDOW_SCALE, 18, "small readable text meets the displayed 18px minimum")
 	var segs: Array = HudIcons.VERB_SEGS
 	if segs.size() > 0:
 		var label := TranslationServer.translate(segs[0][1])
 		var pr := HudIcons.verb_legend_primitives(344.0, segs)
 		Runner.T.ok(absf(pr[0]["label"].size.y - Art.font().get_string_size(
-			label, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO).y) < 0.01,
+			label, HORIZONTAL_ALIGNMENT_LEFT, -1, Art.fs(HudIcons.TYPE_MICRO)).y) < 0.01,
 			"the verb-legend label is measured at the micro rung it is actually drawn at")
 
 func _split_args(s: String) -> Array[String]:
@@ -5612,3 +5611,20 @@ func test_a_dead_boss_stops_suppressing_and_the_table_stays_empty_of_meaning() -
 		% Hud.BOSS_VERB_SUPPRESS.size())
 	Runner.T.ok(not sim.enemies.is_empty() or sim.enemies.is_empty(),
 		"sanity: gates are not enemies — bosses live outside sim.enemies")
+
+
+func test_small_text_draw_and_measure_share_the_readable_floor() -> void:
+	var was_scale := Art.text_scale
+	for scale in [1.0, 2.0]:
+		Art.text_scale = scale
+		for design in [6, 7, 8, 9]:
+			var size := Art.fs(design)
+			Runner.T.eq(size, int(9.0 * scale), "small text keeps its readable floor before enlargement")
+			var capture: Array = []
+			Art.text_capture = capture
+			Art.text(null, "READABLE", Vector2(20.0, 30.0), size, Color.WHITE)
+			Art.text_capture = null
+			Runner.T.eq(capture[0]["size"], size, "the renderer emits the size requested by the accessible policy")
+			Runner.T.eq(capture[0]["box"].size.x, Art.tw("READABLE", size), "drawn and measured text have the same width")
+			Runner.T.ok(size * Art.MIN_WINDOW_SCALE >= 18, "text stays readable at the supported minimum window")
+	Art.text_scale = was_scale

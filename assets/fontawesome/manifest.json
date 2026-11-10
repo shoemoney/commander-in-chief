@@ -1,0 +1,175 @@
+{
+  "pack": "Font Awesome Free 6.7.2",
+  "copyright": "Fonticons, Inc.",
+  "icons_license": "CC BY 4.0",
+  "icons": [
+    {
+      "icon": "volume-high",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/volume-high.svg",
+      "source_sha256": "aedb54e5b7ed3e576b19c7cf89ee9af6d84b12467b0cdd5474c0e7b0ca2c1b84",
+      "local_sha256": "5d292d093581f0035537fc08d0441155f250deae2eba6786f4d098c91783df43",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "volume-xmark",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/volume-xmark.svg",
+      "source_sha256": "72878ed70a6ddfbb1630dad58af41bc218b04fefaee35b3b0e5072e849b09cdc",
+      "local_sha256": "da97fff9ab9c88f4ddda746c3ad4a2e6af425359d7311682b5d1d8007490b4a6",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "music",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/music.svg",
+      "source_sha256": "0eecada89bfb642390282c2fb62b4dd5f9178dd15b71b8ec0ea6034a1f792037",
+      "local_sha256": "f56635612a4be76b83d8a9da4cbfb3d4f723af2d7b15e86f82e7b2bf90c533b0",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "bell-slash",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/bell-slash.svg",
+      "source_sha256": "43d563ea846baad687033932664e08f618334cfca3b57aa0c0b3be99945a9784",
+      "local_sha256": "e73cc2fa6ab5db7f2546df80b9705d509f3eb4f3b8fd8a2d685bd51a15b0351b",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "trophy",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/trophy.svg",
+      "source_sha256": "6b231cb4460840c21b124800ccc0d8909685f34cbce44e5b7def519a1f086849",
+      "local_sha256": "ef55b2ccb9159ac835ed3b4f7721239c9c1c45a9204424187a47f6e30ffd959e",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "book-open",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/book-open.svg",
+      "source_sha256": "bbd0f7a90fe63750bcbacadde63e76a6a6a4b731a7ab34a20fc28f0c49f4131c",
+      "local_sha256": "696a58a65a2d23a5b53989a65406684dc009f175c876c2e4b15262a40319e35a",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "play",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/play.svg",
+      "source_sha256": "2450714e90ceba7026b56f3a926a73b13772210cb9b4ec50b7f3baeacaa439c9",
+      "local_sha256": "0d2b26f1a834ddba58f513219e550011cd942e07cba010809412dcd46dde6fd6",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "gamepad",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/gamepad.svg",
+      "source_sha256": "6dd998edf2f021cfab4ea90c767f3eb306bc32377ea0d9f9f3a95aff3967a1d9",
+      "local_sha256": "8f06dc4e904f797fbe9b0e4be0518f6793e954e6ce58d967ad9a18dfc0520481",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "gear",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/gear.svg",
+      "source_sha256": "b9a38444d7af356e89bb9b2d11852847f969e8b9a45981ca0a1387477247ae81",
+      "local_sha256": "abe7b28013e71078289cad782e3118f8b3f1a6f63fadccddbfed7f3e2cc257fa",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "rotate",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/rotate.svg",
+      "source_sha256": "2faa14f12820e97a6f89a70c2128fbf2faa842e468e103c94f6f67d8ee1f3753",
+      "local_sha256": "2c0e8cda6b4329e2a9aa64ae7d14a1a71b1c4bf40c076cf4369d628685bb0a53",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "house",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/house.svg",
+      "source_sha256": "a2f39593246f7bd7dfcecbe8cf4a0b93926756bbabdd6089b1326545d9389391",
+      "local_sha256": "436ee0d6a3f9a996a2ac0bd5079fe596c172ec11f7d78ba6a75328cd0585a119",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "desktop",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/desktop.svg",
+      "source_sha256": "badddd1affeda69ecf698d830dd82c34602e4e629e35b862d895219a4b129d6b",
+      "local_sha256": "c27d6ff3804cca7a20ba4fdbfd4ecb4602dcd116b04eb83f882a9253e198a6d8",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "door-open",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/door-open.svg",
+      "source_sha256": "ac9031bd95c8c7085856033b905bb8f6504d8c6f7f95dc47243dcb1160cb4eff",
+      "local_sha256": "637bd5cf9bc8d7c0f7200d179022cc29cd9bac28a70d4c8b129aba364150133e",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "person-rifle",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/person-rifle.svg",
+      "source_sha256": "6bfbc49acbf25c757f97007b6a9345cc0ccaa4e6f472346a8417a42ff5aab18b",
+      "local_sha256": "2f56be9aa13f3098805458afad65affad99e32f558ccf077036000e1a35e19e2",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "stopwatch",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/stopwatch.svg",
+      "source_sha256": "424fb86bc01883873b96a0d0ceb07d7419b7015923ccc8851360437942964a1a",
+      "local_sha256": "5ffde0ab3d30870e1534c4696702217e0208455ea4246c5c28f1b6c4ed387238",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "circle-xmark",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/circle-xmark.svg",
+      "source_sha256": "86a4505a783e8162642e11d0d7ad58acf0d9fde76ec040539bfe2203979a8123",
+      "local_sha256": "eb7380f8e699eab87f1c5a4a91f409edf65fac7048328162918def415a548cc2",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "minus",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/minus.svg",
+      "source_sha256": "acceb4dd14955a27ead112580f14b3904b6a8307b29265c4412636b52e762084",
+      "local_sha256": "8e59d516e41b38530717724082db94c97d615f02d47841ad9b80b8f08456f572",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "plus",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/plus.svg",
+      "source_sha256": "8c1c05a38a072f42156542c6f3c6f91f0188e7bf27990f81ff42f42e0719c7e5",
+      "local_sha256": "826d5d7410e5534fdb7380f3fd4aa6687437600c779da614cf0273b61b62afee",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "filter",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/filter.svg",
+      "source_sha256": "3f74ec46bf2832f10ced8c8110af0abc815dd96574adf2159f092fed1c6ea9e0",
+      "local_sha256": "f7ae650ab0f7650378817b212334d5a389efa98d328e63d512179c88193d2a21",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "file-lines",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/file-lines.svg",
+      "source_sha256": "15c0a0e17726508ae605db9c8e7af169899fe9080bc063f8e471bb16634eb41b",
+      "local_sha256": "72d5876723d891671e0e8b4161adac420464baadcbf3a9ac41c4a90d3aa10e8d",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "closed-captioning",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/closed-captioning.svg",
+      "source_sha256": "20a99320e06584d2eca1c7a72c97f2356075eb246461dd878cf93b32458bd8b6",
+      "local_sha256": "09dea07c8f5ec70b63d41005601e919d1307581449833b947f4867a5afb40867",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "text-height",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/text-height.svg",
+      "source_sha256": "4deecd24ed3803e83e7bf7a67673afb47de30678835e71715c8e2e52ca9c1917",
+      "local_sha256": "acf6fbb0b46c45e329b6ac0b93efed2f4366930b0da6270008a5514d580cdd04",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "film",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/film.svg",
+      "source_sha256": "5adf858a1af61ec8ce1ddf5294cb7228b376eb6f814e981df58889c76f74d0db",
+      "local_sha256": "76a5f0bb854d2a3cd016cd16b3041e8bcdf2ed6505abf640b323a19bf8b6ae0e",
+      "change": "white fill for runtime tint"
+    },
+    {
+      "icon": "medal",
+      "source": "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/svgs/solid/medal.svg",
+      "source_sha256": "f8eab823faee7629ba2c9f9542b3f5d30fb4a422896cb6a7d435a8c59c9a8d44",
+      "local_sha256": "a52237f30ee552d864f513dc560ca4e2bc1b906bf3b4d01f3ff624f74965c378",
+      "change": "white fill for runtime tint"
+    }
+  ]
+}

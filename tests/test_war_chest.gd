@@ -328,15 +328,15 @@ func test_last_stand_all_down_latches_the_wipe_in_2p() -> void:
 # losing end, mirroring `_damage_colossus()`'s shape. ---
 
 func test_every_run_ending_converts_the_chest() -> void:
-	# Endless solo wipe. wave 12 + 3 deaths prices a body at 225, above a 200 chest,
+	# Endless solo wipe. wave 12 + 3 deaths prices a body at 200 (8x cap, solo; was 225 uncapped), above a 150 chest,
 	# which is what arms broke_timer and (with nobody up) ends the run.
 	var e := SimWorld.new(7, 1, "endless")
 	var ep: Dictionary = e.players[0]
 	e.wave = 12
-	e.war_chest = 200
+	e.war_chest = 150
 	e._kill_player(ep)
 	ep["deaths"] = 3
-	Runner.T.eq(e.revive_cost(ep), 225, "setup: the body costs more than the chest holds")
+	Runner.T.eq(e.revive_cost(ep), 200, "setup: the body costs more than the chest holds")
 	# BROKE_RESPAWN_TICKS is 300 — the longest instance of this window. Drive 400.
 	var before := 0
 	for i in 400:
@@ -346,14 +346,14 @@ func test_every_run_ending_converts_the_chest() -> void:
 			break
 	Runner.T.ok(e.wiped, "endless wipe latched inside the 400-tick window")
 	Runner.T.eq(e.war_chest, 0, "the wipe empties the chest instead of stranding it")
-	Runner.T.eq(e.score - before, 200 * SimWorld.WIPE_SCORE_MULT,
+	Runner.T.eq(e.score - before, 150 * SimWorld.WIPE_SCORE_MULT,
 		"…converting it at the salvage rate on the same tick")
 	var wev := {}
 	for ev in e.events:
 		if ev.get("t", "") == "wiped":
 			wev = ev
-	Runner.T.eq(int(wev.get("banked", -1)), 200, "the wiped event ships the PRE-zero chest for the debrief")
-	Runner.T.eq(int(wev.get("banked_score", -1)), 200 * SimWorld.WIPE_SCORE_MULT,
+	Runner.T.eq(int(wev.get("banked", -1)), 150, "the wiped event ships the PRE-zero chest for the debrief")
+	Runner.T.eq(int(wev.get("banked_score", -1)), 150 * SimWorld.WIPE_SCORE_MULT,
 		"…and what it converted to, so the view never restates the multiplier")
 
 	# The campaign / solo Last Stand latch is a copy-paste sibling of the endless one;

@@ -85,6 +85,9 @@ jobs:
         shell: bash
         run: |
           python3 -m unittest discover -s tools -p test_build_steam_candidates.py -v
+          python3 -m unittest discover -s tools -p test_verify_runtime_log.py -v
+          python3 -m unittest discover -s tools -p test_verify_native_export.py -v
+          python3 -m unittest discover -s tools -p test_package_attribution.py -v
           python3 -m unittest discover -s tools -p test_verify_export_content.py -v
           python3 tools/verify_export_content.py --godot godot
 
@@ -132,6 +135,7 @@ jobs:
         timeout-minutes: 5
         run: |
           godot --headless --path . -s res://tools/smoke.gd 2>&1 | tee smoke.log
+          python3 tools/verify_runtime_log.py smoke.log --require "SMOKE OK"
           if ! grep -q "SMOKE OK" smoke.log; then
             echo "::error::smoke.gd never reached its SMOKE OK sentinel -- the main scene did not survive 200 frames"
             exit 1
@@ -190,6 +194,27 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Source game end-to-end playthrough
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          godot --headless --path . -s res://tools/e2e_playthrough.gd 2>&1 | tee e2e.log
+          python3 tools/verify_runtime_log.py e2e.log --require "0 FAIL ==="
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          assert re.search(r"^\[E2E\] === [1-9]\d* checks, 0 FAIL ===$", Path("e2e.log").read_text(), re.MULTILINE), "No completed E2E checks"
+          PY
+
+      - name: Run speech reset lifecycle
+        shell: bash
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          godot --headless --path . -s res://tools/verify_run_speech.gd 2>&1 | tee speech.log
+          python3 tools/verify_runtime_log.py speech.log --require "RUN SPEECH PASS: 16 checks, 0 failures"
 
       - name: Full deterministic test suite
         shell: bash
@@ -284,6 +309,7 @@ jobs:
             cat probe.log
             exit 1
           fi
+          python3 tools/verify_runtime_log.py probe.log --require "PROBE OK"
           # Centre-retention regression signal, TIGHTER than the probe's own floor
           # (0.70) but not so tight it flakes on legitimate renderer variance. 0.9
           # was picked from Apple M4 Max / Metal-backed OpenGL samples alone (the
@@ -314,54 +340,25 @@ jobs:
           print(f"centre-retention ok: {keeps}")
           PY
 
-  # Export smoke: prove the real shippable Linux binary boots and survives a
-  # few seconds under the actual export pipeline (export_presets.cfg), not
-  # just the editor/headless test harness above.
   export-smoke:
     needs: resolve-godot-version
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Set up Godot (with export templates)
-        uses: chickensoft-games/setup-godot@v2
-        with:
-          version: ${{ needs.resolve-godot-version.outputs.version }}
-          use-dotnet: false
-          include-templates: true
-
-      - name: Import assets
-        run: godot --headless --path . --import
-
-      - name: Export Linux x86_64 build
-        run: |
-          mkdir -p build
-          godot --headless --path . --export-debug "Linux x86_64" build/CommanderInChief-linux.x86_64
-
-      - name: Boot the exported binary and auto-quit after 200 frames
-        run: |
-          set -euo pipefail
-          chmod +x build/CommanderInChief-linux.x86_64
-          ./build/CommanderInChief-linux.x86_64 --headless --quit-after 200 2>&1 | tee export_smoke.log
-          ! grep -q "SCRIPT ERROR" export_smoke.log
-
-      - name: Upload exported Linux build (binary + .pck)
-        uses: actions/upload-artifact@v7
-        with:
-          name: CommanderInChief-linux-x86_64
-          path: build/CommanderInChief-linux*
-          if-no-files-found: error
-          retention-days: 7
-
-  # Windows export smoke: the item's whole point is "ships reliably on
-  # Windows, Linux, Proton, and Steam Deck" (Proton runs the Windows build,
-  # and Steam Deck's default runtime is Proton) -- so the actual Windows
-  # export_presets.cfg preset has to be proven bootable on a real Windows
-  # runner, not just assumed to work because the Linux export does.
-  export-smoke-windows:
-    needs: resolve-godot-version
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            preset: Linux x86_64
+            artifact: CommanderInChief-linux.x86_64
+          - os: windows-latest
+            name: windows-x86_64
+            preset: Windows x86_64
+            artifact: CommanderInChief-windows.exe
+          - os: macos-latest
+            name: macos-arm64
+            preset: macOS (Apple Silicon + Intel universal)
+            artifact: CommanderInChief-macos.zip
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -377,24 +374,50 @@ jobs:
         shell: bash
         run: godot --headless --path . --import
 
-      - name: Export Windows x86_64 build
-        shell: bash
-        run: |
-          mkdir -p build
-          godot --headless --path . --export-debug "Windows x86_64" build/CommanderInChief-windows.exe
-
-      - name: Boot the exported binary and auto-quit after 200 frames
+      - name: Export native release
         shell: bash
         run: |
           set -euo pipefail
-          ./build/CommanderInChief-windows.exe --headless --quit-after 200 2>&1 | tee export_smoke_windows.log
-          ! grep -q "SCRIPT ERROR" export_smoke_windows.log
+          mkdir -p build
+          godot --headless --path . --export-release "${{ matrix.preset }}" "build/${{ matrix.artifact }}" 2>&1 | tee export.log
+          python3 tools/verify_runtime_log.py export.log
 
-      - name: Upload exported Windows build (binary + .pck)
+      - name: Package third-party license and attribution
+        shell: bash
+        run: |
+          python3 tools/package_attribution.py "build/${{ matrix.artifact }}"
+          python3 tools/package_attribution.py "build/${{ matrix.artifact }}" --verify
+
+      - name: Check Windows version metadata
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = ((Get-Content project.godot | Select-String '^config/version="([^"]+)"$').Matches.Groups[1].Value) + '.0'
+          $metadata = (Get-Item "build/${{ matrix.artifact }}").VersionInfo
+          if ($metadata.FileVersion -ne $version -or $metadata.ProductVersion -ne $version) {
+            throw "Windows file/product version does not match project version $version"
+          }
+
+      - name: Exact release pack campaign and production exit (standard engine)
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            chmod +x "build/${{ matrix.artifact }}"
+          fi
+          python3 tools/verify_native_export.py "build/${{ matrix.artifact }}" --engine godot --log-dir build/native-smoke
+
+      - name: Upload native release and verification evidence
         uses: actions/upload-artifact@v7
+        if: always()
         with:
-          name: CommanderInChief-windows-x86_64
-          path: build/CommanderInChief-windows*
+          name: CommanderInChief-${{ matrix.name }}-release
+          path: |
+            build/CommanderInChief-*
+            build/native-smoke/*
+            build/licenses/**
+            export.log
           if-no-files-found: error
           retention-days: 7
 

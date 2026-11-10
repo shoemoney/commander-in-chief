@@ -27,7 +27,7 @@ func _partial(m: Node2D) -> void:
 	m._last_inputs.clear()
 	m.sim.players[0]["mg_ammo"] = SimWorld.MG_AMMO_MAX - 1
 	m.sim.players[1]["mg_ammo"] = SimWorld.MG_AMMO_MAX - 1
-	m._wheel[0] = {"open": true, "sel": 4}
+	m._wheel[0] = {"open": true, "sel": 0}
 
 func _rally(m: Node2D) -> void:
 	m._last_inputs.clear()

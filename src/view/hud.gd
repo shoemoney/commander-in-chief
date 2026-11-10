@@ -41,14 +41,14 @@ const ICON := 13.0
 # that already existed (a hard black rim for the mid-fight alert band); it is deliberately
 # NOT used for hierarchy, because a black rim is a legibility crutch, not a weight.
 # ===========================================================================================
-const TYPE_MICRO := 8     # 1.000x em — the em floor. Verb-legend labels, keycap captions.
+const TYPE_MICRO := 9
 const TYPE_BODY := 10     # readout tier, the ONLY in-fight size (1.25x em — see the exception above)
 const TYPE_LABEL := 16    # 2.000x em — a labelled plate/heading that has vertical room
 const TYPE_HEAD := 24     # 3.000x em — a section header
 const TYPE_TITLE := 32    # 4.000x em — the title wordmark
 ## The em grid, as a SET, so a test can assert every DISPLAY-tier constant is on it and that
 ## no new off-grid literal creeps back in. Pure data; nothing draws from it.
-const TYPE_EM_GRID := [8, 16, 24, 32]
+const TYPE_EM_GRID := [16, 24, 32]
 
 const FONT_SIZE := TYPE_BODY   # historical name for the readout size — value UNCHANGED (10).
                         # Read by test_hud/test_assets/test_localization; kept as an alias so
@@ -317,6 +317,9 @@ const MAG_ADV := 8.0 * 3.6 + 4.0  # _mag_bar's x-advance (8 segments * 3.6 + tra
                                # the same width from the same source.
 
 var main: Node2D
+# HUD DIET: change-triggered reveal + single-objective lifetime (see hud_diet.gd). main reaches it
+# through _hud_icons.diet, so no new field is read off `main` here.
+var diet := HudDiet.new()
 var _prev_chest := 0
 var _chest_pulse := 0.0   # gold flash on the counter when coin comes in
 var _prev_score := 0
@@ -1414,7 +1417,7 @@ func _draw() -> void:
 							0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 						Art.arc(self, fuel_c, ICON * 0.55,
 							-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
-			if not driver and _row_fits(px, ICON + 13.0 + _tw("%02d" % p["mg_ammo"]) + MAG_ADV):
+			if not driver and _row_fits(px, ICON + 13.0 + _tw(_ammo_str(p)) + MAG_ADV):
 				# The gunner's trigger IS the on-foot MG, so their row carries the ammo numeral + mag
 				# bar where the driver carries the shell count — through the SAME _mg_ammo_stat tint
 				# helper the on-foot row uses, so the two seats can never drift apart. No grenade or
@@ -1803,6 +1806,12 @@ func _telegraph_spec(sim: SimWorld) -> Dictionary:
 			# `cw` is the COMPACT presentation width — a short "GATE!" the planner falls back
 			# to when the full label won't fit, so this critical readout is abbreviated, not
 			# dropped, before it ever becomes a +N tally.
+			# HUD DIET: once the objective sentence for this gate has been stated and retired,
+			# the telegraph is the one remaining statement and drops its economy clause.
+			diet.sync(sim.get_instance_id())
+			if diet.objective_seen(int(g["y"]), sim.tick_count):
+				return {"kind": "gate", "w": _tw(GATE_LABEL_MID) + 4.0, "mid": true,
+					"mw": _tw(GATE_LABEL_MID) + 4.0, "cw": _tw(GATE_LABEL_COMPACT) + 4.0}
 			return {"kind": "gate", "w": _tw(GATE_LABEL_FULL) + 4.0,
 				"mw": _tw(GATE_LABEL_MID) + 4.0, "cw": _tw(GATE_LABEL_COMPACT) + 4.0}
 	if sim.stall_ticks <= PRESSURE_WARN_TICKS:
@@ -1821,6 +1830,15 @@ func _telegraph_spec(sim: SimWorld) -> Dictionary:
 	# TranslationServer.translate, so the .po files are untouched.
 	var cw := ICON + 3.0 + COMPACT_BAR + 4.0
 	return {"kind": "pressure", "w": cw, "cw": cw, "compact": true}
+
+
+## HUD DIET alpha for a static top-bar chip: full while new/changing, eased down once idle.
+## `hold` is for a chip in a WARNING state (the run-ending reinforcements budget): it is observed
+## like any other but never dims, so a rule that ends the run is never shown at 28% alpha.
+func _diet_alpha(id: String, value: Variant, sim: SimWorld, hold := false) -> float:
+	diet.sync(sim.get_instance_id())
+	var a := diet.chip_alpha(id, value, sim.tick_count)
+	return 1.0 if hold else a
 
 
 # c1-06: scrim seam for the telegraph's dark backing rect — default draws; a capture
@@ -2070,6 +2088,25 @@ func _ovf_fit(cands: Array, budget: float, gap: float, extra_hidden: int) -> Dic
 	}
 
 
+var _wb_wave := -1   # EndlessRoster.wave_budget is a pure function of (wave, theme) and costs
+var _wb_theme := -1  # 93-252 us: compute it when either changes, not on every draw
+var _wb_val := 0
+var wave_budget_calls := 0   # test probe: how many times the real function ran
+
+
+func _wave_budget_cached(wave: int, theme: int = 0) -> int:
+	## The theme is part of the key because the sim's own budget is theme-aware
+	## (SimWorld re-derives wave_pending with theme_of once the mutators roll): a MARKSMEN or
+	## BOMBARDMENT wave fields a few more bodies, and a denominator computed without it left
+	## the HOSTILES bar a few bodies short of full on exactly those waves.
+	if wave != _wb_wave or theme != _wb_theme:
+		_wb_wave = wave
+		_wb_theme = theme
+		_wb_val = EndlessRoster.wave_budget(wave, theme)
+		wave_budget_calls += 1
+	return _wb_val
+
+
 func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 	# Live kill-streak: the count + a draining timer ring, so the score-bonus
 	# tiers (5/10/20) are readable in the moment, not just at milestone pops. The
@@ -2145,6 +2182,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			if _fits2("record", _tw("RECORD") + ICON + 9.0):
 				var rp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
 				var rcol := Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.96, 0.62), rp)
+				rcol.a *= _diet_alpha("record", 1, sim)
 				if not _measure:
 					# Through the _emit_icon seam, not a raw draw_texture_rect: an uncaptured
 					# primitive is one a headless frame test cannot see (it measures as ABSENT
@@ -2222,8 +2260,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			var boss_up := not sim.endless_boss.is_empty() and bool(sim.endless_boss.get("alive", false))
 			var remaining: int = alive + sim.wave_pending + (1 if boss_up else 0)
 			# The wave's starting budget (same formula _start_wave uses).
-			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
-				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1) + (1 if boss_up else 0))
+			var wave_total: int = maxi(1, _wave_budget_cached(sim.wave, EndlessRoster.theme_of(sim.wave_mod, sim.second_mod())) + (1 + EndlessRoster.boss_escorts(sim.wave / 5) if boss_up else 0))
 			var htxt := "HOSTILES %d" % remaining
 			# Highest optional priority: the push-or-hold combat dashboard survives a crowded
 			# row while vanity records/streak drop — the stated failure was the reverse.
@@ -2322,6 +2359,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				# Red at two or fewer: the same "this is the run now" cast _dead_chips gives
 				# LAST BREATH, reached before the last body rather than on it.
 				var rcol := Color(0.95, 0.82, 0.5) if rleft > 2 else Art.safe(Color(1.0, 0.42, 0.36))
+				rcol.a *= _diet_alpha("reinforcements", rleft, sim, rleft <= 2)
 				x = _text(rtxt, x, y + ICON - 3.0, rcol) + 8.0
 	# Discoverability: the supply wheel exists (hold to open).
 	# c2-16: suppressed for the WHOLE run whenever the endless shop strip is eligible (shop_row) — the
@@ -2334,11 +2372,12 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 	# the wheel advertised permanently 20px away on the corner plate. One persisted predicate.
 	if not shop_row and not _verb_taught.get("wheel", false) \
 			and _fits2("supplies", _tw("SUPPLIES") + wheel_adv + 12.0):
+		var sup_a := _diet_alpha("supplies", 1, sim)
 		if not _measure:
-			_emit_act_glyph_at("wheel", x + GLYPH_GAP, y + ICON / 2.0, 11.0, Color.WHITE, false)
+			_emit_act_glyph_at("wheel", x + GLYPH_GAP, y + ICON / 2.0, 11.0, Color(1, 1, 1, sup_a), false)
 		# Text starts past the REAL cap, not a frozen +13.0 that assumed a square: a "Q"
 		# rebound to Backspace made the cap 66.8px and buried the word it labels.
-		x = _text("SUPPLIES", x + wheel_adv, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+		x = _text("SUPPLIES", x + wheel_adv, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8 * sup_a)) + 12.0
 	# Flashbang stun: a field-wide effect (every enemy skips its step) that had
 	# zero HUD read — the countdown says how long the free-fire window lasts.
 	if sim.flash_ticks > 0:
@@ -2671,6 +2710,20 @@ func caption_layout() -> Dictionary:
 	var a := 1.0 if main._motion < 0.5 else float(cap.get("fade", 1.0))
 	if a <= 0.0:
 		return {}
+	# CUES NOT WORDS: a non-speech warning cue (the bracket captions) draws as a compact chip, a
+	# glyph plus one or two words on a slim scrim, hung from the same baseline so the arbiters'
+	# reservation (bottom_rail_rects reads this very layout) is unchanged. Voice subtitles carry
+	# no "chip" and keep the full wrapped text below.
+	var form := "full"
+	if String(cap.get("chip", "")) != "":
+		var cmode = main.get("_caption_mode")
+		var counts = sfx.get("cue_counts")
+		var cue_n: int = CuePolicy.count_of(counts if counts is Dictionary else {}, CuePolicy.KEY_CAP + String(cap.get("cue", "")))
+		var step = sfx.get("sfx_step")
+		form = CuePolicy.caption_form(CuePolicy.CAP_ALL if cmode == null else int(cmode), cue_n,
+			10 if step == null else int(step), Art.text_scale)
+		if form == "chip" or form == "glyph":
+			return _chip_layout(String(cap["chip"]) if form == "chip" else "", col, a)
 	var font := Art.font()
 	# accessibility: subtitles are the one HUD element a player may be reading INSTEAD of hearing
 	# the game, so TEXT SIZE scales them. Wrap, measure, leading, scrim and draw all key off this
@@ -2689,9 +2742,57 @@ func caption_layout() -> Dictionary:
 	return {"lines": lines, "cs": cs, "line_h": line_h, "y0": y0, "bg": bg, "col": col, "a": a}
 
 
+const CHIP_ICON_W := 8.0
+const CHIP_GAP := 4.0
+const CHIP_PAD := 4.0
+const CHIP_ABOVE := 7.0   # ascent of the 9px chip type over its baseline; scrim BELOW stays CAPTION_BG_BELOW
+
+## The chip form of an SFX-cue caption: {"lines", "cs", "line_h", "y0", "bg", "col", "a"} like the
+## full strip, plus "icon" (the glyph's rect, inside bg) and "cx" (where the word is centred).
+func _chip_layout(word: String, col: Color, a: float) -> Dictionary:
+	var font := Art.font()
+	var cs := Art.fs(TYPE_MICRO)
+	var scale := float(cs) / float(TYPE_MICRO)
+	var txt: String = TranslationServer.translate(word) if word != "" else ""
+	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, cs).x
+	var iw := CHIP_ICON_W * scale
+	var total := iw + (CHIP_GAP + tw if txt != "" else 0.0)
+	var y_bottom := VERB_LEGEND_Y - 20.0 - bottom_band_lift(main.get("sim"))
+	var x0 := 320.0 - total / 2.0
+	var bg := Rect2(x0 - CHIP_PAD, y_bottom - CHIP_ABOVE * scale, total + CHIP_PAD * 2.0,
+		CHIP_ABOVE * scale + CAPTION_BG_BELOW)
+	var icon := Rect2(x0, y_bottom - iw + 1.0, iw, iw)
+	return {"lines": [txt] as Array[String], "cs": cs, "line_h": CAPTION_LINE_H * scale, "y0": y_bottom,
+		"bg": bg, "col": col, "a": a, "icon": icon, "cx": x0 + iw + CHIP_GAP + tw / 2.0, "glyph_only": txt == ""}
+
+
+func _draw_chip_glyph(icon: Rect2, col: Color) -> void:
+	## A warning triangle with a bang: reads as "danger" with no words and no hue dependence.
+	var l := icon.position.x
+	var r := icon.end.x
+	var t := icon.position.y
+	var b := icon.end.y
+	var mx := (l + r) / 2.0
+	draw_colored_polygon(PackedVector2Array([Vector2(mx, t), Vector2(r, b), Vector2(l, b)]), col)
+	var ink := Color(0.03, 0.04, 0.03, col.a)
+	draw_rect(Rect2(mx - 0.5, t + icon.size.y * 0.38, 1.0, icon.size.y * 0.30), ink)
+	draw_rect(Rect2(mx - 0.5, b - 2.0, 1.0, 1.0), ink)
+
+
 func _draw_caption() -> void:
 	var lay := caption_layout()
 	if lay.is_empty():
+		return
+	if lay.has("icon"):
+		var cbg: Rect2 = lay["bg"]
+		var ccol: Color = lay["col"]
+		var ca: float = lay["a"]
+		var csoft := cbg.grow_individual(10.0, 2.0, 10.0, 2.0)
+		_emit_bg_rect(cbg, Color(CAPTION_SCRIM_FILL.r, CAPTION_SCRIM_FILL.g, CAPTION_SCRIM_FILL.b, CAPTION_SCRIM_FILL.a * ca))
+		draw_texture_rect(Art.tex("fx_softspot"), csoft, false, Color(0.02, 0.03, 0.02, 0.7 * ca))
+		_draw_chip_glyph(lay["icon"], Color(ccol.r, ccol.g, ccol.b, ca))
+		if not lay.get("glyph_only", false):
+			Art.text_center(self, (lay["lines"] as Array)[0], lay["cx"], lay["y0"], lay["cs"], Color(ccol.r, ccol.g, ccol.b, ca))
 		return
 	var lines: Array[String] = lay["lines"]
 	var cs: int = lay["cs"]
@@ -2762,7 +2863,8 @@ func verb_chip_rect() -> Rect2:
 		return Rect2()   # every verb has been used — the reminder taught what it had to teach
 	var ext := verb_legend_extent(segs)
 	var y := VERB_LEGEND_Y - bottom_band_lift(main.get("sim"))
-	return Rect2(float(ext[0]) - 8.0, y - 8.0, float(ext[1]) + 16.0, 16.0)
+	var h := maxf(16.0, ceilf(Art.font().get_height(Art.fs(TYPE_MICRO))) + 6.0)
+	return Rect2(float(ext[0]) - 8.0, y + 8.0 - h, float(ext[1]) + 16.0, h)
 
 
 func _verb_legend() -> void:
@@ -2771,7 +2873,7 @@ func _verb_legend() -> void:
 		return
 	var segs := verb_active_segs(_verb_used, main.get("sim"))
 	var a := _verb_alpha(_verb_show, main._motion)   # same source the _process dirty check reads
-	var y: float = plate.position.y + 8.0            # the chip rect IS the geometry source
+	var y: float = plate.get_center().y
 	# Fades with the glyphs.
 	_emit_rect(plate, Color(0.03, 0.05, 0.03, 0.75 * a))
 	# Emit straight off the primitive list (through the seams below), so pixels land
@@ -2795,7 +2897,7 @@ func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
 	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act),
 		main.pad_bind_for_glyph(act))
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
-	Art.text(self, txt, pos, TYPE_MICRO, c)
+	Art.text(self, txt, pos, Art.fs(TYPE_MICRO), c)
 
 
 ## c1-04: pure geometry of the transient verb chip — [left_x, content_width]. Same
@@ -2808,7 +2910,7 @@ static func verb_legend_extent(segs: Array = VERB_SEGS) -> Array:
 		# localization-text-pipeline: translate() BEFORE measuring, same reasoning as
 		# hud.gd's K.I.A./BAIL OUT fix -- verb_legend_primitives below measures/draws
 		# the SAME translated string, so the two never disagree on width.
-		total += VERB_GH + 3.0 + f.get_string_size(TranslationServer.translate(s[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, TYPE_MICRO).x + 12.0
+		total += VERB_GH + 3.0 + f.get_string_size(TranslationServer.translate(s[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, Art.fs(TYPE_MICRO)).x + 12.0
 	return [320.0 - total / 2.0, total]
 
 
@@ -2830,9 +2932,9 @@ static func verb_legend_primitives(y: float, segs: Array = VERB_SEGS) -> Array:
 		var label_txt := TranslationServer.translate(s[1])
 		# Real font metrics (measured width + ascent/height), not a hard-coded box —
 		# Art.text places the baseline at y+3, so the ink spans up by the ascent.
-		var lsz := f.get_string_size(label_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, TYPE_MICRO)
+		var lsz := f.get_string_size(label_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, Art.fs(TYPE_MICRO))
 		out.append({"act": s[0], "label_txt": label_txt, "glyph": grect,
-			"label": Rect2(x, y + 3.0 - f.get_ascent(TYPE_MICRO), lsz.x, lsz.y)})
+			"label": Rect2(x, y + 3.0 - f.get_ascent(Art.fs(TYPE_MICRO)), lsz.x, lsz.y)})
 		x += lsz.x + 12.0
 	return out
 
@@ -3094,6 +3196,13 @@ func _buff_chip_specs(p: Dictionary) -> Array:
 		chips.append({"icon": "wep_shotgun", "txt": "%ds" % ((p["spread_ticks"] + 59) / 60), "col": _buff_col(p["spread_ticks"], Color(1.0, 0.8, 0.5)), "prio": _buff_prio(p["spread_ticks"])})
 	if p["triple"]:
 		chips.append({"icon": "wep_mg", "txt": "x3", "col": Color(1.0, 0.6, 0.9), "prio": BUFF_PRIO_PERSIST})
+	if p.get("weapon", 0) != 0:
+		# The held special weapon leads the row (top of the timed band: it must never shed into +N).
+		# Icon is the non-colour channel; the number is its magazine.
+		var flamer: bool = p.get("weapon", 0) == Weapons.FLAME
+		chips.append({"icon": "icon_flame" if flamer else "icon_rocket", "txt": "%d" % p["wpn_ammo"],
+			"col": Color(0.92, 1.0, 0.78) if flamer else Color(0.45, 0.62, 0.85),
+			"prio": BUFF_PRIO_PERSIST + 2 + BUFF_TICK_CAP})   # col == main._CAPSULE_COL[8] / [9]: pale lime-white / steel blue
 	if p["rend_ticks"] > 0:
 		# icon_rend — Rend owns a baked icon now (was wep_rifle=Pierce's, then
 		# wep_mg=Triple's; tint-only splits failed protan eyes — both loops' catch).
@@ -3418,6 +3527,13 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 ## could drift out of step with the color tiers), so the numeral routes through the coupled
 ## _warn_stat backing exactly when its tint is a warning. The glyph reflects what's actually
 ## chambered: shotgun shells during the Trench Gun window, AP rounds during Piercing, else MG.
+static func _ammo_str(p: Dictionary) -> String:
+	## The numeral, with the sim's per-shot burn appended when a fan upgrade doubles it ("42x2"):
+	## firing is always-on, so the player must be able to SEE what the Trench Gun / Triple costs.
+	var burn := SimWorld.ammo_burn(p)
+	return "%02d" % p["mg_ammo"] + ("x%d" % burn if burn > 1 else "")
+
+
 func _mg_ammo_stat(p: Dictionary, x: float, y: float) -> float:
 	var ammo: int = p["mg_ammo"]
 	var acol := Color(0.95, 0.96, 0.9)
@@ -3435,7 +3551,8 @@ func _mg_ammo_stat(p: Dictionary, x: float, y: float) -> float:
 		acon = "item_bullet_shotgun"
 	elif p["pierce_ticks"] > 0:
 		acon = "item_bullet"
-	return _warn_stat(acon, "%02d" % ammo, x, y, acol) if awarn else _stat(acon, "%02d" % ammo, x, y, acol)
+	var atxt := _ammo_str(p)
+	return _warn_stat(acon, atxt, x, y, acol) if awarn else _stat(acon, atxt, x, y, acol)
 
 
 ## One magazine segment. A seam like every other HUD primitive, so a headless capture subclass can
@@ -3653,7 +3770,7 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	# the vitals pair is vitals_w(). The vitals lead the list, and plan_chips keeps a strict PREFIX,
 	# so they are the LAST thing this row can lose.
 	var vitals_wdt := vitals_w()
-	var ammo_w := ICON + 13.0 + _tw("%02d" % ammo) + MAG_ADV
+	var ammo_w := ICON + 13.0 + _tw(_ammo_str(p)) + MAG_ADV
 	var gren_w := ICON + 13.0 + _tw("%02d" % p["grenade_ammo"])
 	# The roll chip's slot is the keycap's REAL advance, not ICON + 2.0 — that budget is
 	# 11.9px short of a "Space"-bound roll and the glyph overran the chip after it.

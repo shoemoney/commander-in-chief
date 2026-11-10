@@ -17,10 +17,10 @@
 
 ![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478cbf?logo=godotengine&logoColor=white)
 ![GDScript](https://img.shields.io/badge/GDScript-int--only%20sim-355570)
-![Tests](https://img.shields.io/badge/tests-1289%20methods%20%C2%B7%2039.4k%20asserts-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1729%20methods%20%C2%B7%2096.9k%20asserts-brightgreen)
 ![CI](https://img.shields.io/badge/CI-3--OS%20matrix%20%C2%B7%20determinism%20gate-2ea44f?logo=githubactions&logoColor=white)
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
-![Milestone](https://img.shields.io/badge/milestone-1.2%20%C2%B7%20gold-gold)
+![Milestone](https://img.shields.io/badge/milestone-1.5%20%C2%B7%20in%20progress-gold)
 ![Assets](https://img.shields.io/badge/assets-owned%20or%20CC0%20%C2%B7%20history%20purged-2ea44f)
 ![Release](https://img.shields.io/badge/release-v1.4.4%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
 
@@ -32,19 +32,20 @@ a shared coin economy where every kill mints and every revive spends.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/gifs/staging.gif" alt="Sector 1/6 Staging Ground — opening firefight, rounds bouncing off armor"/></td>
-<td width="50%"><img src="docs/media/gifs/bridge.gif" alt="Sector 3/6 Bridge Gunship — boss strafing run under a sniper lock"/></td>
+<td width="50%"><img src="docs/media/gifs/staging.gif" alt="Sector 1/6 Staging Ground — the dawn bunker line, infantry closing on a commandeered tank"/></td>
+<td width="50%"><img src="docs/media/gifs/bridge.gif" alt="Sector 3/6 Bridge Gunship — the gunship's strafing run over a grenade blast and a sniper's laser"/></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/media/gifs/convoy.gif" alt="Sector 5/6 Crashed Convoy — ten-kill streak, elite winding up"/></td>
-<td width="50%"><img src="docs/media/gifs/foundry.gif" alt="Sector 6/6 The Foundry Core — minefield telegraphs on the run to the Colossus"/></td>
+<td width="50%"><img src="docs/media/gifs/convoy.gif" alt="Sector 5/6 Crashed Convoy — the Siege Tank shelling its gate at dusk, an eighteen-kill streak running"/></td>
+<td width="50%"><img src="docs/media/gifs/foundry.gif" alt="Sector 6/6 The Foundry Core — the Last Stand against the Foundry Colossus"/></td>
 </tr>
 </table>
 
-<sub>☝️ **Four sectors, four real runs.** Clockwise: **1/6 Staging Ground** — the opening push,
-rounds bouncing off armor · **3/6 Bridge Gunship** — a boss strafing run while a sniper paints you
-· **5/6 Crashed Convoy** — a ×10 streak with an elite winding up · **6/6 The Foundry Core** — the
-minefield on the way to the Colossus.<br/>
+<sub>☝️ **Four sectors, four real runs.** Reading across, then down: **1/6 Staging Ground** — the
+dawn bunker line, infantry closing on a commandeered tank · **3/6 Bridge Gunship** — its strafing
+run, over a grenade blast and a sniper's laser · **5/6 Crashed Convoy** — the Siege Tank shelling
+its gate at dusk with an ×18 streak running · **6/6 The Foundry Core** — the Last Stand against
+the Foundry Colossus.<br/>
 Captured by <code>tools/gif_capture.gd</code> straight off the scripted bot playing the real game
 (<code>start_arcade()</code> jumps to each zone), so every number on those HUDs was earned — no
 posed sim states, no mockups, no concept art.</sub>
@@ -55,12 +56,13 @@ posed sim states, no mockups, no concept art.</sub>
 
 </div>
 
-> ⚠️ **Status: 1.2 — gold.** Campaign runs studio splash → Foundry
-> Colossus 🏭, Endless War is deep, all side modes ship (Boss Rush · Arcade · Chapter
-> Select · Daily Run), and the feel stack is real. Art is **owned procedural art
-> (`tools/gen_*.py`) + bespoke generated boss/vehicle/desert pieces** over a Kenney-CC0
-> FX base — no longer greybox, and no longer third-party-derived (every encumbered sprite was
-> replaced; see [`ASSETS.md`](ASSETS.md)).
+> ⚠️ **Status: 1.5 — in progress** (`project.godot` is 1.5.0; the download line below is the last
+> published build). Campaign runs studio splash → Foundry Colossus 🏭 through six sectors, with a
+> Bridge Gunship, a Siege Tank and the Colossus as its bosses. Endless War is deep, all side modes
+> ship (Boss Rush · Arcade · Chapter Select · Daily Run), and the feel stack is real. Art is
+> **owned procedural art** (`tools/gen_*.py`, plus `tools/blender_vehicles.py` for the vehicles and
+> bosses) over a Kenney-CC0 FX base, with a few generative-AI desert pieces — no longer greybox, and
+> no longer third-party-derived (every encumbered sprite was replaced; see [`ASSETS.md`](ASSETS.md)).
 > **CI is live**: `.github/workflows/ci.yml` runs a static `lint` job (`tools/lint_sim.gd`
 > determinism gate + `tools/lint_assets.gd` + `python3 tools/i18n_check.py` string extraction gate),
 > then import + boot-smoke + the full golden-checksum suite (the runner prints the exact
@@ -189,6 +191,7 @@ instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
 | Toggle local 2P 👥 | F2 | — |
 | Toggle Endless War ♾️ | F3 | — |
 | Restart 🔁 | R | — |
+| Retry sector 🔁 (on a Campaign defeat card) | T | Y |
 
 ---
 
@@ -196,8 +199,8 @@ instead, that's real non-determinism: **fix it, never re-record over it.** 🚨
 
 | Mode | What it is |
 |---|---|
-| 🏔️ **Campaign** | 6 gated sectors (`SimWorld.FINAL_GATE_INDEX`) → the **Foundry Colossus** finale (Last Stand rule: no revives; kill converts your War Chest to score. **VICTOLY!**). Gates 2 & 4 **fork**: `< CACHE` (free crate ringed by mines) vs `BOUNTY >` (two elites, one marked) — walking a side IS the choice 🛣️ |
-| ♾️ **Endless War** | Escalating waves, between-wave **shop intermissions**, minibosses that **fly in** over 7s and **escalate by tier** (tighter spray, extra mortars by w15), contested **parachute supply drops** rushers try to steal 🪂, and the wave-7+ **Broadcast Tower** debut |
+| 🏔️ **Campaign** | 6 gated sectors (`SimWorld.FINAL_GATE_INDEX`) → the **Foundry Colossus** finale (Last Stand rule: no revives; kill converts your War Chest to score. **VICTOLY!**). Gates 2 & 4 **fork**: `< CACHE` (free crate ringed by mines) vs `BOUNTY >` (two elites, one marked) — walking a side IS the choice 🛣️. A defeat offers **RETRY SECTOR**, and campaign runs bank Veteran Points (2 per sector reached, +10 for a clear) |
+| ♾️ **Endless War** | Escalating waves, between-wave **shop intermissions**, and a **gunship miniboss every 5 waves** (VANGUARD · BROADSIDE · WARDEN · REAPER) that **flies in** over 7 s and **escalates by tier**: a 4th mortar shell from wave 10, a 5th from wave 15, and WARDEN and REAPER bring escorts. Contested **parachute supply drops** rushers try to steal 🪂. Roster archetypes **debut on their own waves**, the last being the **Broadcast Tower** at wave 14 |
 | 🎯 **Arcade / Chapter Select** | Jump straight to any of the **6 chapters** (`jump_to_chapter`) — the same authored world, entered mid-way by priming every streaming cursor forward. Every streamed pick is a pure function of absolute world position, so chapter 4 looks like chapter 4 always does 🗺️ |
 | 🥊 **Boss Rush** | `BOSS_RUSH_COUNT` = **3 gunships back-to-back**, then the Colossus caps the run. Non-linear HP escalation (`BOSS_RUSH_HP_STEPS = [0, 14, 32]`) — the ladder steepens, it does not just scale 📈 |
 | 👥 **Local 2P co-op** | Shared War Chest, revive tether, per-device input glyphs. The field **keeps advancing on a downed player** — being down is a state, not a pause ⏱️ |
@@ -227,6 +230,10 @@ All four sim modes — `campaign` · `arcade` · `endless` · `boss_rush` — sh
 Persistent carrots 🥕: top-40 **Hall of Fame**, career totals, and best score/wave/distance
 survive across runs (`user://ikari_best.cfg`, atomic tmp+bak writes).
 
+Progression: **CHAPTER SELECT** appears on the title once you reach sector 2. **VET PERKS** decides
+whether owned perks apply in Campaign and Arcade (runs that use them rank as *VET). The **SERVICE
+RECORD** keeps per-sector medals from Campaign: FLAWLESS, SWIFT and HOARDER.
+
 ---
 
 ## 👹 The Roster
@@ -245,11 +252,12 @@ Every threat telegraphs before it resolves — that's the **readable chaos** pil
 | 🐸 Frogman | Submerged in rivers, grenades-only until it surfaces to lunge | Kill it on the surface |
 | 🛸 Drone | Hovering strafer, spawns **marked** (3× trophy bounty + crown) | Watch the tether, claim the crown |
 | 🔩 MG Nest | 3-hit armor, alarm lock-on, teaching card | Break its line or flank — it cracks under fire |
-| 📡 **Broadcast Tower** | Rooted rally mast (endless w7+): every ground trooper in its 140px aura runs **+25%**, and it holds the wave open | Kill the mast, break the rally — 5 hits or one grenade |
+| 📡 **Broadcast Tower** | Rooted rally mast (endless, debuts wave 14): every ground trooper in its 140px aura runs **+25%**, and it holds the wave open | Kill the mast, break the rally — 5 hits or one grenade |
 | 🚙 **Technical** | *The fastest thing on the field.* Cruises, revs 30t (dashed line = still aiming), then **locks a charge lane** (solid line = committed) — 3 px/t, can't steer | Sidestep the lane; one shot drops it; smoke denies the lock; water kills the charge 🌊 |
 | 🛢️ Explosive barrels | Bullets & enemy contact detonate; 8-tick chain fuse goes white-hot | Feed the chain — or flee it |
 | 🗼 Mortar Observer | Shells you for stalling | Kill him or push forward |
-| 🚁 Bridge Gunship | Gate boss every 3rd gate — bullets chip, grenades chunk. Chin-turret **charge glow** telegraphs each spray; mortars **lead your walk** while the hull keeps drifting | When it dies, see below 👇 |
+| 🚁 Bridge Gunship | Gate boss every 3rd gate, in **three HP-third acts**: a strafing run (aimed sprays, then mortars), **cover denial** (a two-strike salvo lands on the cover you hide behind), then **desperation** (1.25× hull drift, faster sprays, and a five-strike carpet across your row). Bullets chip it, grenades chunk it. Chin-turret **charge glow** telegraphs each spray | When it dies, see below 👇 |
+| 🛡️ **Siege Tank** | The Crashed Convoy gate (sector 5) is held by a ground boss instead of two bunkers: shelling, then a telegraphed **charge** down a drawn lane, then a winded hull with an open **rear weak point**. Its last act adds an MG sweep and escorts | Bullets ping off the hull except at the rear weak point, and only while it is stunned. Grenades and rockets hurt it at any time. Step out of the lane |
 | 🪂 **Downed Pilot** | Ejects from any dead gunship, staggers for the enemy line. **TOUCH to rescue (+100¢). Shooting him pays NOTHING.** Tank treads *grab* him, the airstrike spares him, roll-touch works | Reach him before the top edge — the label turns red **ESCAPING!** at the cliff |
 | 🏭 Foundry Colossus | The world ends here: 3 phases, pure armor, inverts the scroll | Grenades only. Last Stand. 🫡 |
 
@@ -260,6 +268,16 @@ Every threat telegraphs before it resolves — that's the **readable chaos** pil
 **Rare capsules** (elite drops, weighted table): 🔵 PIERCE · 🟠 SPREAD · 🩷 TRIPLE
 (permanent 3-fan — stacks with Spread into a 5-fan!) · 🔴 REND (shears riot shields) ·
 🟢 CLAYMORE · ⚪ SMOKE (breaks locks) · 🟡 FLASHBANG (field-wide stun, fair re-arm).
+
+**Special weapons** (`src/sim/weapons.gd`) come from the same elite drops (about one elite in six)
+and from the Endless shop. 🔥 **FLAMETHROWER** unlocks from sector 2 and 🚀 **ROCKET LAUNCHER** from
+sector 3. A pickup replaces the special you hold, and a held special lasts until you die or its
+magazine runs dry, then you fall back to the MG. A held special only fires when there is something to hit:
+
+- 🔥 **Flamethrower**: a short cone with 6 s of continuous fire per pickup. It burns infantry and
+  most bodies. MG nests, technicals and the Broadcast Tower are immune.
+- 🚀 **Rocket launcher**: 10 rockets per pickup (14 max), 0.6 s apart. It flies slower than the MG,
+  so you can lead it. A hit strips a nest or a technical in one shot and does 6 damage to a gunship.
 
 **The wheel** 🎡 went **8-way** (hold Q / BACK, flick, release — coin prices from the shared War Chest):
 
@@ -308,6 +326,15 @@ flowchart LR
 
 Concussion muffles the radio too — by intent. A stunned soldier hears underwater radio. 🌊
 
+### 🎼 The score
+
+The soundtrack is original and composed in-house by `tools/compose_music.py`, rendered into
+`assets/music/`. It has ten looping tracks (title, the six sectors, the boss fight, the shop and the
+Last Stand), each with a combat stem and a lull stem that crossfade on the bar, plus four stingers
+(boss intro, sector clear, victory, defeat). `src/view/music_director.gd` plays it and falls back to the
+synthesized beds when a stem is missing. It is checked by measurement (loudness, loop seams, key,
+melody fit), but **nobody has listened to it yet**, and `assets/music/README.md` says the same.
+
 ---
 
 ## 🧪 Headless test suite
@@ -341,7 +368,7 @@ the engine-error gate fail a perfectly clean diff with *"no log carried this run
 
 </details>
 
-**1,289 test methods / 39,400+ assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
+**1,729 test methods / 96,900+ assertions** — fixed-point math, seeded RNG streams, the 1986 mechanic
 grammar, the War Chest economy, tank/observer/gates/water/gunship/colossus, every archetype's behavior
 contract (nest armor, technical charge lock, pilot rescue/grace/forfeit), Endless War waves & shop,
 lockstep loopback, replay integrity, checksum coverage classification, and the campaign+endless **golden
@@ -413,6 +440,20 @@ Remote Play Together are the co-op that actually ships.
 3. Gatekeeper complains? Right-click → Open once, or
    `xattr -dr com.apple.quarantine Godot.app`. 🔓
 
+### 🐧 Linux
+
+Install Godot **4.7.2 (stable)** so that `godot` is on your `PATH`, then from the checkout:
+
+```sh
+godot --headless --path . --import      # 📦 once after cloning
+godot --path .                          # 🎮 open the project in the editor
+tools/run_tests.sh                      # 🧪 full headless suite
+tools/ci_local.sh                       # 🔁 the blocking CI jobs, run locally
+```
+
+`tools/run_tests.sh` and `tools/ci_local.sh` use `/Applications/Godot.app` when it exists and fall
+back to `godot` on your `PATH` otherwise, so the same commands work on macOS and Linux.
+
 Determinism across architectures is by construction (pure 64-bit int math) and
 asserted by the golden suite — run it locally on your arch; the values must match
 the committed goldens recorded on Apple Silicon. 🤝
@@ -424,12 +465,19 @@ the committed goldens recorded on Apple Silicon. 🤝
 ```
 project.godot        Godot 4.7 project (640×360 virtual res, 60 Hz physics)
 src/sim/             🔒 Deterministic core — int-only, no engine RNG, no Time.*
+                     sim_world.gd (the step) · weapons.gd (flamethrower + rocket) ·
+                     gunship_phases.gd (gunship acts) · siege_boss.gd (Siege Tank) · endless_roster.gd
 src/main.gd|.tscn    🖼️ The view + input quantization boundary
-src/view/            art.gd (bake registry/tint/glyphs) · hud.gd · menu.gd · sfx.gd
+src/view/            art.gd (bake registry/tint/glyphs) · hud.gd · menu.gd · sfx.gd ·
+                     music_director.gd (score) · siege_view.gd · weapon_fx.gd · ground_structure.gd ·
+                     ground_decor.gd · sector_look.gd · atmosphere.gd · front_door.gd (title) ·
+                     campaign_meta.gd (VP, retry, VET) · service_record.gd · time_fx.gd · camera_lead.gd ·
+                     player_locator.gd · hud_diet.gd · cue_policy.gd (captions) · teach_truth.gd
 src/net/             replay.gd (run recorder, live) · lockstep.gd (design sketch, no callers)
-tests/               Headless runner + 38 suites (SUITE=<name> filter, golden checksums)
-tools/               gen_*.py (the live sprite generators) · lint_sim.gd/lint_assets.gd · i18n_check.py (CI gates)
-                     screenshots.gd · smoke.gd · validate_replay.gd
+tests/               Headless runner + one `test_*.gd` file per suite (SUITE=<name> filter, golden checksums)
+tools/               gen_*.py (sprite, ground and infantry generators) · bake_sprites.py (props) ·
+                     blender_vehicles.py · compose_music.py · lint_sim.gd/lint_assets.gd · i18n_check.py (CI gates) ·
+                     ci_local.sh (the blocking CI jobs, locally) · screenshots.gd · smoke.gd · validate_replay.gd
 docs/PLAN.md         📜 The aspirational P0–P7 master plan
 ```
 
@@ -460,11 +508,11 @@ Design viewport is **640x360** (`project.godot:31` `window/size/viewport_width|h
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/gameplay_firefight.png" alt="Desert firefight" width="100%"/></td>
+<td width="50%"><img src="docs/media/gameplay_firefight.png" alt="Jungle firefight" width="100%"/></td>
 <td width="50%"><img src="docs/media/gameplay_colossus.png" alt="Foundry Colossus boss" width="100%"/></td>
 </tr>
 <tr>
-<td align="center"><sub>Desert firefight — one-hit twin-stick</sub></td>
+<td align="center"><sub>Jungle firefight — one-hit twin-stick</sub></td>
 <td align="center"><sub>The Foundry Colossus 🏭 — campaign finale</sub></td>
 </tr>
 </table>
@@ -474,27 +522,36 @@ The art is a **hybrid pipeline**, not one source:
 | Layer | Source | Where |
 |---|---|---|
 | Units · structures · props | ✅ **Owned procedural art** (`tools/gen_entities.py`) | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level |
-| Player + enemy soldier sprites, action poses, and projectile cards | **Bespoke generative-AI art** (OpenAI built-in image generation; prompt/provenance record included) | `assets/troops/`, `assets/projectiles/` |
+| Infantry: hero, rifle and special classes, elite, frogmen | ✅ **Owned procedural art, drawn top-down at its on-screen size** (`tools/gen_infantry.py`) | `assets/baked/{hero,enemy_*,frogman*}` |
+| Vehicles · bosses (tank, gunship, colossus) | ✅ **Owned procedural art, modelled and lit in Blender** from script (`tools/blender_vehicles.py`), then baked by `tools/bake_sprites.py` | `assets/art/vehicles/` → `assets/baked/{vehicle,gunship,colossus}` |
+| Bunkers · crates · cover · rocks | ✅ Owned art, baked to one pixel grid by `tools/bake_sprites.py` (`PROP_FAMILIES`) | `assets/baked/{bunker,crate,cover,rock}` |
+| Projectile cards | **Bespoke generative-AI art** (OpenAI built-in image generation; prompt/provenance record included) | `assets/projectiles/` |
+| Soldier masters (legacy) | **Bespoke generative-AI art**, no longer drawn at runtime. Only the `tools/bake_sprites.py --legacy-masters` path reads them | `assets/troops/` |
 | Menus · HUD · icons · FX cards | ✅ **Owned procedural art** (`tools/gen_ui_chrome.py` · `gen_ui_icons.py` · `gen_ui_glyphs.py` · `gen_fx_cards.py`) | `assets/art/{ui,hud,icons,fx}` |
 | Desert flora | **Bespoke generative-AI art** (`nano-banana`; pipeline + prompts recorded in `assets/art/desert_assets_source.md`) — the painterly cacti, scrub and tumbleweed | `assets/art/` (owned, gen-AI) |
-| Bosses · player tank | **Bespoke generative-AI art**, service unrecorded — the gunship/colossus/tank silhouettes. See [`ASSETS.md`](ASSETS.md) | `assets/art/` (owned, gen-AI, unverified) |
-| Ground · projectiles · FX | **Kenney CC0** | `assets/cc0/` |
-| Radio VO (56 mp3) | **Commissioned TTS** (ElevenLabs) — owned by the project | `assets/vo/` |
-| Combat shouts (118 mp3) | **Commissioned TTS** (ElevenLabs, ar/fa lines) | `assets/audio/` |
+| Ground: sand base and sectors 2–6 | ✅ **Owned procedural cards** (`tools/gen_ground.py`, seeded). Sector 1's jungle turf uses four CC0 ambientCG cards | `assets/art/ground/`, `assets/cc0_extra/ground/` |
+| FX base · legacy cards | **Kenney CC0** | `assets/cc0/` |
+| Score | ✅ **Original music**, composed and rendered in-house (`tools/compose_music.py`) | `assets/music/` |
+| Radio VO (56 mp3) | **Commissioned voice recordings** (service and permissions per [`ASSETS.md`](ASSETS.md)) | `assets/vo/` |
+| Enemy death and spawn shouts (88 mp3) | **Commissioned TTS** (stock voices; provenance per [`ASSETS.md`](ASSETS.md)) | `assets/audio/` |
 | Text | **PixelOperator8** — CC0, Jayvee Enaguas | `assets/fonts/` |
 
-The desert→jungle look is a per-sprite olive tint + 1px readability outline applied in the
-view (`src/view/art.gd`), not baked in — so a new asset joins one palette family regardless
-of which source it came from.
+The desert→jungle look is a per-sprite olive tint applied in the view (`src/view/art.gd`), so a
+new asset joins one palette family regardless of which source it came from. The baked sprites
+carry their own 1px ink keyline.
 
-> ✅ **Every asset is cleared, and the history is clean.** All 266 PNGs under `assets/` are owned
-> procedural art (`tools/gen_*.py`), owned generative-AI pieces, or CC0, and the 174 voice mp3
-> were synthesized in-house and are owned by the project. The old
-> third-party art was **purged from every commit** on 2026-07-27 —
-> that was the last blocker, and clearing it is what let this repo go public. Full map: [`ASSETS.md`](ASSETS.md). Generative-AI assets **are** sanctioned (the earlier no-AI policy
-> was dropped — see `CLAUDE.md`); the gen-AI boss/vehicle/desert art and the synthesized VO
-> already ship in-game. 📋 Full asset-licensing map + the open-source audit trail:
-> **[`ASSETS.md`](ASSETS.md)**.
+**The world reads by sector.** Six ground biomes (`src/view/ground_structure.gd`): jungle turf,
+marsh, bridge deck, gravel, asphalt and slag, with feathered seams, a worn track and gate aprons.
+`src/view/ground_decor.gd` replaces the cacti with biome dressing (reeds and driftwood, rubble, scrap).
+Each sector has its own colour grade, six looks from dawn to furnace night (`src/view/sector_look.gd`,
+applied by `grade.gdshader`), and its own weather and drifting light: rain, fog, dust, ash and embers
+(`src/view/atmosphere.gd`).
+
+> ✅ **The history is clean.** The old third-party art was **purged from every commit** on
+> 2026-07-27 — that was the last blocker, and clearing it is what let this repo go public.
+> Generative-AI assets **are** sanctioned (the earlier no-AI policy was dropped — see `CLAUDE.md`),
+> and some ship in-game (the desert pieces, the commissioned voice). 📋 **[`ASSETS.md`](ASSETS.md)** is
+> a provenance inventory, not a clearance statement: several rows are marked unverified.
 
 <details><summary>🖼️ <b>Promo / key-art variants</b></summary>
 
@@ -533,10 +590,10 @@ flowchart LR
 | | Milestone | Where it actually stands |
 |---|---|---|
 | ✅ | **Deterministic core** | 16.16 fixed-point, seeded xoshiro128\*\*, no floats/RNG/wall-clock/scene-tree in `src/sim` — enforced by `tools/lint_sim.gd` in CI, not by convention. Golden-checksum suite proves bit-identical x86_64 ⇄ arm64 |
-| ✅ | **Playable start→finish** | 6 gated sectors → Foundry Colossus, plus Arcade/Chapter Select, Endless War, Boss Rush, Daily Run, replay, local 2P |
-| ✅ | **Owned art + audio** | Every sprite owned-procedural, owned generative-AI, or CC0; voice lines synthesized in-house. Provenance map in [`ASSETS.md`](ASSETS.md) |
-| ✅ | **Public release** | Clean git history, MIT on the code, **v0.3.0** binaries for macOS (arm64 + universal) · Linux · Windows |
-| 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame, sectors reuse one desert tileset despite distinct names |
+| ✅ | **Playable start→finish** | 6 gated sectors → Foundry Colossus, with the Bridge Gunship and Siege Tank fights, the flamethrower and rocket launcher, plus Arcade/Chapter Select, Endless War, Boss Rush, Daily Run, replay, local 2P |
+| ✅ | **Owned art + audio** | Every shipped sprite has a recorded source (procedural, or CC0 for the FX base). The score is composed in-house. Voice recordings have provenance notes that are still open. Provenance map in [`ASSETS.md`](ASSETS.md) |
+| ✅ | **Public release** | Clean git history, MIT on the code, binaries for macOS (arm64 + universal) · Linux · Windows. The latest published build is **v1.4.4** |
+| 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame |
 | ⬜ | **Online netplay** | `src/net/lockstep.gd` is **~260 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
 | ⬜ | **Steam release** | `SteamBridge` is an offline-first *facade* — it no-ops without the SDK. No store page, no Playtest |
 | ⬜ | **Localization freeze** | 3 languages shipped (`locale/strings.{es,fr,ja}.po`), not the 12-language freeze the plan costs |
@@ -563,6 +620,7 @@ Small, well-tested changes are very welcome. Two things this codebase cares abou
 godot --headless --path . --import        # once after cloning
 tools/run_tests.sh                        # full suite under a private user://
 tools/run_tests.sh -s res://tools/lint_sim.gd
+tools/ci_local.sh                         # the blocking CI jobs, run locally
 ```
 
 Looking for something to fix? [`FINDINGS.md`](FINDINGS.md) is the open defect inventory —

@@ -798,13 +798,27 @@ const SEED := 0xDEADBEEF
 ## BYTE-IDENTICAL and 1-5 move. ⚠️ Coverage cost, measured: this torture now wipes at TICK
 ## 2057 (was 3140; 8 knockdowns, 0 gates either way), so samples 3-5 are frozen post-wipe
 ## state (was only 5). SURVIVOR_GOLDEN is still the live-state arm for that back half.
+## RE-RECORDED (2026-11-10 — MERGE of the fairness and special-weapons packages): sample 5
+## ONLY. The weapons package recorded "campaign GOLDEN untouched" on a tree where this
+## torture never got far enough to roll a rare capsule past sector 1; with the fairness
+## changes merged it does. Measured on the merged tree: the first special-weapon capsule
+## lands at TICK 3072 and is in a player's hands at 3073 — 3072 / SAMPLE_EVERY(600) = 5, so
+## sample 5 must move and 0-4 must not. They did exactly that. Control: forcing both weapons'
+## min_sector to 99 reproduces all six pre-merge samples byte-for-byte, so nothing else in
+## the four merged sim packages reaches this stream (bisected too: fairness, economy and
+## gunship are each green against the fairness-recorded values). The run opens 2 gates and
+## still wipes (13 knockdowns); SURVIVOR_GOLDEN remains the live-state arm.
+## RE-RECORDED (2026-11-10 -- REVIEW FIXES, SIM): sample 5 ONLY again, same cause: the player holds a
+## special from tick 3073, and a special that has nothing to hit now falls through to the MG
+## (so a held flamethrower no longer stands mute: it shoots MG rounds) + the rocket's lead /
+## proximity fuse. Samples 0-4 are byte-identical (no special in hand before 3072).
 const GOLDEN: Array[int] = [
-	4946374995361956892,
-	2882873412615601156,
-	4212473115369938232,
-	8934249832053349751,
-	7419367325045136095,
-	6204860958298409479,
+	4777686421406228267,
+	6331385278001629063,
+	5720059147807561410,
+	6422984499686730060,
+	3092976764520280189,
+	7512635039189011389,
 ]
 
 
@@ -1044,13 +1058,24 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## any shot, so sample 0 (t = 600) moves too — measured, not assumed. The torture now WIPES at
 ## TICK 3123 (was alive at 3600; 4 knockdowns either way, still wave 3), so sample 5 is
 ## frozen post-wipe state.
+## RE-RECORDED (2026-11-10 -- SPECIAL WEAPONS): ONLY sample 1 moves (8359... -> 7598...). The
+## Endless crate pool grew from 5 to 7 kinds (flamethrower, rocket launcher), so the wave-1 shop's
+## Fisher-Yates draws a different crate from the same rng stream; later samples reconverge. The
+## campaign GOLDEN is untouched: every new field is hashed conditionally (weapon held / rocket in
+## flight / scorched bag), and the rare-capsule roll is byte-identical below sector 2.
+## RE-RECORDED (2026-11-10 — MERGE with the fairness package): the special-weapons note above
+## was written on a tree where this array's samples 2-5 still held their pre-fairness values;
+## fairness moved 2-5, weapons moves 1. Both are now in: sample 0 is the only survivor of both.
+## RE-RECORDED (2026-11-10 -- ENDLESS VARIETY): samples 2-5 move (0-1 byte-identical). The torture
+## reaches wave 3, where the tiered roster (EndlessRoster) fields ONE grenadier on a fixed slot and
+## otherwise plain elites, plus compensation bodies in the trickle. No new hashed field.
 const ENDLESS_GOLDEN: Array[int] = [
 	2690452510761397110,
-	8359227894364836834,
-	6697781869985125928,
-	2863856926012775250,
-	3072235456289054715,
-	2496037070296672176,
+	7598256093459179475,
+	6662727244287474993,
+	3184369704061080815,
+	2906951860614421736,
+	2551049773907170239,
 ]
 
 
@@ -1079,7 +1104,12 @@ const ENDLESS_GOLDEN: Array[int] = [
 ## (27 and 0xBEEF; median wipe tick 2652 -> 2568). Seed 27 is the one that still OPENS TWO
 ## GATES (11 knockdowns, 76 coin left at t = 3600); 0xBEEF opens one. So all six samples
 ## below are live state again on the new seed.
-const SURVIVOR_SEED := 27
+## RE-RECORDED (2026-11-10, FAIRNESS package): rifleman windup 20 -> 24, riot-shield turn 1/32 -> 1/96
+## rad/tick, rooted guns spawn north of the front-most player, tank cook-off hurts players in the
+## blast, trench camping draws the flush. GOLDEN: all six samples; ENDLESS_GOLDEN: samples 2-5
+## (0-1 byte-identical); SURVIVOR: seed 27 now wipes inside the window, RE-SEEDED to 25 (sweep of
+## seeds 0..39 + 0xBEEF: survivors 24/25/36; 25 opens 2 gates with 11 knockdowns) and re-recorded.
+const SURVIVOR_SEED := 25
 
 ## RE-RECORDED (2026-10-01, sapper mines tagged "hostile" + no_coin): sample 5 ONLY. The
 ## seed-27 window lays 10 sapper mines; a live one sits in mines[] at t = 3600 and the new
@@ -1092,13 +1122,25 @@ const SURVIVOR_SEED := 27
 ## a unit the ratchet had just left behind), inside standoff, now walks back up instead of
 ## holding. The arm still does its job, measured: ALIVE at t = 3600 (13 knockdowns, was 11),
 ## but it opens ONE gate now (was 2; score 14661, chest 268). All six samples are live state.
+## RE-RECORDED (2026-11-10 — MERGE of the fairness and special-weapons packages): samples 1
+## and 5. Each package was green alone; together they are not, and neither side's array was
+## right. Cause, by control experiment rather than by argument: forcing both weapons'
+## min_sector to 99 on the merged tree reproduces all six pre-merge survivor samples (and all
+## six campaign GOLDEN samples) byte-for-byte, so every moved sample is the rare-capsule pool
+## growing once a run is past sector 1 (_pick_rare_kind: 10 slots -> 13/16). Measured on the
+## merged tree, this arm NEVER sees a weapon capsule (0 in 3,600 ticks, nobody ever holds
+## one) — what changes is which ordinary rare kind the SAME single rng draw names. One call
+## per roll either way, so the stream is untouched, which is why samples 2-4 stay
+## byte-identical between the two rolls that land near a sample. (That last step is inferred
+## from the reconvergence; the control proves the cause, the per-capsule trace was not run.)
+## The arm still does its job: ALIVE at t = 3600, 3 gates open, 11 knockdowns, sector index 2.
 const SURVIVOR_GOLDEN: Array[int] = [
-	5237620441672197736,
-	7033708846459431453,
-	7009908576559667704,
-	7102171874154285119,
-	6036103179099983411,
-	8209868053795792201,
+	136124877747581649,
+	3264801321259842924,
+	428232730071013903,
+	7266587977861809201,
+	2604994738116460987,
+	9181879318324887023,
 ]
 
 
@@ -1261,7 +1303,7 @@ func test_c3_wave_themes_determinism_and_bias() -> void:
 
 func _themed_wave_run(mod: int) -> Dictionary:
 	var sim := SimWorld.new(SEED, 1, "endless")
-	sim.wave = 3
+	sim.wave = 12   # was 3: wave 13 has no archetype debut, so the theme is the only roster signal
 	sim._start_wave()
 	var kinds := {}
 	for tick in 300:

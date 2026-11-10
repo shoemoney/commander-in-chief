@@ -54,8 +54,6 @@ SIZES = {
     "ui/menuicons/book": (512, 512),
     "ui/menuicons/controller": (512, 512),
     "ui/menuicons/keyboard": (512, 512),
-    "ui/menuicons/mi_arrow": (256, 256),
-    "ui/menuicons/mi_back": (256, 256),
     "ui/menuicons/mi_camera": (256, 256),
     "ui/menuicons/mi_cancel": (256, 256),
     "ui/menuicons/mi_combat": (256, 256),
@@ -66,6 +64,9 @@ SIZES = {
     "ui/menuicons/mi_medal_3": (256, 256),
     "ui/menuicons/mi_medal_4": (256, 256),
     "ui/menuicons/mi_medal_5": (256, 256),
+    "ui/menuicons/medal_flawless": (256, 256),
+    "ui/menuicons/medal_hoarder": (256, 256),
+    "ui/menuicons/medal_swift": (256, 256),
     "ui/menuicons/mi_reload": (256, 256),
     "ui/menuicons/mi_settings": (256, 256),
     "ui/menuicons/mi_timer": (256, 256),
@@ -90,6 +91,8 @@ SIZES = {
     "icons/icon_grenade": (128, 128),
     "icons/icon_medal": (128, 128),
     "icons/icon_rend": (64, 64),
+    "icons/icon_flame": (64, 64),
+    "icons/icon_rocket": (64, 64),
     "icons/icon_skull": (128, 128),
     "icons/icon_vest": (128, 128),
 }
@@ -228,20 +231,6 @@ def i_keyboard(p):
     p.keyline()
 
 
-def i_mi_arrow(p):
-    for off, c in ((0.16, (170, 175, 168)), (0.0, (232, 236, 228))):
-        p.poly([(0.14 + off, 0.14), (0.52 + off, 0.50), (0.14 + off, 0.86),
-                (0.30 + off, 0.86), (0.68 + off, 0.50), (0.30 + off, 0.14)], c)
-    p.keyline()
-
-
-def i_mi_back(p):
-    p.poly([(0.86, 0.14), (0.48, 0.50), (0.86, 0.86), (0.70, 0.86),
-            (0.32, 0.50), (0.70, 0.14)], (206, 186, 96))
-    p.poly([(0.60, 0.14), (0.22, 0.50), (0.60, 0.86), (0.44, 0.86),
-            (0.06, 0.50), (0.44, 0.14)], (162, 142, 66))
-    p.keyline()
-
 
 def i_mi_camera(p):
     p.rect(0.06, 0.30, 0.94, 0.80, OLIVE, r=0.07)
@@ -295,6 +284,46 @@ def i_medal(p, tier: int):
     p.ell(0.5, 0.60, 0.27, 0.27, fill=face)
     p.ell(0.5, 0.60, 0.20, 0.20, fill=shade)
     p.text(0.5, 0.60, str(tier), 0.20, face, weight=0.22)
+    p.keyline()
+
+
+def _ribbon(p, left, right):
+    p.poly([(0.34, 0.05), (0.47, 0.05), (0.55, 0.42), (0.40, 0.42)], left)
+    p.poly([(0.53, 0.05), (0.66, 0.05), (0.60, 0.42), (0.45, 0.42)], right)
+
+
+def i_medal_flawless(p):
+    """Service-record medal: cleared a sector with no knockdown. Gold disc, star."""
+    _ribbon(p, (70, 96, 150), (176, 68, 60))
+    p.ell(0.5, 0.62, 0.31, 0.31, fill=GOLD_D)
+    p.ell(0.5, 0.62, 0.26, 0.26, fill=GOLD)
+    star = []
+    for i in range(10):
+        r = 0.20 if i % 2 == 0 else 0.085
+        a = -math.pi / 2 + i * math.pi / 5
+        star.append((0.5 + math.cos(a) * r, 0.62 + math.sin(a) * r))
+    p.poly(star, (252, 240, 190))
+    p.keyline()
+
+
+def i_medal_swift(p):
+    """Service-record medal: cleared a sector under par time. Silver disc, bolt."""
+    _ribbon(p, (60, 120, 160), (230, 230, 220))
+    p.ell(0.5, 0.62, 0.31, 0.31, fill=SILVER_D)
+    p.ell(0.5, 0.62, 0.26, 0.26, fill=SILVER)
+    p.poly([(0.56, 0.44), (0.40, 0.65), (0.49, 0.65), (0.43, 0.82),
+            (0.62, 0.58), (0.52, 0.58)], (38, 74, 120))
+    p.keyline()
+
+
+def i_medal_hoarder(p):
+    """Service-record medal: cleared a sector without spending the war chest. Bronze disc, coin stack."""
+    _ribbon(p, (120, 150, 70), (200, 160, 60))
+    p.ell(0.5, 0.62, 0.31, 0.31, fill=BRONZE_D)
+    p.ell(0.5, 0.62, 0.26, 0.26, fill=BRONZE)
+    for cy in (0.72, 0.62, 0.52):
+        p.ell(0.5, cy + 0.04, 0.15, 0.055, fill=BRASS_D)
+        p.ell(0.5, cy, 0.15, 0.055, fill=(240, 205, 96))
     p.keyline()
 
 
@@ -555,9 +584,36 @@ def i_icon_rend(p):
     p.keyline(0.030)
 
 
+def i_icon_flame(p):
+    """Special-weapon chip / capsule: a flame licking up off a nozzle. 64px canvas."""
+    p.rect(0.40, 0.72, 0.60, 0.92, (74, 78, 70), r=0.04)
+    p.rect(0.36, 0.66, 0.64, 0.74, (110, 114, 104), r=0.03)
+    p.poly([(0.50, 0.06), (0.74, 0.34), (0.72, 0.60), (0.62, 0.68), (0.38, 0.68),
+            (0.28, 0.58), (0.30, 0.36)], (232, 110, 36))
+    p.poly([(0.50, 0.24), (0.64, 0.44), (0.62, 0.62), (0.56, 0.68), (0.44, 0.68),
+            (0.38, 0.60), (0.38, 0.44)], (250, 190, 64))
+    p.poly([(0.50, 0.44), (0.57, 0.56), (0.55, 0.66), (0.45, 0.66), (0.43, 0.56)],
+           (255, 240, 170))
+    p.keyline(0.030)
+
+
+def i_icon_rocket(p):
+    """Special-weapon chip / capsule: a rocket round, nose up. 64px canvas."""
+    p.poly([(0.50, 0.04), (0.64, 0.24), (0.36, 0.24)], (196, 62, 48))
+    p.rect(0.36, 0.22, 0.64, 0.72, (176, 180, 170), r=0.03)
+    p.rect(0.36, 0.22, 0.46, 0.72, (214, 218, 208), r=0.03)
+    p.rect(0.36, 0.40, 0.64, 0.47, (196, 62, 48))
+    p.poly([(0.36, 0.56), (0.20, 0.82), (0.36, 0.76)], (120, 126, 116))
+    p.poly([(0.64, 0.56), (0.80, 0.82), (0.64, 0.76)], (120, 126, 116))
+    p.poly([(0.42, 0.72), (0.58, 0.72), (0.50, 0.96)], (250, 170, 52))
+    p.keyline(0.030)
+
+
 MENU = {
     "book": i_book, "controller": i_controller, "keyboard": i_keyboard,
-    "mi_arrow": i_mi_arrow, "mi_back": i_mi_back, "mi_camera": i_mi_camera,
+    "mi_camera": i_mi_camera,
+    "medal_flawless": i_medal_flawless, "medal_swift": i_medal_swift,
+    "medal_hoarder": i_medal_hoarder,
     "mi_cancel": i_mi_cancel, "mi_combat": i_mi_combat, "mi_home": i_mi_home,
     "mi_reload": i_mi_reload, "mi_settings": i_mi_settings, "mi_timer": i_mi_timer,
     "mus_off": i_mus_off, "mus_on": i_mus_on, "play": i_play,
@@ -568,7 +624,7 @@ PICK = {
     "icon_ammo": i_icon_ammo, "icon_grenade": i_icon_grenade, "icon_coin": i_icon_coin,
     "icon_fuel": i_icon_fuel, "icon_airstrike": i_icon_airstrike,
     "icon_medal": i_icon_medal, "icon_skull": i_icon_skull, "icon_vest": i_icon_vest,
-    "icon_rend": i_icon_rend,
+    "icon_rend": i_icon_rend, "icon_flame": i_icon_flame, "icon_rocket": i_icon_rocket,
 }
 
 

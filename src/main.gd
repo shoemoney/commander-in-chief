@@ -11,6 +11,8 @@ extends Node2D
 ##        Y revive, BACK (hold) spend-wheel
 ##   F2 toggles local 2P · F3 toggles Endless War · F4 toggles Boss Rush · R restarts.
 
+const AccessibleInput := preload("res://src/view/accessibility_input.gd")
+const AccessiblePolicy := preload("res://src/view/accessibility_policy.gd")
 const PX := 1.0 / Fixed.ONE
 const SCREEN_W := 640.0
 const SCREEN_H := 360.0
@@ -85,6 +87,12 @@ var _recorder: Replay             # captures this run's inputs → user://last_r
 var _watching := false            # Watch Last Run playback mode
 var _watch_replay: Replay = null
 var _watch_frame := 0
+var _accessibility_settings: Dictionary = {}
+var _accessible_input := AccessibleInput.new()
+var _accessible_policy := AccessiblePolicy.new()
+var _mouse_aim_override_until := 0
+var _wheel_cancelled: Array[bool] = [false, false]
+var _recorded_accessibility: Dictionary = {}
 var _replay_saved := false        # save the replay once per run, at the debrief
 var _replay_task := -1            # WorkerThreadPool id of the async replay write
 var _two_players := false
@@ -97,6 +105,7 @@ var _seed_override := -1         # CHALLENGE SEED: one-shot forced seed (-1 = no
 # Feel stack (view-only; the sim never sees any of this).
 var _trauma := 0.0
 var _hitstop_frames := 0
+var _time_fx := TimeFx.new()   # view-only slow-mo beats, hit-stop budget, enemy flinch (src/view/time_fx.gd)
 # #13: a grenade/roll press that starts AND ends entirely inside a hit-stop freeze used
 # to be discarded outright — _gather_inputs() (and therefore sim.step()) never runs while
 # frozen, so the sim's own ROLL_BUFFER_TICKS/GRENADE_BUFFER_TICKS never saw it. Latched
@@ -170,6 +179,9 @@ var _steam := SteamBridge.new()   # Steamworks facade -- no-ops offline (see src
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _hit_flinch: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player body kick when hit
 var _kick := Vector2.ZERO         # directional screen nudge from firing
+var _camera_lead := CameraLead.new()   # smoothed aim look-ahead (view-only, see camera_lead.gd)
+var _locator := PlayerLocator.new()    # per-soldier ring pulse state (view-only, see player_locator.gd)
+var _locator_tick := -1
 # AUDIO ONLY. Its window advances on PHYSICS FRAMES (which keep running through
 # hitstop and pause) and it counts mg_nest kills the sim deliberately excludes, so
 # it is NOT the run's streak — it is a blip-pitch ramp that must never be read as
@@ -186,7 +198,7 @@ var _rumble_sharp: Array[bool] = [false, false]   # true = punchy crack (gunfire
 var _rumble_on := true            # accessibility: gamepad vibration on/off
 var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad option — swap the MOVE (left) and AIM (right) analog sticks. [0]=P1, [1]=P2, independent like the per-player pad button layouts, so a left-handed P2 swaps without touching P1. The sticks aren't per-button rebindable, so this is the accessible way to reassign them for left-handed / adaptive-controller players. Applied view-side in _gather_inputs.
 var _fullscreen := false          # F11 / Alt+Enter window mode, persisted in [settings]
-var _win_scale := 2               # c1-19: the player's PREFERRED windowed integer scale (Nx of the 640x360 canvas), persisted in [settings]. This is the PREFERENCE, sane-capped to [1, WIN_SCALE_MAX] but NEVER clamped down to a monitor — so moving to a smaller display and back restores it. The window is sized to _effective_scale() (this preference clamped to what the CURRENT display fits); only an explicit user pick or RESET changes this value.
+var _win_scale := 2
 const WIN_SCALE_MAX := 8          # c1-19: sanity ceiling on the STORED preference (8x = 5120x2880, past any real monitor) so a garbage save can't persist an absurd scale; the live per-monitor fit clamps below this for actual sizing.
 var _deco_reserve := Vector2i(0, 40)   # c1-19: window chrome (title bar + borders) kept OFF-canvas when computing the largest scale that fits. The AUTHORITATIVE value is the live windowed decoration delta (window_get_size_with_decorations - window_get_size), written ONLY from _settle_window (deferred, a frame after a mode change) so the transient zero the OS reports right after leaving fullscreen can't clobber it; a settled borderless window's stable zero is valid. The initial 40 is a conservative fallback until the first windowed measurement (e.g. booting straight into fullscreen) — it only shrinks the temporary EFFECTIVE fit, never the stored preference, and is re-evaluated once measured.
 var _last_screen := -1                 # c1-19: monitor index the window is on, polled so a drag to another display (which fires no resize signal) still re-fits/recenters the window to what the new screen holds.
@@ -219,7 +231,17 @@ var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignett
 const STROBE_HALF_TICKS := 10
 var colorblind := false: set = _set_colorblind  # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
-var _captions := true            # accessibility: on-screen subtitles for Commander/Spotter VO+barks (hud.gd _draw_caption)
+var _caption_mode := CuePolicy.CAP_ALL   # CAPTIONS: ALL / SMART / OFF (CuePolicy.CaptionMode); saved as the int
+## accessibility: on-screen subtitles for Commander/Spotter VO+barks (hud.gd _draw_caption). Derived: every
+## existing reader (hud gates, tools, tests) keeps asking "are captions on at all", and only the CAPTIONS row,
+## the save and the cue gate know about the three states.
+var _captions: bool:
+	get:
+		return _caption_mode != CuePolicy.CAP_OFF
+	set(v):
+		if v != (_caption_mode != CuePolicy.CAP_OFF):
+			_caption_mode = CuePolicy.CAP_ALL if v else CuePolicy.CAP_OFF
+var _cue_seen := {}              # persisted cue counters beside _seen: caption exposures, pickup counts, armor mastery
 # accessibility: TEXT SIZE, as a PERCENT of the design font sizes (100 = the shipped 640x360
 # sizes). The game draws load-bearing information at 7-8px inside a 640x360 design frame — the
 # shop item NAME, the seed-validity tag, the in-world RESCUE/HOLD FIRE/LOW FUEL callouts — which
@@ -342,6 +364,9 @@ var _run_rescues := 0            # pilot ransoms this run — the signature mech
 var _run_knockdowns := 0         # times a player went down this run — the continue ledger's count
 var _run_revive_coin := 0        # coin the chest paid to stand them back up (0 for a free broke rally)
 var _run_best_streak := 0
+var _run_perked := false         # retry-meta: this run started with purchased perks (Campaign/Arcade) -> filed under the *VET tag, off the clean board
+var _vet_perks_on := true        # review-fixes: persisted SETUP switch; OFF = Campaign/Arcade start unperked and untagged (Endless is unaffected)
+var _retry_origin := 0           # review-fixes: >0 while the live Arcade run came from RETRY SECTOR k (its debrief offers the way back to a ranked Campaign)
 var _run_vp_gain := 0            # endless-meta-retention: VP this run actually banked (0 unless
                                   # Endless + score-verified) -- shown on the debrief/victory card,
                                   # not just the transient BANKED banner (see _track_bests below)
@@ -408,11 +433,11 @@ var _seen_kinds := {}             # enemy kind → true once its first-encounter
 const _KIND_TEACH := {
 	"sniper": "LASER SNIPER — BREAK THE LINE",
 	"ghillie": "GHILLIE — CLOSE IN. CLOAK BEATS BLASTS",
-	"grenadier": "GRENADIER — MOVE OFF YOUR GROUND",
+	"grenadier": "GRENADIER — 3 LOBS. RUN TOWARD IT",
 	"shield": "RIOT SHIELD — FLANK OR BLOW IT OPEN",
 	"frogman": "FROGMAN — KILL IT ON THE SURFACE",
 	"sapper": "SAPPER — MIND THE MINE TRAIL",
-	"mg_nest": "MG NEST — BREAK ITS LINE OR FLANK",
+	"mg_nest": "MG NEST TRACKS YOU — COVER OR GRENADE IT",
 	# The counterplay is counterintuitive (it outruns a straight sprint at
 	# 3px/t vs the player's 2.4) — the card must teach the sidestep.
 	"technical": "TECHNICAL — SIDESTEP ITS CHARGE",
@@ -455,11 +480,11 @@ const PERK_CHEST := "perk_chest"
 const PERK_TOKEN := "perk_token"
 const PERK_DEFS := [
 	{"id": PERK_VEST, "label": "VETERAN VEST", "cost": [40],
-		"desc": "ENDLESS RUNS START WITH A FLAK VEST ALREADY ON"},
+		"desc": "RUNS START WITH A FLAK VEST ALREADY ON"},
 	{"id": PERK_CHEST, "label": "HEAD START", "cost": [30, 45, 60],
-		"desc": "ENDLESS RUNS START WITH +60 WAR CHEST PER TIER OWNED (STACKS)"},
+		"desc": "RUNS START WITH +60 WAR CHEST PER TIER OWNED (STACKS)"},
 	{"id": PERK_TOKEN, "label": "SIGNAL FLARE", "cost": [50, 70],
-		"desc": "ENDLESS RUNS START WITH +1 COMMENDATION PER TIER OWNED (STACKS)"},
+		"desc": "RUNS START WITH +1 COMMENDATION PER TIER OWNED (STACKS)"},
 ]
 
 
@@ -497,7 +522,7 @@ const WHEEL_ITEMS := [
 	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST, "label": "FLAK VEST",
 		"blurb": "EATS ONE HIT"},
 	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST, "label": "AIRSTRIKE",
-		"blurb": "CALLS FIRE ON A LINE"},
+		"blurb": "CLEARS THE SCREEN. NO BOUNTY"},
 	{"kind": 4, "icon": "wall_sandbag", "cost": SimWorld.SHOP_SANDBAG_COST, "label": "SANDBAGS",
 		"blurb": "PLANTS HARD COVER"},
 	{"kind": 5, "icon": "icon_medal", "cost": 0, "label": "CALL: AMMO/NADES/VEST/STRIKE",
@@ -529,7 +554,7 @@ const WHEEL_TEXT_ROWS := [WHEEL_ROW_CARD, WHEEL_ROW_WARN, WHEEL_ROW_LABEL, WHEEL
 ## the same silence in a new costume — tests/test_view_honesty.gd pins this table against
 ## SimWorld.DEATH_LOSS_KEYS so a field added tomorrow gets a word or goes red.
 const LOSS_NOUN := {
-	"vest": "FLAK VEST", "triple": "TRIPLE SHOT", "claymores": "CLAYMORES",
+	"vest": "FLAK VEST", "triple": "TRIPLE SHOT", "claymores": "CLAYMORES", "weapon": "SPECIAL WEAPON",
 	"pierce_ticks": "PIERCING ROUNDS", "spread_ticks": "TRENCH GUN",
 	"rend_ticks": "REND ROUNDS", "smoke_ticks": "SMOKE",
 	"token": "COMMENDATION", "streak": "FLAWLESS STREAK",
@@ -540,6 +565,10 @@ const _EVENT_SOUND := {
 	"shot": ["shot", -9.0, 1.0],
 	"tank_shot": ["tank_shot", -3.0, 1.0],
 	"throw": ["throw", -8.0, 1.0],
+	"rocket_launch": ["tank_shot", -7.0, 1.4],   # special weapons: the launcher thump...
+	"flame": ["shot", -17.0, 0.5],               # ...the flame's low rasp (a burst every 4 ticks)
+	"weapon_empty": ["click_dry", -8.0, 0.7],     # magazine spent: the MG comes back
+	"bag_burn": ["vest_break", -10.0, 0.6],       # a sandbag burnt through
 	"roll": ["roll", -8.0, 1.0],
 	# "explosion" plays in _ev_explosion with proximity-scaled volume, not here.
 	# "kill" plays in the match branch with streak-scaled pitch, not here.
@@ -602,6 +631,10 @@ const _EVENT_SOUND := {
 	"rend_pierce": ["vest_break", -8.0, 2.0],      # metal shear (KIMK: pitch 2.0 clears the true-break band)
 	"mg_nest_aim": ["alarm_air", -12.0, 0.85],   # a1-13: aerial paint-whine, pitched below sniper_paint
 	"technical_rev": ["rev", -8.0, 1.0],   # rising engine growl: a charge is coming (own synth — the tank_board clunk at 0.75 couldn't read as a rev)
+	"siege_fire": ["explosion", -9.0, 0.6],       # the Siege Tank's turret thump: a shell is in the air (its ring is the strike_warn telegraph)
+	"siege_vent": ["vest_break", -6.0, 0.55],    # the hull winds down after the charge: the rear plate just opened
+	"siege_slam": ["rubble", -3.0, 0.7],         # the charge hit a wreck head-on
+	"siege_dismount": ["click_dry", -7.0, 0.9],  # escorts spill out of the rear hatches
 	"technical_stall": ["splash", -8.0, 0.7],      # charge dies at the bank — wheels don't swim, audibly
 	"pilot_down": ["avenge", -8.0, 0.8],           # crash-site ransom ping — friendly rising two-note (the alarm voice at 1.1 was byte-identical to tank_ignite's 'bail out now')
 	"pilot_lost": ["alarm", -14.0, 0.6],           # low fail tone — he's gone
@@ -645,6 +678,10 @@ var _splash_icon: Texture2D        # the shield emblem (res://icon.png), stamped
 var _splash_bigit: Texture2D       # Big IT studio medallion spritesheet (6×6 grid, 31 frames @200px)
 var _splash_keyart: Texture2D      # the hero key-art poster, revealed on beat 4
 var _splash_vo_fired := false      # latch: fire the crawl narration once as the crawl beat begins
+var _splash_len := SPLASH_DUR      # this boot's splash length: SPLASH_DUR first boot / replay, FrontDoor.SPLASH_SHORT after
+var svc := ServiceRecord.new()      # service-record: per-sector medals + best rank per mode (view-only, persisted under [service])
+var front := FrontDoor.new()       # front-door: intro-seen flag, furthest sector, daily streak/score (view-only, persisted under [front])
+var _front_dirty := false
 
 
 var _quitting := false
@@ -665,18 +702,7 @@ func _ready() -> void:
 	# _bg_root (the ground layer) had been given the NEAREST override below — this
 	# is the same fix applied to the actual root the sprites draw through.
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	# 1x design-size floor. display/window/size/window_min_width|height are NOT
-	# real Godot settings (silent no-op) — Window.min_size is the actual API, so
-	# the integer-scaled 640x360 canvas can't be shrunk into a cropped degenerate.
-	get_window().min_size = Vector2i(640, 360)
-	# c1-19: the window IS freely resizable (standard desktop behavior on Windows/macOS/X11/Wayland,
-	# where forcing a fixed window is hostile — users expect to grab an edge). The 640x360 canvas is
-	# drawn with viewport + integer stretch (see project.godot / test_display_integer_stretch_configured),
-	# so ANY window size renders at the largest whole-pixel scale that fits and letterboxes the rest —
-	# a free drag can never produce blurry fractional pixels. _on_window_resized then SNAPS the shown
-	# WINDOW SCALE label to that fitted integer, so the OPTIONS control and the real window stay in
-	# sync. min_size keeps the floor at a clean 1x. The OPTIONS WINDOW SCALE row remains the way to
-	# jump to an exact centered multiple; dragging is just the other, equally valid, path.
+	get_window().min_size = Vector2i(640, 360) * Art.MIN_WINDOW_SCALE
 	if not OS.has_feature("movie"):
 		_sfx.lock_startup_audio()
 	add_child(_sfx)
@@ -753,9 +779,35 @@ func _setup_splash() -> void:
 	if OS.has_feature("movie"):
 		_splash_layer.visible = false   # trailer capture: no studio splash, straight to combat
 		return
-	_splash_t = SPLASH_DUR
+	# front-door: the full 16 s cinematic plays once; every later boot gets the 3 s studio card
+	# (still skippable). WATCH INTRO on the INFO screen replays the full thing on demand.
+	_splash_len = FrontDoor.splash_length(front.intro_seen, SPLASH_DUR)
+	_splash_t = _splash_len
+	if not front.intro_seen:
+		front.intro_seen = true
+		_front_dirty = true
+		_flush_front()
 	_menu.mode = GameMenu.Mode.HIDDEN   # suspend the title/attract under the opaque splash
 	_splash_root.queue_redraw()
+
+
+## front-door: replay the full intro from the INFO screen's WATCH INTRO row.
+func replay_intro() -> void:
+	if _splash_layer == null:
+		return
+	_splash_len = SPLASH_DUR
+	_splash_t = SPLASH_DUR
+	_splash_vo_fired = false
+	if _splash_keyart == null and ResourceLoader.exists("res://assets/ui/intro/keyart.png"):
+		_splash_keyart = load("res://assets/ui/intro/keyart.png")   # _end_splash releases it
+	_splash_layer.visible = true
+	_menu.mode = GameMenu.Mode.HIDDEN
+	_splash_root.queue_redraw()
+
+
+func _flush_front() -> void:
+	if _front_dirty and _persist({"front": front.to_section()}) == OK:
+		_front_dirty = false
 
 
 func _end_splash() -> void:
@@ -801,7 +853,7 @@ static func splash_skip_alpha(el: float) -> float:
 func _splash_is_skip(event: InputEvent) -> bool:
 	# c-title-sting: the studio medallion always gets its first second on screen —
 	# a stray keypress at frame 0 no longer flashes straight past the parade.
-	if not splash_skip_armed(SPLASH_DUR - _splash_t):
+	if not splash_skip_armed(_splash_len - _splash_t):
 		return false
 	if event is InputEventKey and event.pressed and not event.echo:
 		return true
@@ -837,11 +889,13 @@ func _splash_back(t: float) -> float:
 
 
 func _draw_splash() -> void:
-	var el := SPLASH_DUR - _splash_t   # elapsed seconds
+	var el := _splash_len - _splash_t   # elapsed seconds
 	# The whole overlay dissolves over the final stretch, revealing the live title beneath.
+	# front-door: the short splash dissolves over its own last half second (studio card only).
 	var veil := 1.0
-	if el > SPLASH_FADE_OUT:
-		veil = clampf(1.0 - (el - SPLASH_FADE_OUT) / (SPLASH_DUR - SPLASH_FADE_OUT), 0.0, 1.0)
+	var fade_at := SPLASH_FADE_OUT - (SPLASH_DUR - _splash_len)
+	if el > fade_at:
+		veil = clampf(1.0 - (el - fade_at) / (_splash_len - fade_at), 0.0, 1.0)
 	_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(0.04, 0.045, 0.06, veil))
 	if el < SPLASH_STUDIO_END:
 		_draw_splash_studio(el, veil)
@@ -1207,9 +1261,10 @@ static func ground_base_variant(band_index: int) -> int:
 ## screenshot read as desert, and every reviewer flagged it independently. So the
 ## ground now follows the zone names the game already ships.
 static func ground_biome(sector: int) -> int:
-	# sectors 0 (STAGING) and 1 (MARSH) are the wet jungle; 2 (BRIDGE) is the
-	# transitional span; 3+ are arid/industrial.
-	return 1 if sector <= 1 else 0
+	# One owned card per zone: 1 jungle turf (STAGING), 2 marsh mud (MARSH BASIN),
+	# 3 cracked bridge deck, 4 packed gravel (FOUNDRY WORKS), 5 scorched asphalt
+	# (CRASHED CONVOY), 6 slag (FOUNDRY CORE). Biome 0 (sand) is the endless/legacy card.
+	return clampi(sector, 0, 5) + 1
 
 
 ## a3-28: the source texture key for a biome's base strip. Static and pure so
@@ -1217,6 +1272,11 @@ static func ground_biome(sector: int) -> int:
 static func ground_biome_source(biome: int) -> String:
 	match biome:
 		1: return "jungle_turf"
+		2: return "ground_marsh"
+		3: return "ground_deck"
+		4: return "ground_gravel"
+		5: return "ground_asphalt"
+		6: return "ground_slag"
 		_: return "sand"
 
 
@@ -1364,10 +1424,12 @@ func _ground_base_strip(v: int) -> Texture2D:
 ## its OWN cache so switching biomes never rebuilds or crosses streams. Built
 ## lazily on first paint, same 64-blit cost as the sand strips.
 func _ground_biome_strip(biome: int, v: int) -> Texture2D:
-	if _jungle_strips.is_empty():
+	if not _biome_strips.has(biome):
+		var arr: Array[Texture2D] = []
 		for i in GROUND_BASE_VARIANTS:
-			_jungle_strips.append(ImageTexture.create_from_image(ground_biome_strip_image(1, i)))
-	return _jungle_strips[v % GROUND_BASE_VARIANTS]
+			arr.append(ImageTexture.create_from_image(ground_biome_strip_image(biome, i)))
+		_biome_strips[biome] = arr
+	return (_biome_strips[biome] as Array)[v % GROUND_BASE_VARIANTS]
 
 
 ## The bare-earth dressing FILL texture for a biome: a 2x2 atlas of four soft, organic
@@ -1375,7 +1437,7 @@ func _ground_biome_strip(biome: int, v: int) -> Texture2D:
 ## and pure so tests/test_view_honesty.gd measures the exact pixels _paint_bg binds.
 ## View-only: floats and trig are fine here, the sim never sees this.
 static func ground_dressing_patch_image(biome: int) -> Image:
-	var src: Image = Art.tex("jungle_mud" if biome == 1 else "dirt").get_image()
+	var src: Image = Art.tex("jungle_mud" if biome == 1 or biome == 2 else "dirt").get_image()
 	if src.is_compressed():
 		src.decompress()   # a VRAM-compressed import has no raw pixels to read
 	src.convert(Image.FORMAT_RGBA8)
@@ -1415,7 +1477,7 @@ static func ground_dressing_tex(biome: int) -> Texture2D:
 	if _dirt_patch_tex.is_empty():
 		for b in 2:
 			_dirt_patch_tex.append(ImageTexture.create_from_image(ground_dressing_patch_image(b)))
-	return _dirt_patch_tex[1 if biome == 1 else 0]
+	return _dirt_patch_tex[1 if biome == 1 or biome == 2 else 0]
 
 
 ## THE ground-dressing generator: the bare-earth cards scattered over the base sand
@@ -1501,12 +1563,14 @@ static func ground_dressing_cards(base_iy: int, march: float) -> Array:
 ## read, and the ground is many bands) and handed to every band's strip lookup, so
 ## a whole frame is never half sand and half grass.
 var _ground_biome := 0
+var _ground_campaign := false          # ground follows WORLD y per band only in the campaign world
+var _ground_biome_map: Array = []      # [ground_biome(0) .. ground_biome(5)] for GroundStructure
 
 
 ## Pick the right cached strip for a biome. Kept as a function (not inlined at the
 ## draw site) so the desert path stays literally the old _ground_base_strip call.
 func _ground_band_strip(biome: int, v: int) -> Texture2D:
-	return _ground_biome_strip(biome, v) if biome == 1 else _ground_base_strip(v)
+	return _ground_biome_strip(biome, v) if biome >= 1 else _ground_base_strip(v)
 
 
 func _paint_bg(canvas: Node2D) -> void:
@@ -1519,8 +1583,17 @@ func _paint_bg(canvas: Node2D) -> void:
 	# card, so the wet zones (STAGING GROUND, MARSH BASIN) rendered as arid desert
 	# under a `jungle-firefight` filename. current_sector() is a clamped sim read;
 	# the sector never changes mid-frame, so every band below agrees on the biome.
-	_ground_biome = ground_biome(sim.current_sector())
+	var fallback_biome := ground_biome(sim.current_sector())
+	_ground_campaign = sim.is_campaign_world()
+	if _ground_biome_map.is_empty():
+		for gs in GroundStructure.SECTORS:
+			_ground_biome_map.append(ground_biome(gs))
 	var cam_y := sim.camera_top * PX
+	# Campaign: each band takes the biome of ITS world y (so a seam can be feathered);
+	# other modes keep the old one-biome-per-run behaviour. _ground_biome = the biome
+	# at screen centre, which picks nothing but the frame-level fallbacks below.
+	_ground_biome = GroundStructure.biome_at(_ground_campaign, fallback_biome,
+		cam_y + 180.0, _ground_biome_map)
 	var oy := -fposmod(cam_y, 64.0)
 	var base_iy := int(floor(cam_y / 64.0))
 	var march := _sector_march()
@@ -1539,6 +1612,7 @@ func _paint_bg(canvas: Node2D) -> void:
 	var dirt_cards: Array = []   # [center, rot, size, dirt_col] tuples
 	var row_ys := PackedFloat32Array(); row_ys.resize(8)     # per-row screen y, filled below
 	var row_cols: Array[Color] = []; row_cols.resize(8)      # per-row biome stop (c2 3v)
+	var row_atlas := PackedInt32Array(); row_atlas.resize(8) # per-row dressing atlas: 1 wet mud, 0 dry dirt
 	# 5-stop biome ramp (5v: one biome with a linear scorch felt like a dimmer
 	# switch, not a JOURNEY): jungle -> scorched -> marsh -> ruins -> foundry
 	# ash. c2 3v: sample PER TILE ROW, not per frame — the new sector's flat
@@ -1579,14 +1653,24 @@ func _paint_bg(canvas: Node2D) -> void:
 		# the source's real green through, and biome 0 keeps the byte-identical old
 		# path.
 		var shade := GROUND_SHADE
-		var tint := Color(gt.r, gt.g, gt.b)
-		if _ground_biome == 1:
-			tint = Color.WHITE
 		canvas.draw_set_transform(Vector2(-32.0, band[0] as float), 0.0,
 			Vector2(band_scale, band_scale))
-		canvas.draw_texture_rect(_ground_band_strip(_ground_biome, band[2] as int),
-			Rect2(Vector2.ZERO, Vector2(1024, 128)), true,
-			Color(shade * tint.r, shade * tint.g, shade * tint.b))
+		# Every biome except the legacy sand card keeps a NEUTRAL tint (its hue is baked
+		# into the card). A seam band carries the outgoing card whole, then the incoming
+		# card in 12px slices at ramping alpha (GroundStructure.band_layers) = the feather.
+		for layer in GroundStructure.band_layers(_ground_campaign, fallback_biome,
+				band_wy, float(GROUND_TILE_PX), _ground_biome_map):
+			var lb: int = layer["b"]
+			var tint := Color(gt.r, gt.g, gt.b) if lb < 1 else Color.WHITE
+			var lcol := Color(shade * tint.r, shade * tint.g, shade * tint.b, float(layer["a"]))
+			var r0: int = layer["r0"]
+			var r1: int = layer["r1"]
+			if r0 == 0 and r1 == 128:
+				canvas.draw_texture_rect(_ground_band_strip(lb, band[2] as int),
+					Rect2(Vector2.ZERO, Vector2(1024, 128)), true, lcol)
+			else:
+				canvas.draw_texture_rect_region(_ground_band_strip(lb, band[2] as int),
+					Rect2(0, r0, 1024, r1 - r0), Rect2(0, r0, 1024, r1 - r0), lcol)
 		canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# The dressing still rides 64px rows (the cards' own cell), so the per-row
 	# bookkeeping the dirt pass reads is unchanged — only the paint moved.
@@ -1600,9 +1684,16 @@ func _paint_bg(canvas: Node2D) -> void:
 		# re-browned the mud into a foreign stain and, at full strength, blew the
 		# paths out into pale hard-edged slabs. Alpha is still the ramp's, so the
 		# feathered halo/fill passes batch and fade exactly as before.
-		if _ground_biome == 1:
+		var row_b := GroundStructure.biome_at(_ground_campaign, fallback_biome,
+			float(base_iy + ty) * 64.0 + 32.0, _ground_biome_map)
+		row_atlas[ty] = 1 if row_b == 1 or row_b == 2 else 0
+		if row_b == 1:
 			var ds := _biome_ramp(row_march, dirt_stops)
 			row_cols[ty] = Color(GROUND_SHADE, GROUND_SHADE, GROUND_SHADE, ds.a)
+		elif row_b >= 2:
+			var ds := _biome_ramp(row_march, dirt_stops)
+			var dt := GroundStructure.dressing_tint(row_b)
+			row_cols[ty] = Color(GROUND_SHADE * dt.r, GROUND_SHADE * dt.g, GROUND_SHADE * dt.b, ds.a)
 		else:
 			row_cols[ty] = _biome_ramp(row_march, dirt_stops)
 	# The dressing GEOMETRY comes from one shipped generator (ground_dressing_cards),
@@ -1614,7 +1705,7 @@ func _paint_bg(canvas: Node2D) -> void:
 	for c in ground_dressing_cards(base_iy, march):
 		var cry: int = c[3]
 		dirt_cards.append([Vector2((c[0] as Vector2).x, row_ys[cry] + (c[0] as Vector2).y),
-			c[1], c[2], row_cols[cry]])
+			c[1], c[2], row_cols[cry], row_atlas[cry]])
 	# opt-loop: THREE passes over the same cards (all outer halos, then all inner halos, then
 	# all fills) instead of one interleaved pass — same idiom the sand/grass tile loop above
 	# already uses (see its comment on the batching trap this exact interleave falls into).
@@ -1646,13 +1737,18 @@ func _paint_bg(canvas: Node2D) -> void:
 	# Both are now SOFT patches (ground_dressing_tex): the raw cards were opaque
 	# squares, so this pass painted a hard rotated rectangle over its own feathers.
 	# One atlas per biome, bound once: still a single texture switch for the pass.
-	var dirt_tex := ground_dressing_tex(_ground_biome)
-	for card in dirt_cards:
-		var dirt_col: Color = card[3]
-		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
-		var psz: Vector2 = card[2] * DIRT_PATCH_SCALE
-		canvas.draw_texture_rect_region(dirt_tex, Rect2(-psz / 2.0, psz),
-			ground_dressing_patch_region(int(card[1] * 100.0) % 4), dirt_col)
+	# Two atlases can be live in one frame at a wet/dry seam, so the fill pass runs once
+	# per atlas (still one texture switch each; a frame with one atlas draws one pass).
+	for atlas in 2:
+		var dirt_tex := ground_dressing_tex(1 if atlas == 1 else 0)
+		for card in dirt_cards:
+			if int(card[4]) != atlas:
+				continue
+			var dirt_col: Color = card[3]
+			canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
+			var psz: Vector2 = card[2] * DIRT_PATCH_SCALE
+			canvas.draw_texture_rect_region(dirt_tex, Rect2(-psz / 2.0, psz),
+				ground_dressing_patch_region(int(card[1] * 100.0) % 4), dirt_col)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# MACRO MOTTLE (4v: the barren-lawn killer): 2-3 broad, soft value shifts
 	# per screen on a coarse 256px grid — trampled-earth patches, and the
@@ -1707,6 +1803,8 @@ func _paint_bg(canvas: Node2D) -> void:
 					canvas.draw_texture_rect(Art.tex("fx_softspot"),
 						Rect2(Vector2(-msz * 0.75 + float(mh % 60), -msz * 0.6), Vector2.ONE * msz * 1.3),
 						false, Color(mcol.r, mcol.g, mcol.b, mcol.a * 0.5))
+	if _ground_campaign:
+		_paint_ground_structure(canvas, cam_y)
 	# a1-14 SKY LIGHT — last thing the ground pass lays down, so it grades the
 	# base strips, the dirt cards and the mottle as ONE surface (grading them
 	# separately is what makes composited ground read as layers). Two region
@@ -1734,12 +1832,24 @@ func _paint_bg(canvas: Node2D) -> void:
 	canvas.draw_texture_rect_region(glt, GROUND_LIGHT_RECT, Rect2i(1, 0, 1, GROUND_LIGHT_TEX_H))
 
 
+## The lane / gate aprons / ford-bank planking, as one GroundStructure plan. Reads sim
+## gates and waters only; `canvas` is the ground layer, so everything draws beneath
+## actors, mines and telegraphs (see GroundStructure's honesty rule).
+func _paint_ground_structure(canvas: Node2D, cam_y: float) -> void:
+	var anc := GroundStructure.anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX)
+	var gys: Array = []
+	for g in sim.gates:
+		gys.append(float(g["y"]) * PX)
+	GroundStructure.paint(canvas, GroundStructure.plan(anc, gys, sim.waters, cam_y,
+		SimWorld.WATER_H * PX, func(b: int) -> int: return SimWorld.ford_half_w(b)))
+
+
 func _process(_delta: float) -> void:
 	_steam.process()   # pumps Steamworks callbacks -- a safe no-op offline
 	if _splash_t > 0.0:
 		_splash_t -= _delta
 		# Fire the Commander narration once as the crawl beat begins (dry cinematic VO).
-		if not _splash_vo_fired and (SPLASH_DUR - _splash_t) >= SPLASH_STUDIO_END:
+		if not _splash_vo_fired and _splash_len >= SPLASH_DUR and (_splash_len - _splash_t) >= SPLASH_STUDIO_END:
 			_splash_vo_fired = true
 			_sfx.play_startup_line("intro_crawl")
 		_splash_root.queue_redraw()
@@ -1828,6 +1938,48 @@ func _process(_delta: float) -> void:
 		if absf(_grade_breather - _grade_mat_breather_prev) > 0.001:
 			_grade_mat.set_shader_parameter("breather", _grade_breather)
 			_grade_mat_breather_prev = _grade_breather
+		_update_sector_look(_delta)
+	_update_crt_vignette(_delta)
+
+
+# Sector look: eased toward the table entry for the sector on screen (src/view/sector_look.gd).
+# Reduce-motion snaps, like the breather above: no animated grade reaches the shader.
+var _look_cur := SectorLook.look(0)
+var _look_key := Vector3(-1, -1, -1)
+const _LOOK_EASE_K := 1.6
+const _CRT_VIG_REST := 0.18
+const _CRT_VIG_COMBAT := 0.09
+var _crt_vig := _CRT_VIG_REST
+var _crt_vig_prev := -1.0
+
+
+func _update_sector_look(dt: float) -> void:
+	if sim == null:
+		return
+	var tgt := SectorLook.look(SectorLook.index_for(sim.is_campaign_world(), _sector_march(), sim.wave))
+	_look_cur = tgt if _motion < 0.5 else SectorLook.mix(_look_cur, tgt, 1.0 - exp(-_LOOK_EASE_K * dt))
+	var lk: Vector3 = _look_cur["gain"]
+	var key := Vector3(lk.x + (_look_cur["lift"] as Vector3).z, lk.z + (_look_cur["gamma"] as Vector3).x, _look_cur["sat"])
+	if key.distance_to(_look_key) > 0.0005:
+		SectorLook.push(_grade_mat, _look_cur)
+		_look_key = key
+
+
+## The always-on CRT corner darkening eases down while enemies are live so the edges of the
+## play field keep their contrast in a fight, and back up in the lulls.
+func _update_crt_vignette(dt: float) -> void:
+	if _scan_mat == null or sim == null:
+		return
+	var fighting := false
+	for e in sim.enemies:
+		if e["alive"]:
+			fighting = true
+			break
+	var want := _CRT_VIG_COMBAT if fighting else _CRT_VIG_REST
+	_crt_vig = want if _motion < 0.5 else lerpf(_crt_vig, want, 1.0 - exp(-2.5 * dt))
+	if absf(_crt_vig - _crt_vig_prev) > 0.002:
+		_scan_mat.set_shader_parameter("vignette_strength", _crt_vig)
+		_crt_vig_prev = _crt_vig
 
 
 func start_game(endless: bool) -> void:
@@ -1862,6 +2014,7 @@ func start_arcade(chapter: int) -> void:
 	_endless = false
 	_daily = false
 	_boss_rush = false
+	_retry_origin = 0
 	_arcade_chapter = clampi(chapter, 1, SimWorld.FINAL_GATE_INDEX)
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
@@ -2020,9 +2173,11 @@ func start_watch() -> void:
 
 
 func _reset() -> void:
+	reset_accessibility_input()
+	_recorded_accessibility.clear()
 	Art.foliage_march = 0.0   # a1-05 r2: neutral until a gameplay frame feeds the march (no stale leak)
 	_sfx.stop_engines()   # tank-index-keyed loops: the next SimWorld re-binds that index (see Sfx.stop_engines)
-	_sfx.clear_captions()   # a new run never inherits the last one's pending subtitle backlog
+	_sfx.reset_run_speech()
 	# Re-arm the water pool's shader push key IN PLACE (it is indexed by pool slot, which outlives
 	# the run — clearing it would index past the end of the pool on the next _sync_water).
 	for wi in _water_pushed.size():
@@ -2059,7 +2214,8 @@ func _reset() -> void:
 	# stamp stays — it re-writes the same value and owns the midnight comment.
 	if _daily and seed_v == _daily_seed() and _daily_done_seed != seed_v:
 		_daily_done_seed = seed_v
-		_persist({"daily": {"done_seed": _daily_done_seed}})
+		front.note_daily_dealt(FrontDoor.today())   # front-door: the streak advances when the attempt is spent
+		_persist({"daily": {"done_seed": _daily_done_seed}, "front": front.to_section()})
 	var _mode_str := "endless" if _endless else ("boss_rush" if _boss_rush \
 		else ("arcade" if _arcade_chapter >= 1 else "campaign"))
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, _mode_str)
@@ -2069,7 +2225,11 @@ func _reset() -> void:
 	if _assist:
 		for pl in sim.players:
 			pl["vest"] = true
-	if _mode_str == "endless":
+	_run_perked = false
+	if CampaignMeta.perks_apply(_mode_str, _daily, _vet_perks_on):
+		# retry-meta: Campaign and Arcade starts take the perks too (never the daily seed).
+		_run_perked = _mode_str != "endless" and (perk_level(PERK_VEST) > 0 \
+			or perk_level(PERK_CHEST) > 0 or perk_level(PERK_TOKEN) > 0)
 		# endless-meta-retention: owned perk tiers are applied post-construction,
 		# same trick as the assist-vest loop above, so SimWorld itself never
 		# learns a perk system exists. CHEST/TOKEN stack per owned tier.
@@ -2096,6 +2256,7 @@ func _reset() -> void:
 	_recorder.start_vest = not sim.players.is_empty() and bool(sim.players[0]["vest"])
 	_recorder.start_chest = sim.war_chest
 	_recorder.start_tokens = sim.tokens
+	_record_accessibility_change()
 	_replay_saved = false
 	# A restart mid-replay must not keep feeding recorded frames into the new sim.
 	_watching = false
@@ -2103,10 +2264,14 @@ func _reset() -> void:
 	_watch_frame = 0
 	_trauma = 0.0
 	_hitstop_frames = 0
+	_time_fx.cancel()
+	_time_fx.reset_hitstop()
+	_time_fx.flinch_clear_all()
 	_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 	_flash_alpha = 0.0
 	_flash_col = Color(1, 1, 1)
 	_fx.clear()
+	WeaponFx.reset()
 	_rooted_arrive.clear()   # c4-19: a restart mid-ramp must not inherit the old run's dig-in ages
 	_mote_count = 0
 	_pending_blasts.clear()
@@ -2210,6 +2375,7 @@ func _reset() -> void:
 	_victory_banked_score = 0
 	_wipe_banked = 0
 	_wipe_banked_score = 0
+	svc.begin_run(sim)   # service-record: a fresh medal tracker for this sim
 	_warn_p2_pad()   # after _banners.clear(), so the warning survives the reset
 
 
@@ -2324,6 +2490,8 @@ static func crosshair_hotspot(cursor_s: int) -> Vector2:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion and event.relative.length_squared() > 0.0 and not _menu.is_active():
+		_mouse_aim_override_until = Time.get_ticks_msec() + 1000
 	# Boot splash: any key / button / click skips straight to the title screen.
 	if _splash_t > 0.0 and _splash_is_skip(event):
 		_end_splash()
@@ -2382,6 +2550,82 @@ func _input(event: InputEvent) -> void:
 		else:
 			_reset()
 		get_viewport().set_input_as_handled()
+	if event is InputEventJoypadButton and event.pressed \
+			and event.button_index == CampaignMeta.NEW_CAMPAIGN_PAD_BUTTON \
+			and not _menu.is_active() and _try_new_campaign():
+		if is_inside_tree():
+			get_viewport().set_input_as_handled()
+	# retry-meta: pad Y on the Campaign defeat card = RETRY SECTOR N (Y is otherwise idle there).
+	if event is InputEventJoypadButton and event.pressed \
+			and event.button_index == CampaignMeta.RETRY_PAD_BUTTON \
+			and not _menu.is_active() and _try_retry_sector():
+		if is_inside_tree():
+			get_viewport().set_input_as_handled()
+
+
+## retry-meta: the sector a RETRY would start at, or 0 when the card offers none.
+func _retry_sector() -> int:
+	if not _debrief or _watching or _result_t < 1.0:
+		return 0
+	if _retry_chapter() > 0:   # a retried arcade run offers the same retry again (never after a clear)
+		if sim.victory:
+			return 0
+		return maxi(_retry_chapter(), CampaignMeta.sector_reached(CampaignMeta.opened_gates(sim)))
+	return CampaignMeta.retry_sector(sim.mode, sim.victory, _daily,
+		CampaignMeta.sector_reached(CampaignMeta.opened_gates(sim)))
+
+
+## review-fixes: the sector the live run was retried from, or 0 when it is not a retried Arcade run.
+func _retry_chapter() -> int:
+	if _retry_origin > 0 and sim != null and sim.mode == "arcade" and _arcade_chapter == _retry_origin:
+		return _retry_origin
+	return 0
+
+
+func _try_retry_sector() -> bool:
+	var k := _retry_sector()
+	if k <= 0:
+		return false
+	start_arcade(k)
+	_retry_origin = k   # set AFTER start_arcade (which clears it): this run came from a retry
+	return true
+
+
+## review-fixes: back to a fresh, ranked Campaign from a retried Arcade run's debrief.
+func _try_new_campaign() -> bool:
+	if _retry_chapter() <= 0 or not _debrief or _watching or _result_t < 1.0:
+		return false
+	start_game(false)
+	return true
+
+
+## review-fixes: the label of the default (ENTER / START) row on the defeat card.
+func redeploy_label() -> String:
+	return CampaignMeta.redeploy_text(_retry_chapter())
+
+
+## retry-meta: the Campaign extras on the end cards -- the VP line (Endless keeps its inline
+## row) and, on a defeat, the unranked RETRY SECTOR row. REDEPLOY stays the last, default row.
+func _debrief_meta_rows(pulse: float) -> Array:
+	var rows: Array = []
+	if sim.mode == "campaign" and not _daily:
+		rows.append(CampaignMeta.vp_row(vet_points, _run_vp_gain, perks_maxed()))
+	var medal_row := svc.callout_row()   # service-record: fires once, on the run that earned it
+	if not medal_row.is_empty():
+		rows.append(medal_row)
+	var k := CampaignMeta.retry_sector(sim.mode, sim.victory, _daily,
+		CampaignMeta.sector_reached(CampaignMeta.opened_gates(sim)))
+	if k <= 0 and _retry_chapter() > 0 and not sim.victory:
+		k = _retry_sector()
+	if k > 0:
+		rows.append(CampaignMeta.retry_row(k, Art.pad_button_label(CampaignMeta.RETRY_PAD_BUTTON), Art.use_pad, pulse))
+	if _retry_chapter() > 0:
+		rows.append(CampaignMeta.new_campaign_row(Art.pad_button_label(CampaignMeta.NEW_CAMPAIGN_PAD_BUTTON), Art.use_pad))
+	if _run_perked:
+		rows.append(CampaignMeta.vet_row())
+	if not Art.use_pad and not _watching:   # review2: the C key works on both end cards, so say so
+		rows.append(CampaignMeta.copy_result_row())
+	return rows
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -2416,7 +2660,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_menu.open(GameMenu.Mode.TITLE)
 			else:
 				_reset()
-		elif event.keycode == KEY_C and (_debrief or sim.victory):
+		elif event.keycode == CampaignMeta.RETRY_KEY and _try_retry_sector():
+			pass
+		elif event.keycode == CampaignMeta.NEW_CAMPAIGN_KEY and _try_new_campaign():
+			pass
+		elif event.keycode == CampaignMeta.COPY_KEY and (_debrief or sim.victory):
 			_copy_share_text()
 		elif (event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER
 				or event.keycode == KEY_SPACE) and (_debrief or sim.victory):
@@ -2499,10 +2747,19 @@ func _flush_bests() -> void:
 	# outside _record_run. Called from _reset (covers restart/new game/attract
 	# rollover) and _exit_tree (covers app quit).
 	var sections := {}
+	if sim != null:
+		var opened := 0
+		for g in sim.gates:
+			if g["open"]:
+				opened += 1
+		if front.note_sector(mini(opened + 1, SimWorld.FINAL_GATE_INDEX)):   # front-door: banks CHAPTER SELECT's unlock even for a run quit mid-way
+			_front_dirty = true
+	if _front_dirty:
+		sections["front"] = front.to_section()
 	if _best_dirty:
 		sections["best"] = {"score": best_score, "wave": best_wave, "dist": best_dist}
 	if _seen_dirty:
-		sections["seen"] = {"hints": _seen}
+		sections["seen"] = {"hints": _seen, "cues": _cue_seen}
 	if sections.is_empty():
 		return
 	# save-integrity: clear the dirty flags only once the write actually LANDED.
@@ -2511,6 +2768,7 @@ func _flush_bests() -> void:
 	if _persist(sections) == OK:
 		_best_dirty = false
 		_seen_dirty = false
+		_front_dirty = false
 
 
 func request_quit() -> void:
@@ -2532,7 +2790,15 @@ func request_quit() -> void:
 	tree.quit()
 
 
+## review-fixes: TimeFx writes the PROCESS-GLOBAL AudioServer.playback_speed_scale; a scene that
+## goes away mid-beat must hand it back at exactly 1.0 (cancel() is a no-op when no dip is held).
+func _restore_global_audio() -> void:
+	if _time_fx != null:
+		_time_fx.cancel()
+
+
 func _exit_tree() -> void:
+	_restore_global_audio()
 	get_tree().auto_accept_quit = _previous_auto_accept_quit
 	_flush_bests()
 	if _replay_task != -1:
@@ -2555,6 +2821,7 @@ func _notification(what: int) -> void:
 	# instance in the suite. PREDELETE fires BEFORE ~Node frees its children, so in
 	# the shipped game they are still parented and every branch here no-ops.
 	if what == NOTIFICATION_PREDELETE:
+		_restore_global_audio()
 		for n in [_sfx, _hud_icons, _menu]:
 			if is_instance_valid(n) and n.get_parent() == null:
 				n.free()
@@ -2624,7 +2891,7 @@ func _on_window_resized() -> void:
 	#    OUR OWN resizes (_apply_windowed_scale) produce, so skip: a monitor-clamped effective size
 	#    must NOT collapse a larger stored preference. Only a genuine user drag to a DIFFERENT integer
 	#    scale rewrites the stored preference (an explicit resize IS a new choice).
-	if _fullscreen:
+	if _uses_fullscreen():
 		return
 	if _prog_resize:
 		return   # OUR OWN mode/scale transition is in flight — ignore its intermediate resize events (explicit guard, not a size heuristic), so a fitting transient client size can't overwrite the saved scale
@@ -2649,7 +2916,7 @@ func _on_window_resized() -> void:
 static func snap_scale(client: Vector2i, usable: Vector2i, ceiling: int) -> int:
 	if usable.x > 0 and usable.y > 0 and (client.x > usable.x or client.y > usable.y):
 		return 0
-	return clampi(mini(client.x / 640, client.y / 360), 1, ceiling)
+	return clampi(mini(client.x / 640, client.y / 360), Art.MIN_WINDOW_SCALE, maxi(Art.MIN_WINDOW_SCALE, ceiling))
 
 
 # c1-19: a window dragged onto a DIFFERENT monitor fires no resize signal (its pixel size is
@@ -2669,6 +2936,13 @@ func _watch_display() -> void:
 		return
 	if usable.size.x <= 0 or usable.size.y <= 0:
 		return                           # no display metrics (headless) — nothing to fit
+	var desired_mode := DisplayServer.WINDOW_MODE_FULLSCREEN if _uses_fullscreen() else DisplayServer.WINDOW_MODE_WINDOWED
+	if DisplayServer.window_get_mode() != desired_mode:
+		_apply_display_mode()
+		call_deferred("_bake_cursor")
+		return
+	if _uses_fullscreen():
+		return
 	# c1-19: re-fit when the actual client size no longer matches the EFFECTIVE target for the new
 	# work area — this catches BOTH a shrink (moved to a smaller monitor: the ceiling drops, target
 	# shrinks) AND a regrow (moved back to a bigger monitor: the ceiling rises, target grows again),
@@ -2693,6 +2967,8 @@ static func needs_refit(actual: Vector2i, scale: int) -> bool:
 
 
 func _physics_process(_delta: float) -> void:
+	if _splash_t > 0.0:
+		return
 	# THE god-mode gate, and the only place `sim.god_mode` is ever written. Re-asserted every
 	# tick rather than at the toggle, so it survives `_reset()` rebuilding the sim and a harness
 	# setting `god_mode` at any point in the frame — and so a release build can NEVER run with it
@@ -2727,6 +3003,7 @@ func _physics_process(_delta: float) -> void:
 			# _consume_events can SET it (near demo blasts) — a stuck freeze would
 			# wedge every feel gate (particles/envelopes/camera) forever. Clear it.
 			_hitstop_frames = 0
+			_time_fx.cancel()   # no dilation in attract: nothing here would ever clock it
 			_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 			_update_feel()
 		else:
@@ -2734,6 +3011,7 @@ func _physics_process(_delta: float) -> void:
 			# square the camera — pausing mid-shake froze the world offset/tilted
 			# behind the overlay.
 			_concussion = 0.0
+			_time_fx.cancel()   # a beat must not hold the pitch dip behind a menu
 			_duck = 0.0
 			_sfx.set_concussion(0.0)
 			# Undo the VO duck too. _drive_audio() (the only caller of duck_sfx_under_vo)
@@ -2773,9 +3051,15 @@ func _physics_process(_delta: float) -> void:
 		return
 	_hud_icons.visible = true
 	if _watching:
+		_time_fx.cancel()   # replays/Watch verify a recorded run 1:1 — never dilated
 		if _watch_replay == null or _watch_frame >= _watch_replay.frames.size() or sim.victory or sim.wiped:
 			_watching = false
 			_menu.open(GameMenu.Mode.TITLE)
+			queue_redraw()
+			return
+		if not _accessible_policy.should_step(_watch_replay.slow_at(_watch_frame)):
+			_update_feel()
+			_update_hud()
 			queue_redraw()
 			return
 		var rin: Array[SimInput] = []
@@ -2794,25 +3078,34 @@ func _physics_process(_delta: float) -> void:
 		queue_redraw()
 		_update_hud()
 		return
-	if _hitstop_frames > 0:
-		_hitstop_frames -= 1
-		# #13: _gather_inputs()/sim.step() are both skipped while frozen, so a grenade/roll
-		# TAP that starts and ends entirely inside the freeze would otherwise never reach the
-		# sim's own input buffers. Sample the same raw reads _gather_inputs uses for those two
-		# verbs and OR them into a latch that the next _gather_inputs() call re-injects.
-		_hs_latch[0]["grenade"] = _hs_latch[0]["grenade"] \
-			or Input.is_physical_key_pressed(bind("grenade")) \
-			or Input.is_physical_key_pressed(bind("grenade_alt")) \
-			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
-			or pad_pressed(0, "grenade") or _steam.button_pressed(0, "grenade")
-		_hs_latch[0]["roll"] = _hs_latch[0]["roll"] \
-			or Input.is_physical_key_pressed(bind("roll")) \
-			or pad_pressed(0, "roll") or _steam.button_pressed(0, "roll")
-		if _two_players:
-			_hs_latch[1]["grenade"] = _hs_latch[1]["grenade"] \
-				or pad_pressed(1, "grenade") or _steam.button_pressed(1, "grenade")
-			_hs_latch[1]["roll"] = _hs_latch[1]["roll"] \
-				or pad_pressed(1, "roll") or _steam.button_pressed(1, "roll")
+	var buffered_controls := not _debrief and _uses_buffered_accessibility()
+	if buffered_controls:
+		_record_accessibility_change()
+		_accessible_policy.buffer_inputs(_gather_inputs())
+	# Slow-mo beat: skips sim.step() on a pattern, exactly like a hit-stop frame (so the same
+	# input latch catches taps and no input is dropped or duplicated). Clock holds during hit-stop.
+	var tfx_skip := _time_fx.advance(_hitstop_frames > 0)
+	if _hitstop_frames > 0 or tfx_skip:
+		if _hitstop_frames > 0:
+			_hitstop_frames -= 1
+		if not buffered_controls:
+			# #13: _gather_inputs()/sim.step() are both skipped while frozen, so a grenade/roll
+			# TAP that starts and ends entirely inside the freeze would otherwise never reach the
+			# sim's own input buffers. Sample the same raw reads _gather_inputs uses for those two
+			# verbs and OR them into a latch that the next _gather_inputs() call re-injects.
+			_hs_latch[0]["grenade"] = _hs_latch[0]["grenade"] \
+				or Input.is_physical_key_pressed(bind("grenade")) \
+				or Input.is_physical_key_pressed(bind("grenade_alt")) \
+				or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+				or pad_pressed(0, "grenade") or _steam.button_pressed(0, "grenade")
+			_hs_latch[0]["roll"] = _hs_latch[0]["roll"] \
+				or Input.is_physical_key_pressed(bind("roll")) \
+				or pad_pressed(0, "roll") or _steam.button_pressed(0, "roll")
+			if _two_players:
+				_hs_latch[1]["grenade"] = _hs_latch[1]["grenade"] \
+					or pad_pressed(1, "grenade") or _steam.button_pressed(1, "grenade")
+				_hs_latch[1]["roll"] = _hs_latch[1]["roll"] \
+					or pad_pressed(1, "roll") or _steam.button_pressed(1, "roll")
 	elif not _debrief:
 		# THE RUN-ENDER FREEZE. SimWorld.step() has exactly one of these — `if wiped: return` —
 		# and `victory` never got a counterpart, so killing the Colossus stopped nothing: the
@@ -2828,7 +3121,13 @@ func _physics_process(_delta: float) -> void:
 		# _cinematic, driven by _update_feel below), so it plays on over a still world — exactly
 		# what a wipe already looks like. The sim-side `if wiped or victory: return` is still the
 		# better home for half of this; it is not this slice's file.
-		var inputs := _gather_inputs()
+		if not _accessible_policy.should_step(bool(accessibility_setting("slow_mode"))):
+			_update_feel()
+			_update_hud()
+			queue_redraw()
+			return
+		_record_accessibility_change()
+		var inputs: Array[SimInput] = _accessible_policy.take_inputs() if buffered_controls else _gather_inputs()
 		_last_inputs = inputs
 		_check_dry_throw(inputs)
 		_check_dry_roll(inputs)
@@ -2888,6 +3187,8 @@ static func levelstart_should_arm(seen: Dictionary) -> bool:
 
 
 func _consume_events() -> void:
+	if not _watching:
+		svc.observe(sim)   # service-record: per-sector knockdowns / clear time / chest spend
 	# Level-1 motivation: gate_open covers sectors 2+, but the opening sector has
 	# no gate to cross — fire the rally once, the first frame we're actually in
 	# combat (not still under the title/splash). _cmd_bark self-gates on HIDDEN.
@@ -2923,6 +3224,10 @@ func _consume_events() -> void:
 			break
 	for ev in sim.events:
 		var kind: String = ev["t"]
+		WeaponFx.note_event(ev, sim)   # the flame cone is drawn only after a real 'flame' burst
+		if kind == "throw" and not _cue_seen.has(CuePolicy.KEY_THREW) and _menu.mode != GameMenu.Mode.TITLE:
+			_cue_seen[CuePolicy.KEY_THREW] = 1   # the player has found the grenade: the armor re-arm retires
+			_seen_dirty = true
 		if kind == "pickup":
 			_sfx.play("buy" if ev.get("cost", 0) > 0 else "pickup", -5.0)
 			if ev.get("cost", 0) == 0 and not ev.get("full", false):
@@ -2953,20 +3258,27 @@ func _consume_events() -> void:
 				_sfx.play("buy", -9.0, 0.8)
 			elif ev.get("kind", 0) >= 4:
 				var cap_i: int = clampi(int(ev["kind"]) - 4, 0, _CAPSULE_CALLOUT.size() - 1)
-				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
+				var cap_fx := {"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
 					"rate": 0.013, "size": 13, "text": _CAPSULE_CALLOUT[cap_i],
-					"col": _CAPSULE_COL[cap_i]})
+					"col": _CAPSULE_COL[cap_i]}
+				# CUES NOT WORDS: the first two grabs of each kind spell the callout; after that the
+				# capsule's own sprite pulses in a ring (the teach hints below still fire once).
+				if not _pickup_word_due(str(int(ev["kind"]))):
+					cap_fx["icon"] = _CAPSULE_TEX[cap_i]
+				_fx.append(cap_fx)
 				# First-grab teaching: the new capsules are rules, not just stats —
 				# one-shot hints (persisted) say what each actually DOES.
 				match int(ev["kind"]):
 					4: _hint("pierce", "PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM DOWN THE COLUMN")
-					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN, 2 AMMO A PULL. ON TRIPLE IT'S 5 FOR 3")
-					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN, 2 AMMO A PULL. STACK SPREAD FOR 5 FOR 3")
+					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN, 2 AMMO A PULL. ON TRIPLE IT'S 5 FOR 2")
+					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN, 2 AMMO A PULL. STACK SPREAD FOR 5 FOR 2")
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
 						% (Art.pad_button_label(pad_bind_for_glyph("interact")) if Art.use_pad else GameMenu.key_label(bind("interact"))))
 					9: _hint("smoke", "SMOKE — BLINDS RIFLE AIM. NESTS STILL TRACK. SHELLS STILL FALL")
 					10: _hint("flashbang", "FLASHBANG — DETONATES ON GRAB. INFANTRY ONLY.")
+					12: _hint("flamethrower", TranslationServer.translate("FLAMETHROWER — BURNS INFANTRY + SANDBAGS UP CLOSE. ARMOR LAUGHS"))
+					13: _hint("rocket", TranslationServer.translate("ROCKET LAUNCHER — SLOW, CRACKS ARMOR. FIRES WHEN LINED UP"))
 				_trauma = minf(1.0, _trauma + 0.12)
 				# Per-capsule pitch: all four rares shared one 1.4 jingle — grabbing
 				# REND sounded identical to grabbing FLASHBANG. kind 7..10 -> 1.2..1.56.
@@ -3027,7 +3339,7 @@ func _consume_events() -> void:
 			# the sim steps a run the player cannot see, and the old HIDDEN-only gate happily armed
 			# lethal-tier captions for it. Same backlog leak as the attract fix, different cover.
 			if _menu.mode == GameMenu.Mode.HIDDEN and _splash_t <= 0.0:
-				_sfx.caption_sfx(kind)
+				_caption_cue(kind)
 		match kind:
 			"cannon_deny":
 				var pi := int(ev["i"])
@@ -3081,6 +3393,25 @@ func _consume_events() -> void:
 								1.0 + float(3 - nh) * 0.3)
 						_hint("nest_crack", "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT")
 						break
+				# Endless gunship still on its approach: it cannot be killed before it lands,
+				# so the bounce is named (EndlessRoster / _hit_endless_boss) instead of
+				# reading as the wall lecture below.
+				var fly_hit := false
+				if not nest_hit and not sim.endless_boss.is_empty() and sim.endless_boss["alive"] \
+						and sim.endless_boss["phase_t"] < 0:
+					var foff: Array = SimWorld.boss_flyin_offset(sim.endless_boss["phase_t"])
+					if absi(sim.endless_boss["x"] + int(foff[0]) - ev["x"]) <= SimWorld.BOSS_HIT_RADIUS + 8 * Fixed.ONE \
+							and absi(sim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(foff[1]) - ev["y"]) \
+								<= SimWorld.BOSS_HIT_RADIUS + 8 * Fixed.ONE:
+						fly_hit = true
+						armor_pinged = true
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex",
+							"tex": "fx_sparkle", "sz": 7.0, "fade": 1.8, "rate": 0.16,
+							"col": Color(0.75, 0.88, 1.0, 0.95)})
+						if Engine.get_physics_frames() - _vet_ping_frame >= 10:
+							_vet_ping_frame = Engine.get_physics_frames()
+							_sfx.play_at("ping_armor", _to_screen(ev["x"], ev["y"]), -12.0, 1.15)
+						_hint("boss_flyin", "THE GUNSHIP IS STILL ARRIVING — SHOTS BOUNCE OFF UNTIL IT LANDS")
 				# Manned-tank cover: a MANNED hull blocking enemy fire pays
 				# TANK_HIT_FUEL_COST off the clock (sim_world.gd
 				# _step_enemy_bullets) but fired the SAME bare armor_block
@@ -3103,7 +3434,7 @@ func _consume_events() -> void:
 							_fx.append({"x": ev["x"], "y": ev["y"] - 10, "t": 0.0, "kind": "floattext",
 								"rate": 0.02, "text": "-1S", "col": Color(1.0, 0.6, 0.25)})
 							break
-				if not nest_hit and not tank_hit:
+				if not nest_hit and not tank_hit and not fly_hit:
 					# Veteran-armor chip: wave-13+ endless infantry. The split is the
 					# sim's own seam — _wave_armor() > 0 (endless-only, wave 13+)
 					# AND hp set near the block. hp alone is NOT the tell: mg_nest
@@ -3143,6 +3474,7 @@ func _consume_events() -> void:
 						# ...and the keyboard half now reads the LIVE bind instead of a hardcoded
 						# stamp: grenade moved SHIFT->E, and a stamped key would have lied about it
 						# (and about every rebind) exactly like the old one did.
+						_note_armor_block()   # mastery re-arm: may clear _seen["armor"] so the hint below teaches once more
 						_hint("armor", TranslationServer.translate("GRENADES CRACK ARMOR — [%s] — BUNKERS TAKE NO BULLETS")
 							% (Art.pad_button_label(pad_bind_for_glyph("grenade")) if Art.use_pad else GameMenu.key_label(bind("grenade"))))
 				if not armor_pinged:
@@ -3158,7 +3490,7 @@ func _consume_events() -> void:
 					# per hit-target), so it needs its own caption call. The plink is what tells a
 					# player their bullets are doing NOTHING to this — the _hint teaches it once
 					# ever, then it's audio-only forever.
-					_sfx.caption_sfx("armor_block")
+					_caption_cue("armor_block")
 				# Riot-shield deflect: armor_block fires for bunkers AND shields, but a
 				# shieldman eating your frontal rounds looked identical to plinking a
 				# wall. If the block landed on a shieldman, add a bright cyan ricochet
@@ -3663,6 +3995,11 @@ func _consume_events() -> void:
 					"rate": 0.03, "text": "AVENGED +%d¢" % int(ev.get("coin", 5)),
 					"col": Color(0.7, 0.9, 1.0)})
 				_sfx.play("avenge", -5.0)
+			"streak_tier":
+				# 40 / 80 streaks: pop + receipt fire from the kill event via SimWorld.streak_tier();
+				# this adds the body-blow the 20-surge has, so the new rung is felt as well as read.
+				_trauma = minf(1.0, _trauma + 0.12)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.1})
 			"surge":
 				_vo("vo_surge", 0, 900)
 				# The 20-streak adrenaline rush lands as a body-blow of feedback —
@@ -3722,8 +4059,11 @@ func _consume_events() -> void:
 				# hulk salvage. Same mount grammar as sandbag_plant/tank_crew: tread dust,
 				# the tank-blue callout, and a short punch so the hull has weight.
 				_burst(ev["x"], ev["y"], "dust", 6, 0.8, 1.8, 0.4)
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.014, "text": "ARMOR UP", "col": Color(0.7, 0.9, 1.0)})
+				var armor_fx := {"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.014, "text": "ARMOR UP", "col": Color(0.7, 0.9, 1.0)}
+				if not _pickup_word_due("armor_up"):
+					armor_fx["icon"] = "icon_vest"
+				_fx.append(armor_fx)
 				_trauma = minf(1.0, _trauma + 0.14)
 				_hitstop_frames = maxi(_hitstop_frames, 2)
 				# -1 (both pads): the sim event carries no player index, so the buzz can't
@@ -3741,8 +4081,9 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_softspot",
 					"sz": 18.0, "grow": 0.4, "fade": 0.75, "rate": 0.03, "col": Color(1.0, 0.55, 0.3, 0.35)})
 			"flank_breach":
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.014, "text": "FLANKS!", "col": Color(1.0, 0.5, 0.3)})
+				# CUES NOT WORDS: an edge chevron pointing at the breach replaces the word FLANKS!.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "edge_chev",
+					"rate": 0.011, "col": Color(1.0, 0.5, 0.3)})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
 					"sz": 20.0, "grow": 1.0, "fade": 1.4, "rate": 0.02, "col": Color(0.5, 0.42, 0.35, 0.5)})
 			"strafe_lock":
@@ -3940,9 +4281,11 @@ func _consume_events() -> void:
 				_trauma = minf(1.0, _trauma + 0.6)
 				_flash_alpha = maxf(_flash_alpha, 0.4)
 				_hitstop_frames = maxi(_hitstop_frames, 8)
+				_time_fx.start("wipe", _motion)
 				_buzz(1.0)
 				show_banner("OVERRUN — RUN OVER")
 				_sfx.play("wiped", -2.0)
+				if _menu.mode != GameMenu.Mode.TITLE: _sfx.play_sting("defeat")   # audio-director
 			"victory":
 				_ev_victory(ev)
 				# ONE voice on the win. These two lines are the same sentence — the Spotter's
@@ -3956,7 +4299,21 @@ func _consume_events() -> void:
 					_vo("vo_victoly", 3, 6000)
 	if _kill_blip_pitch > 0.0:
 		_sfx.play("kill", -7.0, _kill_blip_pitch)
+	_blast_beat_check()
 	_check_enemy_hits()
+
+
+func _blast_beat_check() -> void:
+	# A grenade/mortar blast that cuts down 4+ in one tick earns a short slow-mo beat.
+	var blasts := 0
+	var kills := 0
+	for ev in sim.events:
+		if ev["t"] == "kill":
+			kills += 1
+		elif ev["t"] == "explosion" and ev.get("src", "") != "barrel":
+			blasts += 1
+	if blasts > 0 and kills >= 4:
+		_time_fx.start("blast", _motion)
 
 
 func _check_enemy_hits() -> void:
@@ -3969,6 +4326,7 @@ func _check_enemy_hits() -> void:
 	# tick (called once per _consume_events(), i.e. once per sim.step()) so
 	# _draw_enemies() is a pure reader of _enemy_flash.
 	var ecount := sim.enemies.size()
+	_time_fx.flinch_tick()
 	# Prune per-slot view state past the live range — the sim compacts with
 	# remove_at, so an out-of-range key would otherwise leak onto a future
 	# same-kind occupant of that slot. Also moved here (was in _draw_enemies):
@@ -3982,11 +4340,13 @@ func _check_enemy_hits() -> void:
 			_tech_lunge_prev.erase(sk)
 			_enemy_hp_prev.erase(sk)
 			_enemy_flash.erase(sk)
+			_time_fx.flinch_clear(sk)
 	for eidx in ecount:
 		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
 			_enemy_flash.erase(eidx)
 			_enemy_hp_prev.erase(eidx)
+			_time_fx.flinch_clear(eidx)
 			continue
 		# Slot inherited by a different kind after a kill's compaction: seed the
 		# face fresh and drop the prev-pos/lunge/hp instead of comparing this
@@ -3999,18 +4359,30 @@ func _check_enemy_hits() -> void:
 			_tech_lunge_prev.erase(eidx)
 			_enemy_hp_prev.erase(eidx)
 			_enemy_flash.erase(eidx)
+			_time_fx.flinch_clear(eidx)
 		# Most kinds are one-shot and carry NO "hp" field (only mg_nest/technical/
 		# broadcast track it). Default to a constant so the edge-detect is a no-op
 		# for them (prev==cur -> never flashes; they die in one hit anyway).
 		var ehp: int = e.get("hp", 1)
 		if ehp < int(_enemy_hp_prev.get(eidx, ehp)):
 			_enemy_flash[eidx] = 1.0
+			_sfx.play_hit("flesh" if ekind == "elite" else "wall", _to_screen(e["x"], e["y"]))   # audio-director: a landed non-lethal bullet has a sound
 			# a2-15: the non-lethal half of the same fix. Landing real damage on a
 			# multi-HP target is a hit the player watched succeed — and it had no
 			# weight either, only a flash and some sparks. `maxi` means a hit that
 			# also kills lands on the kill path's floor instead of stacking two
 			# freezes for one bullet.
-			_hitstop_frames = maxi(_hitstop_frames, 1)
+			_hitstop_frames = maxi(_hitstop_frames, _time_fx.grant_hitstop(sim.tick_count, 1, false))
+			# Flinch away from the shooter: incoming direction = nearest live player -> this enemy.
+			var fdir := Vector2.UP
+			var fbest := INF
+			for fp in sim.players:
+				if fp["alive"]:
+					var fv := Vector2(float(e["x"] - fp["x"]), float(e["y"] - fp["y"]))
+					if fv.length_squared() < fbest:
+						fbest = fv.length_squared()
+						fdir = fv
+			_time_fx.flinch_hit(eidx, fdir)
 			if _motion >= 0.5:   # a2-11 r3: REDUCE MOTION suppresses the pop + sparks (not just the flinch)
 				_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "light", "rate": 0.16, "r": 13.0, "col": Color(1.0, 1.0, 0.95)})
 				# juice pass ("a hit that doesn't sell"): landing REAL damage on the only
@@ -4026,6 +4398,10 @@ func _check_enemy_hits() -> void:
 					var sa := float(sp) * PI / 2.0 + 0.4
 					_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "ember", "rate": 0.1,
 						"vx": cos(sa) * 2.2, "vy": sin(sa) * 2.2})
+				for sp in 3:   # directional burst: embers thrown along the incoming bullet
+					var fa := fdir.normalized().angle() + (float(sp) - 1.0) * 0.35
+					_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "ember", "rate": 0.1,
+						"vx": cos(fa) * 3.4, "vy": sin(fa) * 3.4})
 		_enemy_hp_prev[eidx] = ehp
 		var eflash: float = _enemy_flash.get(eidx, 0.0)
 		if eflash > 0.02:
@@ -4293,7 +4669,8 @@ func _ev_explosion(ev: Dictionary) -> void:
 			_flash_alpha = efa
 			_flash_col = EXPLOSION_FLASH_COL
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "explosion"})
-	if not barrel:
+	WeaponFx.on_event(ev, _fx)   # a rocket draws its own ring at the true splash radius
+	if not barrel and ev.get("src", "") != "rocket":
 		_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.12})
 	_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "light", "rate": 0.09,
 		"r": 60.0, "col": Color(1.0, 0.7, 0.35)})
@@ -4440,6 +4817,17 @@ static func _victory_best_text(score: int, best: int) -> String:
 	if best <= 0:
 		return ""
 	return "BEST %d" % best + ("   NEW BEST!" if score >= best else "")
+
+
+## review2: the victory card's tail (meta rows, NEW BEST, REDEPLOY). A retried Arcade run's
+## REDEPLOY re-runs the unranked sector, so the row says so (redeploy_label), same as the defeat card.
+func _victory_tail_rows(pulse: float) -> Array:
+	var rows: Array = _debrief_meta_rows(pulse)
+	for vr in _victory_extra_rows(sim.score, best_score, pulse):
+		if vr["text"] == "REDEPLOY":
+			vr["text"] = redeploy_label()
+		rows.append(vr)
+	return rows
 
 
 static func _victory_extra_rows(score: int, best: int, pulse: float) -> Array:
@@ -4682,10 +5070,12 @@ func _ev_kill(ev: Dictionary) -> void:
 	# surge keys off it, the water clock stops and the input latch re-injects any
 	# tap that began and ended inside it. `maxi` so a multi-kill tick still costs
 	# ONE frame, and `big` keeps its 2 — this adds the floor, it takes nothing away.
-	_hitstop_frames = maxi(_hitstop_frames, 1)
-	_punch = maxf(_punch, 0.012)
+	# Rate-limited (TimeFx.grant_hitstop): at MG rate a kill per tick stuttered the run; extra kills
+	# inside the window fold into camera punch instead of more freeze.
+	_hitstop_frames = maxi(_hitstop_frames, _time_fx.grant_hitstop(sim.tick_count, 2 if heavy else 1, heavy))
+	_punch = maxf(_punch, 0.012 + _time_fx.punch_bonus())
 	if heavy:
-		_hitstop_frames = maxi(_hitstop_frames, 2)   # a weighted kill out-hits a trooper's
+		# a weighted kill out-hits a trooper's (2 frames, granted above)
 		_buzz(0.35, -1, true)   # kill confirm: sharp, no single shooter attributed
 		_punch = maxf(_punch, 0.03)
 	# The milestone pop advertises the sim's +25/50/100% bonus, so it reads the
@@ -4698,7 +5088,7 @@ func _ev_kill(ev: Dictionary) -> void:
 		_streak_popped = 0
 	# Events arrive after the complete sim step: a multi-kill can cross 5/10/20
 	# without ending on it. Celebrate the highest earned tier once, not equality.
-	var milestone := 20 if sstreak >= 20 else 10 if sstreak >= 10 else 5 if sstreak >= 5 else 0
+	var milestone := SimWorld.streak_tier(sstreak)
 	if milestone > _streak_popped:
 		_streak_popped = milestone
 		_cmd_bark("streak", 60)   # Commander gloats at a kill-streak milestone
@@ -4721,14 +5111,14 @@ func _ev_kill(ev: Dictionary) -> void:
 
 
 func _streak_receipt(x: int, y: int, streak: int) -> void:
-	if not [5, 10, 20].has(streak):
+	if SimWorld.streak_tier(streak) != streak:
 		return
 	# A rapid tier upgrade replaces its older receipt, not unrelated rewards,
 	# loss messages, or warnings. Identity is semantic, never a text match.
 	for i in range(_fx.size() - 1, -1, -1):
 		if _fx[i].get("kind", "") == "floattext" and _fx[i].get("role", "") == "streak":
 			_fx.remove_at(i)
-	var bonus := 25 if streak == 5 else 50 if streak == 10 else 100
+	var bonus := SimWorld.streak_bonus_pct(streak)
 	_fx.append({"x": x, "y": y, "t": 0.0, "kind": "floattext", "role": "streak",
 		"rate": 0.02, "size": 10, "text": "x%d STREAK +%d%%" % [streak, bonus],
 		"col": Color(1.0, 0.92, 0.4)})
@@ -4828,6 +5218,7 @@ func _boss_death_finale(x: int, y: int) -> void:
 	# Peak screen feel — the one moment that earns a full-strength hit.
 	_trauma = 1.0
 	_hitstop_frames = maxi(_hitstop_frames, 10)
+	_time_fx.start("boss", _motion)   # slow-mo beat begins once the freeze above has played
 	_flash_alpha = maxf(_flash_alpha, 0.5)
 	# Rumble is UNGATED by reduce-motion: haptics have their own toggle
 	# (_rumble_on) and should compensate for damped visuals, not vanish with
@@ -4857,6 +5248,7 @@ func _boss_death_finale(x: int, y: int) -> void:
 
 
 func _ev_gate_open(ev: Dictionary) -> void:
+	if _menu.mode != GameMenu.Mode.TITLE: _sfx.play_sting("sector_clear")   # audio-director
 	_trauma = minf(1.0, _trauma + 0.2)
 	_kick += Vector2(0, 6)   # the wall gives way — a forward lurch
 	_punch = maxf(_punch, 0.04)
@@ -4960,11 +5352,13 @@ func _ev_vest_break(ev: Dictionary) -> void:
 
 
 func _ev_victory(ev: Dictionary) -> void:
+	if _menu.mode != GameMenu.Mode.TITLE: _sfx.play_sting("victory")   # audio-director
 	_victory_banked = int(ev.get("banked", 0))
 	_victory_banked_score = int(ev.get("banked_score", 0))
 	_trauma = 1.0
 	_flash_alpha = 0.6
 	_punch = maxf(_punch, 0.18)   # the run's one win-state finally out-hits a common kill
+	_time_fx.start("victory", _motion)
 	_cinematic = 1.0              # letterbox the extraction flyover
 	# The one win-state of the whole run deserves a payoff: a gold
 	# shockwave + light bloom off the wreck and a fountain of gold
@@ -4997,8 +5391,11 @@ func _check_boss_intro() -> void:
 		if _seen_bosses.has(g["y"]):
 			continue
 		_seen_bosses[g["y"]] = true
-		show_banner("BRIDGE GUNSHIP", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
+		show_banner(SiegeView.BANNER if SiegeBoss.is_siege(g["boss"]) else "BRIDGE GUNSHIP", GameMenu.BANNER_COL_DEFAULT, "hud_skull")
+		if SiegeBoss.is_siege(g["boss"]):
+			_hint("siege", TranslationServer.translate("SIEGE TANK — BULLETS PING OFF. GRENADE IT, OR SHOOT THE REAR PLATE WHEN IT VENTS"))
 		_sfx.play("alarm", -2.0, 0.85)
+		if _menu.mode != GameMenu.Mode.TITLE: _sfx.play_sting("boss_intro")   # audio-director
 		_cmd_bark("rally", 60)   # Commander rallies the troops at the boss arrival
 		_trauma = minf(1.0, _trauma + 0.3)
 		_punch = maxf(_punch, 0.12)   # boss sighting gets a zoom hit, not just shake
@@ -5109,6 +5506,18 @@ func buy_perk(id: String) -> bool:
 	return true
 
 
+## review-fixes: the SETUP VET PERKS switch. Persisted at once, like a perk purchase.
+func set_vet_perks(on: bool) -> void:
+	_vet_perks_on = on
+	_persist({"meta": {"vet_perks": on}})
+
+
+## review-fixes: the player-facing tags the live run carries (ASSIST aids + "vet" for a perked run).
+func run_board_tags() -> Array[String]:
+	var assist_only: Array[String] = _recorder.assist_tags if _recorder != null else _run_assist_tags()
+	return CampaignMeta.run_tags(assist_only, _run_perked)
+
+
 # save-integrity: every scalar read in _load_bests goes through these. The target
 # fields are inferred-type (`var best_score := 0`, `var _perk_levels: Dictionary`),
 # so a wrong-typed value from a partially corrupt file throws a runtime error on
@@ -5171,6 +5580,7 @@ func _load_bests() -> void:
 		last_run_score = _cfg_int(cf, "replay", "last_score", -1)   # c4-18: last-run score banked with the replay (-1 = none/pre-feature)
 		replay_watched_score = _cfg_int(cf, "replay", "watched_score", -999)   # c4-18: replay already watched (persisted) so NEW stays quiet across relaunch
 		_seen = _cfg_dict(cf, "seen", "hints")
+		_cue_seen = _cfg_dict(cf, "seen", "cues")
 		# c4-fix: a type-corrupt "runs" value (wrong element type from an older/newer build or
 		# partial file corruption) makes Array[Dictionary].assign() throw a runtime error and
 		# abort the rest of _load_bests BEFORE _apply_settings runs — silently reverting ALL
@@ -5190,9 +5600,18 @@ func _load_bests() -> void:
 		_life_runs = _cfg_int(cf, "life", "runs", 0)
 		_life_kills = _cfg_int(cf, "life", "kills", 0)
 		_life_wins = _cfg_int(cf, "life", "wins", 0)
+		front = FrontDoor.new()
+		front.load_from(cf)
+		svc.load_from(cf)   # service-record: tolerant of absent / corrupt [service]
+		if not cf.has_section("front"):
+			# Saves that predate [front]: a veteran has seen the intro and the hall proves how far they got.
+			front.intro_seen = _life_runs > 0 or best_score > 0
+			for r in hall:
+				front.note_sector(int(r.get("sector", 1)))
 		_daily_done_seed = _cfg_int(cf, "daily", "done_seed", -1)   # c2-13: locks the DAILY RUN row when it equals today's seed
 		vet_points = _cfg_int(cf, "meta", "vp", 0)   # endless-meta-retention: persistent perk currency
 		_perk_levels = _cfg_dict(cf, "meta", "levels")   # perk id -> owned tier
+		_vet_perks_on = bool(cf.get_value("meta", "vet_perks", true)) if cf.get_value("meta", "vet_perks", true) is bool else true   # absent / wrong type -> ON
 		# c1-09: read each key (SETTINGS_DEFAULTS is the fallback source; legacy saves
 		# only carried the mute BOOLS, so map those to a 0 level) into one dict, then
 		# push it through the SAME _apply_settings path fresh-install and RESET use —
@@ -5214,9 +5633,27 @@ func _load_bests() -> void:
 			# so a chosen scale never survived a restart). Legacy saves lack the key -> ship 2x.
 			"window_scale": cf.get_value("settings", "window_scale", SETTINGS_DEFAULTS["window_scale"]),
 			# audio-identity: captions default ON; a save predating the toggle lands there too.
-			"captions": cf.get_value("settings", "captions", SETTINGS_DEFAULTS["captions"]),
+			# A save that loaded with ANY section predates the toggle, when captions were always
+			# on: that is ALL, not the new-install SMART. ([settings] is written only by OPTIONS
+			# SAVE & co, so a veteran who never opened OPTIONS has [best]/[hall] and no
+			# [settings]: keying on that section silently downgraded them.) An empty file = new.
+			"captions": cf.get_value("settings", "captions",
+				CuePolicy.CAP_ALL if not cf.get_sections().is_empty() else SETTINGS_DEFAULTS["captions"]),
 			# accessibility: a save predating TEXT SIZE lands at 100% (the shipped sizes).
 			"text_scale": cf.get_value("settings", "text_scale", SETTINGS_DEFAULTS["text_scale"]),
+			"single_stick_p1": cf.get_value("settings", "single_stick_p1", SETTINGS_DEFAULTS["single_stick_p1"]),
+			"single_stick_p2": cf.get_value("settings", "single_stick_p2", SETTINGS_DEFAULTS["single_stick_p2"]),
+			"classic_aim_p1": cf.get_value("settings", "classic_aim_p1", SETTINGS_DEFAULTS["classic_aim_p1"]),
+			"classic_aim_p2": cf.get_value("settings", "classic_aim_p2", SETTINGS_DEFAULTS["classic_aim_p2"]),
+			"aim_assist": cf.get_value("settings", "aim_assist", SETTINGS_DEFAULTS["aim_assist"]),
+			"toggle_grenade": cf.get_value("settings", "toggle_grenade", SETTINGS_DEFAULTS["toggle_grenade"]),
+			"toggle_roll": cf.get_value("settings", "toggle_roll", SETTINGS_DEFAULTS["toggle_roll"]),
+			"toggle_interact": cf.get_value("settings", "toggle_interact", SETTINGS_DEFAULTS["toggle_interact"]),
+			"toggle_revive": cf.get_value("settings", "toggle_revive", SETTINGS_DEFAULTS["toggle_revive"]),
+			"toggle_buy": cf.get_value("settings", "toggle_buy", SETTINGS_DEFAULTS["toggle_buy"]),
+			"slow_mode": cf.get_value("settings", "slow_mode", SETTINGS_DEFAULTS["slow_mode"]),
+			"shake_level": cf.get_value("settings", "shake_level", SETTINGS_DEFAULTS["shake_level"]),
+			"flash_level": cf.get_value("settings", "flash_level", SETTINGS_DEFAULTS["flash_level"]),
 		})
 	else:
 		# c1-09: fresh install (no save yet) — apply the SAME authoritative defaults
@@ -5229,7 +5666,36 @@ func _load_bests() -> void:
 # table so _load_settings' fallbacks and _reset_settings' revert can't drift, and
 # a newly-added setting is reset the moment it's given a default here. reduce_motion
 # is the persisted bool; the live field is _motion (1.0 normal / 0.0 reduced).
+const ACCESSIBILITY_KEYS: Array[String] = [
+	"single_stick_p1",
+	"single_stick_p2",
+	"classic_aim_p1",
+	"classic_aim_p2",
+	"aim_assist",
+	"toggle_grenade",
+	"toggle_roll",
+	"toggle_interact",
+	"toggle_revive",
+	"toggle_buy",
+	"slow_mode",
+	"shake_level",
+	"flash_level",
+]
+
 const SETTINGS_DEFAULTS := {
+	"single_stick_p1": false,
+	"single_stick_p2": false,
+	"classic_aim_p1": false,
+	"classic_aim_p2": false,
+	"aim_assist": 0,
+	"toggle_grenade": false,
+	"toggle_roll": false,
+	"toggle_interact": false,
+	"toggle_revive": false,
+	"toggle_buy": false,
+	"slow_mode": false,
+	"shake_level": 10,
+	"flash_level": 10,
 	"colorblind": false,
 	"assist": false,
 	"reduce_motion": false,
@@ -5240,7 +5706,7 @@ const SETTINGS_DEFAULTS := {
 	"music_vol": 10,
 	"fullscreen": false,
 	"window_scale": 2,
-	"captions": true,
+	"captions": CuePolicy.CAP_SMART,   # a NEW install; saves keep theirs (_load_bests). Was a bool: migrate_caption_mode reads both
 	"text_scale": TEXT_SCALE_MIN,
 }
 
@@ -5472,7 +5938,7 @@ func reset_binds() -> void:
 # (which persists it) and the OPTIONS dirty-state (which snapshots it as the revert baseline before
 # staging a change). Shape matches _apply_settings' expected keys so a snapshot round-trips cleanly.
 func _settings_snapshot() -> Dictionary:
-	return {
+	var snapshot := {
 		"colorblind": colorblind,
 		"assist": _assist,
 		"reduce_motion": _motion < 0.5,
@@ -5483,9 +5949,11 @@ func _settings_snapshot() -> Dictionary:
 		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
 		"window_scale": _win_scale,
-		"captions": _captions,
+		"captions": _caption_mode,
 		"text_scale": _text_scale,
 	}
+	snapshot.merge(_accessibility_snapshot())
+	return snapshot
 
 
 # c4-11: true when every persisted setting already equals its ship default, so the OPTIONS
@@ -5498,6 +5966,123 @@ func _settings_at_defaults() -> bool:
 		if snap[k] != SETTINGS_DEFAULTS[k]:
 			return false
 	return true
+
+
+func accessibility_setting(key: String) -> Variant:
+	return _accessibility_settings.get(key, SETTINGS_DEFAULTS.get(key, false))
+
+
+func _normalized_accessibility_setting(key: String, value: Variant) -> Variant:
+	if key in ["aim_assist", "shake_level", "flash_level"]:
+		if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(value)):
+			return SETTINGS_DEFAULTS[key]
+		return clampi(int(value), 0, 2 if key == "aim_assist" else 10)
+	return value if typeof(value) == TYPE_BOOL else SETTINGS_DEFAULTS[key]
+
+
+func _accessibility_snapshot() -> Dictionary:
+	var result := {}
+	for key in ACCESSIBILITY_KEYS:
+		result[key] = accessibility_setting(key)
+	return result
+
+
+func set_accessibility_setting(key: String, value: Variant) -> void:
+	if key not in ACCESSIBILITY_KEYS:
+		return
+	_accessibility_settings[key] = _normalized_accessibility_setting(key, value)
+	_refresh_accessibility_input()
+
+
+func _raw_accessibility_actions(seat: int) -> Dictionary:
+	if seat == 0:
+		var e := shared_e(Input.is_physical_key_pressed(bind("grenade")),
+			Input.is_physical_key_pressed(bind("grenade_alt")), Input.is_physical_key_pressed(bind("revive")),
+			bind("grenade") == bind("revive"), revive_context(sim, 0) if sim != null else false)
+		return {"grenade": e[0] or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or pad_pressed(0, "grenade") or _steam.button_pressed(0, "grenade"),
+			"roll": Input.is_physical_key_pressed(bind("roll")) or pad_pressed(0, "roll") or _steam.button_pressed(0, "roll"),
+			"interact": Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact") or _steam.button_pressed(0, "interact"),
+			"revive": e[1] or pad_pressed(0, "revive") or _steam.button_pressed(0, "revive"),
+			"buy": Input.is_physical_key_pressed(bind("buy")) or pad_pressed(0, "buy") or _steam.button_pressed(0, "buy")}
+	var result := {}
+	for action in ["grenade", "roll", "interact", "revive", "buy"]:
+		result[action] = pad_pressed(seat, action) or _steam.button_pressed(seat, action)
+	return result
+
+
+func _refresh_accessibility_input() -> void:
+	_accessible_input.configure(_accessibility_snapshot())
+
+
+func reset_accessibility_input() -> void:
+	_accessible_input.reset()
+	_accessible_policy.reset_clock()
+	_mouse_aim_override_until = 0
+	for seat in (2 if _two_players else 1):
+		var raw := _raw_accessibility_actions(seat)
+		for action in raw:
+			if accessibility_setting("toggle_" + action):
+				_accessible_input.prime_action(seat, action, raw[action])
+	_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
+
+
+func _run_assist_tags() -> Array[String]:
+	return Replay.assist_tags_for_config(_accessibility_snapshot(),
+		sim.players.size() if sim != null else (2 if _two_players else 1),
+		sim != null and sim.assist_mode)
+
+
+func _record_accessibility_change() -> void:
+	if _recorder == null or _watching:
+		return
+	var current := _accessibility_snapshot()
+	if current != _recorded_accessibility:
+		_recorder.record_accessibility(current, _run_assist_tags())
+		_recorded_accessibility = current
+
+
+func _uses_buffered_accessibility() -> bool:
+	for key in ["slow_mode", "toggle_grenade", "toggle_roll", "toggle_interact", "toggle_revive", "toggle_buy"]:
+		if accessibility_setting(key):
+			return true
+	return false
+
+
+func _detent_feedback(seat: int) -> void:
+	if _accessible_input.consume_detent_change(seat) and _rumble_on and Input.has_joy_vibration(seat):
+		Input.start_joy_vibration(seat, 0.04, 0.07, 0.035)
+
+
+func _shake_strength() -> float:
+	return AccessiblePolicy.shake_scale(int(accessibility_setting("shake_level")), _motion < 0.5)
+
+
+func _lead_strength() -> float:
+	## Aim look-ahead scale: the shake setting (0 under reduce-motion). Dev harnesses
+	## (no_autopause) get zero lead so staged shots stay byte-reproducible, unless
+	## CIC_CAMERA_LEAD=1 asks for it.
+	if no_autopause and OS.get_environment("CIC_CAMERA_LEAD") != "1":
+		return 0.0
+	return _shake_strength()
+
+
+func _lead_shift() -> Vector2:
+	return _camera_lead.offset if _lead_strength() > 0.0 else Vector2.ZERO
+
+
+func _flash_strength() -> float:
+	return AccessiblePolicy.flash_scale(int(accessibility_setting("flash_level")), _motion < 0.5)
+
+
+func accessibility_summary() -> String:
+	var aids: Array[String] = []
+	if accessibility_setting("single_stick_p1") or accessibility_setting("single_stick_p2"):
+		aids.append("SINGLE STICK")
+	if int(accessibility_setting("aim_assist")) > 0:
+		aids.append("AIM ASSIST")
+	if accessibility_setting("slow_mode"):
+		aids.append("75% SPEED")
+	return " / ".join(aids) if not aids.is_empty() else "STANDARD INPUT"
 
 
 func _save_settings() -> void:
@@ -5548,6 +6133,8 @@ func _step_text_scale(dir: int) -> bool:
 
 
 func _apply_settings(d: Dictionary) -> void:
+	for key in ACCESSIBILITY_KEYS:
+		_accessibility_settings[key] = _normalized_accessibility_setting(key, d.get(key, SETTINGS_DEFAULTS[key]))
 	colorblind = d["colorblind"]
 	_assist = d["assist"]
 	_motion = 0.0 if d["reduce_motion"] else 1.0
@@ -5562,17 +6149,15 @@ func _apply_settings(d: Dictionary) -> void:
 	# .get: saves predating c1-19 land at the 2x ship default. Store the PREFERENCE sane-capped
 	# (NOT clamped to the current monitor) so a scale saved on a bigger display survives a load on
 	# a smaller one; _apply_windowed_scale sizes the window to the live per-monitor fit.
-	_win_scale = clampi(int(d.get("window_scale", 2)), 1, WIN_SCALE_MAX)
+	_win_scale = clampi(int(d.get("window_scale", 2)), Art.MIN_WINDOW_SCALE, WIN_SCALE_MAX)
 	# audio-identity: .get (not d["captions"]) — a save predating the toggle lacks the key,
 	# same back-compat pattern as swap_sticks/window_scale above.
-	_captions = bool(d.get("captions", true))
+	_caption_mode = CuePolicy.migrate_caption_mode(d.get("captions", CuePolicy.CAP_ALL))
 	# accessibility: .get — a save predating TEXT SIZE lands at the shipped 100%. The setter
 	# snaps/clamps, so no caller (load, RESET, DISCARD) can install an off-rung value.
 	_set_text_scale(int(d.get("text_scale", TEXT_SCALE_MIN)))
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if _fullscreen \
-		else DisplayServer.WINDOW_MODE_WINDOWED)
-	if not _fullscreen:
-		_apply_windowed_scale()
+	_refresh_accessibility_input()
+	_apply_display_mode()
 	# c1-09: rebake the cursor to the new window size here too — RESET DEFAULTS switches
 	# display mode through this path, and without this it left the cursor scaled for the
 	# old size (the F11/Alt+Enter shortcut always rebaked; reset used to skip it).
@@ -5589,35 +6174,46 @@ func _apply_settings(d: Dictionary) -> void:
 func _toggle_fullscreen(persist := true) -> void:
 	_prog_resize = true   # a programmatic mode change — ignore the transition's resize events until settled
 	_fullscreen = not _fullscreen
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN
-		if _fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
-	if not _fullscreen:
-		# Returning to windowed restores the chosen integer scale — RE-CLAMPED to the current
-		# monitor first, so a scale carried in from a larger display (save or F11 round-trip)
-		# can never restore an oversized window that overflows the smaller screen. This arms a
-		# windowed settle chain that clears _prog_resize once the transition completes.
-		_apply_windowed_scale()
-	else:
-		# Entering fullscreen applies NO windowed fit, so arm a generation-tagged settle chain anyway:
-		# its fullscreen branch (reached from _process next frame) resets the counters AND clears
-		# _prog_resize, so the guard can never stay stuck true after a bare F11-in.
-		_settle_gen += 1
-		_settle_active = true
+	_apply_display_mode()
 	call_deferred("_bake_cursor")   # cursor scale follows the new window size
 	if persist:
 		_save_settings()
 
 
-# c1-19: largest integer window scale the current display can actually hold (min 1),
-# so the OPTIONS control never offers a window that won't fit. Sized against the WORK
-# area (screen_get_usable_rect excludes the taskbar / macOS menu bar) MINUS the window
-# chrome (title bar + borders) — a raw-screen divide advertised e.g. 2x on a 720p display
-# that the decorated 1280x720 window then overflowed. The live decoration delta is only
-# trustworthy while WINDOWED (it reads 0 in fullscreen); it's cached into _deco_reserve
-# there and reused when queried in fullscreen, so the ceiling computed mid-fullscreen still
-# leaves room for the chrome that returns on the way out.
 func _max_win_scale() -> int:
 	return max_scale_for(DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen()).size, _deco_reserve)
+
+
+static func display_requires_fullscreen(preferred: bool, usable: Vector2i, chrome: Vector2i) -> bool:
+	if preferred:
+		return true
+	if usable.x <= 0 or usable.y <= 0:
+		return false
+	var minimum := Vector2i(640, 360) * Art.MIN_WINDOW_SCALE
+	return usable.x < minimum.x + maxi(0, chrome.x) or usable.y < minimum.y + maxi(0, chrome.y)
+
+
+func _uses_fullscreen() -> bool:
+	return display_requires_fullscreen(_fullscreen, _display_usable_size(), _deco_reserve)
+
+
+func _display_usable_size() -> Vector2i:
+	return DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen()).size
+
+
+func display_forced_fullscreen() -> bool:
+	return not _fullscreen and _uses_fullscreen()
+
+
+func _apply_display_mode() -> void:
+	_prog_resize = true
+	var full := _uses_fullscreen()
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if full else DisplayServer.WINDOW_MODE_WINDOWED)
+	if full:
+		_settle_gen += 1
+		_settle_active = true
+	else:
+		_apply_windowed_scale()
 
 
 # c1-19: the ceiling math, pure + static so it's headless-assertable with SYNTHETIC work-area +
@@ -5627,7 +6223,7 @@ func _max_win_scale() -> int:
 static func max_scale_for(usable: Vector2i, reserve: Vector2i) -> int:
 	if usable.x <= 0 or usable.y <= 0:
 		return 3
-	return clampi(mini((usable.x - reserve.x) / 640, (usable.y - reserve.y) / 360), 1, WIN_SCALE_MAX)
+	return clampi(mini((usable.x - reserve.x) / 640, (usable.y - reserve.y) / 360), Art.MIN_WINDOW_SCALE, WIN_SCALE_MAX)
 
 
 # c1-19: cache the real window chrome from the live delta. The cache is only ever written from
@@ -5637,7 +6233,7 @@ static func max_scale_for(usable: Vector2i, reserve: Vector2i) -> int:
 # good value. Once settled, a genuinely borderless / client-side-decoration window reads a stable
 # zero, which is valid and stored as-is.
 func _measure_decorations(accept_zero := false) -> void:
-	if _fullscreen:
+	if _uses_fullscreen():
 		return
 	var raw := DisplayServer.window_get_size_with_decorations() - DisplayServer.window_get_size()
 	var live := Vector2i(maxi(0, raw.x), maxi(0, raw.y))
@@ -5669,7 +6265,8 @@ func _settle_window(gen := 0) -> void:
 	# (gen 0 default = a direct/legacy call adopts the current chain.)
 	if gen != 0 and gen != _settle_gen:
 		return
-	if _fullscreen:
+	if _uses_fullscreen():
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 		_settle_tries = 0
 		_settle_last_deco = Vector2i(-1, -1)
 		_settle_zero_streak = 0
@@ -5708,6 +6305,9 @@ func _settle_window(gen := 0) -> void:
 	var accept_zero := _settle_zero_streak >= SETTLE_ZERO_FRAMES and at_target
 	var prev_reserve := _deco_reserve
 	_measure_decorations(accept_zero)
+	if _uses_fullscreen():
+		_apply_display_mode()
+		return
 	var reserve_changed := _deco_reserve != prev_reserve
 	# Recompute the target AFTER measuring: committing the reserve (e.g. accepting a borderless zero,
 	# dropping the 40px fallback) can RAISE the effective scale, so the pre-measurement `want` is now
@@ -5770,6 +6370,9 @@ static func center_pos(usable_pos: Vector2i, usable_size: Vector2i, deco: Vector
 # preference, so every path back to windowed (load, RESET, F11 out, a scale step, a monitor hop)
 # fits the live display while a scale chosen on a bigger monitor survives to be restored later.
 func _apply_windowed_scale() -> void:
+	if _uses_fullscreen():
+		_apply_display_mode()
+		return
 	_prog_resize = true   # our own resize — suppress the size-change notifications it emits until the settle completes
 	var eff := _win_scale_norm()
 	DisplayServer.window_set_size(Vector2i(640 * eff, 360 * eff))
@@ -5791,7 +6394,7 @@ func _apply_windowed_scale() -> void:
 # choice. The OPTIONS row label and the ladder step both read through here, so the on-screen
 # control always sits on the real ceiling (a stale over-max preference can't wedge ►).
 func _win_scale_norm() -> int:
-	return clampi(_win_scale, 1, _max_win_scale())
+	return clampi(_win_scale, Art.MIN_WINDOW_SCALE, _max_win_scale())
 
 
 # c1-19: apply an absolute windowed integer scale — the ONE place window size changes,
@@ -5799,13 +6402,12 @@ func _win_scale_norm() -> int:
 # Picking a scale implies WINDOWED: fullscreen has no visible window to size, so a step
 # drops out of it into the chosen clean multiple. Returns true if the value moved.
 func _set_win_scale(s: int, persist := true) -> bool:
-	var ns := clampi(s, 1, _max_win_scale())
+	var ns := clampi(s, Art.MIN_WINDOW_SCALE, _max_win_scale())
 	if ns == _win_scale and not _fullscreen:
 		return false
 	_win_scale = ns
 	_fullscreen = false
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	_apply_windowed_scale()
+	_apply_display_mode()
 	call_deferred("_bake_cursor")   # cursor scale follows the new window size
 	if persist:   # c3-18: the OPTIONS dirty-state defers the write to SAVE
 		_save_settings()
@@ -5817,7 +6419,7 @@ func _set_win_scale(s: int, persist := true) -> bool:
 # row. The chosen value is what applies the moment you drop back to windowed (via the FULLSCREEN
 # toggle or F11). Clamped to the current effective ceiling and persisted; returns true if it moved.
 func _set_win_scale_pref(s: int, persist := true) -> bool:
-	var ns := clampi(s, 1, _max_win_scale())
+	var ns := clampi(s, Art.MIN_WINDOW_SCALE, _max_win_scale())
 	if ns == _win_scale:
 		return false
 	_win_scale = ns
@@ -5982,12 +6584,17 @@ func _record_run(score: int) -> void:
 		if g["open"]:
 			opened += 1
 	var rr := _run_rank()   # bank the earned grade/title with the run so the Hall can show it
+	var assist_only: Array[String] = _recorder.assist_tags if _recorder != null else _run_assist_tags()
+	var run_tags := CampaignMeta.board_tags(assist_only, _run_perked)   # Steam routing: a perked run keeps the vest bit
 	var entry := {"score": score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, SimWorld.FINAL_GATE_INDEX), "dist": -Fixed.to_int(sim.camera_top) / 10,
 		# authored-campaign-and-modes: bosses cleared, meaningful only for a
 		# boss_rush entry (the Hall/menu read it only when mode == "boss_rush").
 		"bosses": mini(opened, SimWorld.BOSS_RUSH_COUNT),
-		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist,
+		"streak": _run_best_streak, "won": sim.victory, "daily": _daily,
+		"assist": not assist_only.is_empty(), "perked": _run_perked, "vet": _run_perked,
+		"assist_tags": run_tags,
+		"player_count": sim.players.size(),
 		"hard": sim.hard,
 		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues,
 		"hid": _hall_seq}
@@ -6017,19 +6624,30 @@ func _record_run(score: int) -> void:
 		# DAILY RUN row locks while _daily_done_seed == today's _daily_seed().
 		_daily_done_seed = _current_seed
 		cf.set_value("daily", "done_seed", _daily_done_seed)
+	if _daily:
+		front.note_daily_score(FrontDoor.today(), score, rr.grade)
+	front.note_sector(int(entry["sector"]))
+	cf.set_value("front", "max_sector", front.max_sector)
+	cf.set_value("front", "daily_day", front.daily_day)
+	cf.set_value("front", "daily_score", front.daily_score)
+	cf.set_value("front", "daily_grade", front.daily_grade)
 	cf.set_value("life", "runs", _life_runs)
 	cf.set_value("life", "kills", _life_kills)
 	cf.set_value("life", "wins", _life_wins)
+	_commit_service_record(cf, entry, rr)
 	cf.set_value("best", "score", best_score)
 	cf.set_value("best", "wave", best_wave)
 	cf.set_value("best", "dist", best_dist)
-	if sim.mode == "endless":
+	var vp_award := CampaignMeta.vp_for_run(sim.mode, sim.wave, CampaignMeta.sector_reached(opened), sim.victory, _daily)
+	if vp_award > 0:
 		# endless-meta-retention: 1 Veteran Point per wave survived -- a deeper
 		# run always banks more toward the next perk, independent of score.
-		vet_points += sim.wave
+		# retry-meta: Campaign pays per sector reached + a win bonus (CampaignMeta).
+		vet_points += vp_award
 		cf.set_value("meta", "vp", vet_points)
 		cf.set_value("meta", "levels", _perk_levels)
 	cf.set_value("seen", "hints", _seen)
+	cf.set_value("seen", "cues", _cue_seen)
 	# save-integrity: same rule as _flush_bests — the flags stay dirty unless the
 	# write landed, so a failed save is retried at the next flush instead of
 	# being silently dropped.
@@ -6044,6 +6662,20 @@ func _record_run(score: int) -> void:
 	_report_to_steam(entry, score)
 
 
+## service-record: bank this (already replay-verified) run's medals and best rank into `cf`.
+## The Hall's own `assist` flag (vest / accessibility assists / purchased perks) gates both.
+func _commit_service_record(cf: ConfigFile, entry: Dictionary, rr: Dictionary) -> void:
+	var assisted: bool = entry.get("assist", false) or entry.get("vet", false)   # a perked run is still not a clean one
+	var key := ServiceRecord.mode_key(str(entry["mode"]), bool(entry["daily"]))
+	var reach := ServiceRecord.reach_value(str(entry["mode"]), int(entry["sector"]),
+		int(entry["bosses"]), int(entry["wave"]), bool(entry["won"]))
+	svc.commit_run(ServiceRecord.medals_eligible(str(entry["mode"]), bool(entry["daily"]), assisted),
+		key, str(rr["grade"]), reach, assisted)
+	var sec := svc.to_section()
+	for k in sec:
+		cf.set_value("service", k, sec[k])
+
+
 func _report_to_steam(entry: Dictionary, score: int) -> void:
 	# Steamworks MVP hook: fires at the END of _record_run (see the call
 	# site's comment just above) -- achievements/leaderboards report against
@@ -6051,7 +6683,10 @@ func _report_to_steam(entry: Dictionary, score: int) -> void:
 	# safely when Steam isn't present (dev/CI/non-Steam builds) -- this call
 	# is always safe to make. `score` is the same already-verified argument
 	# _record_run received -- never sim.score re-read here.
-	_steam.upload_score(sim.mode, score)
+	_steam.upload_score("daily" if entry.get("daily", false) else sim.mode, score, {
+		"player_count": sim.players.size(), "hard": sim.hard,
+		"assist_tags": entry.get("assist_tags", []),
+		"seed": _current_seed, "ticks": sim.tick_count})
 	# unlock(id, false) skips the per-call store_stats() round trip -- a run can
 	# clear several milestones in one tick (e.g. a Boss Rush no-death win), and
 	# flush_stats() below reports them to Steam in a single batch.
@@ -6150,6 +6785,49 @@ func _visible_hint_text() -> String:
 	# Keep the existing once-per-profile teaching window, but never display a
 	# stale promise or let an already-resolved recovery hide the next objective.
 	return _recovery_hint_text() if _hint_id == "revive" else _hint_text
+
+
+func _on_title() -> bool:
+	return _menu != null and _menu.mode == GameMenu.Mode.TITLE
+
+
+## CUES NOT WORDS: every caption cue funnels through here so the SMART fade sees the live mode,
+## the live SFX level (0..10) and the persisted exposure counters. ALL stays the shipped path.
+func _caption_cue(key: String) -> void:
+	_sfx.caption_mode = _caption_mode
+	_sfx.sfx_step = _bus_vol("SFX")
+	# The attract bot's cues are not the player's exposures: count into a throwaway dict on the title.
+	_sfx.cue_counts = {} if _on_title() else _cue_seen
+	_sfx.caption_sfx(key)
+	if _sfx.cue_counts_dirty:
+		_sfx.cue_counts_dirty = false
+		_seen_dirty = _seen_dirty or not _on_title()
+
+
+## True when this pickup/status of `key` should still spell its word (first WORD_PICKUPS of each
+## kind); after that the toast is an icon with a pulse ring. Counts the grab, persisted with _seen.
+func _pickup_word_due(key: String) -> bool:
+	if _on_title():
+		return true   # the attract bot's grabs teach nobody and bank nothing
+	var prior := CuePolicy.count_of(_cue_seen, CuePolicy.KEY_PICK + key)
+	CuePolicy.bump(_cue_seen, CuePolicy.KEY_PICK + key)
+	_seen_dirty = true
+	return CuePolicy.pickup_word(_caption_mode, prior, Art.text_scale)
+
+
+## One armor_block the player caused. After ARMOR_BLOCKS_TO_REARM of them with no grenade ever
+## thrown, the armor/grenade hint (already delivered once) is re-queued a single time and then
+## retired for good. Returns true on the call that re-arms; the caller's _hint("armor") follows.
+func _note_armor_block() -> bool:
+	if _on_title():
+		return false   # the attract bot's blocks are not the player's (same gate as _hint)
+	CuePolicy.bump(_cue_seen, CuePolicy.KEY_ARMOR_BLOCKS)
+	_seen_dirty = true
+	if not _seen.get("armor", false) or not CuePolicy.rearm_due(_cue_seen):
+		return false
+	_cue_seen[CuePolicy.KEY_REARMED] = 1
+	_seen.erase("armor")
+	return true
 
 
 func _hint(id: String, text: String, urgent := false) -> void:
@@ -6268,7 +6946,7 @@ func _track_bests() -> void:
 			# trusted, so a missing recorder can never be a backdoor around the check.
 			var _score_verified := _recorder != null and _recorder.verify_score(sim.score)
 			_apply_score_verdict(sim.score, _score_verified)   # extracted gate -- see tests/test_leaderboard.gd; also sets _run_vp_gain
-			if sim.mode == "endless" and _run_vp_gain > 0:
+			if _run_vp_gain > 0:
 				# _run_vp_gain is what the debrief/victory card reads too (see _draw below) --
 				# not just this transient banner, so the gain survives past the banner's decay.
 				# Once perks_maxed() the gain buys nothing, so shouting "+N VP" is a reward cue
@@ -6734,7 +7412,7 @@ func _update_feel() -> void:
 		var fi := 0
 		while fi < _fx.size():
 			var fx := _fx[fi]
-			fx["t"] += fx.get("rate", 0.09)
+			fx["t"] += fx.get("rate", 0.09) * _time_fx.fx_scale()
 			if fx["kind"] == "casing" or fx["kind"] == "gib" or fx["kind"] == "dust" or fx["kind"] == "splash" or fx["kind"] == "ember" or fx.get("move", false):
 				fx["x"] += int(fx["vx"] * Fixed.ONE)
 				fx["y"] += int(fx["vy"] * Fixed.ONE)
@@ -6841,6 +7519,10 @@ func _update_feel() -> void:
 			_down_anim[i] = minf(1.0, _down_anim[i] + 0.12)
 	if _hitstop_frames == 0:
 		_kick *= 0.78
+	if sim.tick_count < _locator_tick:
+		_locator.reset()   # a restart rewinds the tick: the new run's soldiers get their spawn pulse
+	_locator_tick = sim.tick_count
+	_locator.observe(sim.players)
 	# Gamepad rumble: HD/adaptive — in 2P each pad buzzes for ITS OWN player's hits
 	# only (device 0 == P1, device 1 == P2), and `sharp` events (gunfire, melee,
 	# a lost soldier) get a punchier weak/strong split and a short snap, while
@@ -6885,12 +7567,12 @@ func _update_feel() -> void:
 		return
 	# Random per-axis rattle (not a smooth Lissajous sway), biased vertical to match
 	# the scroll axis; trauma² keeps small hits subtle while big ones land.
-	var mag := _trauma * _trauma * 11.0 * _motion
+	var mag := _trauma * _trauma * 11.0 * _shake_strength()
 	var shake := Vector2.ZERO
 	if mag > 0.01:
 		shake = Vector2(randf_range(-0.8, 0.8) * mag, randf_range(-1.0, 1.0) * mag)
 	# Camera zoom-punch pivots around screen center, not the top-left origin.
-	var pz := 1.0 + _punch * _motion
+	var pz := 1.0 + _punch * _shake_strength()
 	scale = Vector2(pz, pz)
 	# Rotational judder: only the biggest hits (boss deaths, phase breaks) get a hair
 	# of dutch-angle roll — a juice axis untouched until now. Pivots on screen center
@@ -6899,9 +7581,10 @@ func _update_feel() -> void:
 	# a hard gate popped visibly as trauma crossed it mid-decay.
 	# 0.55 rad/frame ≈ 5Hz: a readable held twist. The old 2.9 sat near Nyquist
 	# (π rad/frame), flipping sign almost every frame — buzz, not roll.
-	var rot := sin(float(Engine.get_physics_frames()) * 0.55) * _trauma * _trauma * 0.035 * _motion
+	var rot := sin(float(Engine.get_physics_frames()) * 0.55) * _trauma * _trauma * 0.035 * _shake_strength()
 	rotation = rot
-	position = (shake + _kick * _motion + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)).round()
+	_camera_lead.step(CameraLead.mean_aim(sim.players), _lead_strength())
+	position = (shake + _kick * _shake_strength() + _lead_shift() + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)).round()
 
 
 func _drive_audio() -> void:
@@ -6918,6 +7601,9 @@ func _drive_audio() -> void:
 	var intensity := minf(1.0, alive_enemies / 12.0) * 0.6 + _trauma * 0.4
 	if boss_on:
 		intensity = maxf(intensity, 0.85)
+	# audio-director: a thin line sounds thin even when few enemies are alive.
+	if _menu.mode != GameMenu.Mode.TITLE:
+		intensity = maxf(intensity, MusicDirector.danger_intensity(sim.last_stand, sim.standups_left()))
 	# Held-breath dropout before a big beat; drums duck out under last-stand
 	# so the heartbeat plays alone.
 	if _music_hold > 0:
@@ -6932,7 +7618,7 @@ func _drive_audio() -> void:
 	if sim.wiped or sim.victory or _debrief:
 		intensity = 0.0
 	if _tension > 0.4:
-		intensity = minf(intensity, 0.15)
+		intensity = minf(intensity, 0.55 if _sfx.stems_active() else 0.15)   # audio-director: a composed last-stand track plays; the bare synth bed leaves the heartbeat alone
 	# Last Stand engage: the flag flips once; the radio marks the moment.
 	if sim.last_stand and not _last_stand_prev:
 		_vo("vo_last_stand", 3, 600)
@@ -6941,6 +7627,13 @@ func _drive_audio() -> void:
 	if _vo_plea_at >= 0 and int(Engine.get_physics_frames()) >= _vo_plea_at:
 		_vo_plea_at = -1
 		_vo("vo_pilot_plea", 2, 600, true)
+	# audio-director: which place is this? (title / sector N / boss / shop / last stand)
+	var scr := MusicDirector.SCREEN_TITLE if _menu.mode == GameMenu.Mode.TITLE \
+		else (MusicDirector.SCREEN_DEBRIEF if _debrief else MusicDirector.SCREEN_PLAY)
+	var trk_sector := sim.current_sector() if sim.is_campaign_world() else clampi(sim.wave / 3, 0, 5)
+	_sfx.set_music_track(MusicDirector.pick_track(scr, trk_sector, _boss_music_on(sim),
+		sim.mode == "endless" and sim.intermission_ticks > 0, sim.last_stand and not sim.victory and not sim.wiped,
+		_sfx.music_director().current_id))
 	# VO owns the mix while speaking: rides the existing duck channel.
 	_sfx.set_music_intensity(intensity, maxf(_duck, 0.45 if _sfx.vo_active() else 0.0), _boss_music_on(sim))
 	_sfx.duck_sfx_under_vo(_sfx.vo_active(), _sfx_base_db)   # a1-14 AUD#6: dip under radio, rest at the user's SFX level (c4-fix)
@@ -7017,6 +7710,12 @@ static func _demo_boss_target(dsim: SimWorld, p: Dictionary) -> Dictionary:
 			continue
 		if g["y"] < dsim.camera_top or g["y"] > dsim.camera_top + SimWorld.VIEW_H:
 			continue
+		if SiegeBoss.is_siege(g["boss"]):
+			# The ground boss: shoot the rear plate while it is open (the one place a bullet
+			# counts), the hull otherwise (grenades). "siege" asks demo_input to hold range.
+			var sp: Array = SiegeBoss.weak_point(g["boss"]) if SiegeBoss.weak_open(g["boss"]) \
+				else [g["boss"]["x"], g["boss"]["y"]]
+			return {"x": sp[0], "y": sp[1], "siege": true}
 		return {"x": g["boss"]["x"], "y": g["boss"]["gate_y"] - SimWorld.BOSS_Y_OFFSET}
 	# Base infantry used to body-rush into the open-loop sweep, so campaign
 	# deliberately ignored loose bodies while the bot sapped objectives. Riflemen
@@ -7136,6 +7835,10 @@ static func demo_input(tick: int, dsim: SimWorld) -> SimInput:
 		if llen > Fixed.ONE:
 			inp.aim_x = clampi(Fixed.div(ldx, llen) / 256, -256, 256)
 			inp.aim_y = clampi(Fixed.div(ldy, llen) / 256, -256, 256)
+		if lock.get("siege", false):
+			# A tap-lobbed grenade lands ~99 px out, so a bot that marches into the hull's lap
+			# (its default north push) never connects: stand ~100 px south of the Siege Tank.
+			inp.move_y = clampi((lock["y"] + 100 * Fixed.ONE - p["y"]) / Fixed.ONE * 8, -256, 256)
 	if p["in_tank"] >= 0:
 		if dsim.tanks[p["in_tank"]]["burning"]:
 			# Hull's on fire and the crew is exposed from ignition on, so riding it
@@ -7290,6 +7993,7 @@ static func revive_context(w: SimWorld, i: int) -> bool:
 
 
 func _gather_inputs() -> Array[SimInput]:
+	_wheel_cancelled = [false, false]
 	if OS.has_feature("movie") or demo_autoplay:
 		# One scripted input per player, same as the title attract screen — demo_input
 		# steers off players[0], so P2 just replays P1's plan 53 ticks out of phase.
@@ -7333,7 +8037,7 @@ func _gather_inputs() -> Array[SimInput]:
 	# With the fallback skipped the view sends aim 0 and the sim HOLDS the last aim
 	# (it only writes aim_x/aim_y above a quarter-unit input) — which is what P2,
 	# pad-only with no mouse arm, has always done.
-	if ax == 0.0 and ay == 0.0 and not Art.use_pad and sim.players[0]["alive"]:
+	if ax == 0.0 and ay == 0.0 and not Art.use_pad and sim.players[0]["alive"] and (not accessibility_setting("single_stick_p1") or Time.get_ticks_msec() < _mouse_aim_override_until):
 		var to_mouse := get_local_mouse_position() \
 			- _to_screen(sim.players[0]["x"], sim.players[0]["y"])
 		if to_mouse.length() > 4.0:
@@ -7343,6 +8047,11 @@ func _gather_inputs() -> Array[SimInput]:
 	if pad_aim.length() > 0.25:
 		ax = pad_aim.x
 		ay = pad_aim.y
+	if not _wheel[0]["open"]:
+		var resolved := _accessible_input.resolve_aim(0, Vector2(kx, ky), Vector2(ax, ay), sim)
+		ax = resolved.x
+		ay = resolved.y
+		_detent_feedback(0)
 	p1.move_x = _quantize_axis(kx)
 	p1.move_y = _quantize_axis(ky)
 	p1.aim_x = _quantize_axis(ax)
@@ -7368,28 +8077,16 @@ func _gather_inputs() -> Array[SimInput]:
 	# custom layout that deliberately binds both verbs to one physical key.
 	# GRENADE (ALT) — SHIFT by default — is a PURE throw and sits outside the arbitration on
 	# purpose, so old muscle memory throws even while a partner is bleeding out.
-	var e := shared_e(Input.is_physical_key_pressed(bind("grenade")),
-		Input.is_physical_key_pressed(bind("grenade_alt")),
-		Input.is_physical_key_pressed(bind("revive")),
-		bind("grenade") == bind("revive"), revive_context(sim, 0))
-	p1.grenade = e[0] \
-		or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
-		or pad_pressed(0, "grenade") \
-		or _steam.button_pressed(0, "grenade")
-	p1.roll = Input.is_physical_key_pressed(bind("roll")) or pad_pressed(0, "roll") \
-		or _steam.button_pressed(0, "roll")
-	p1.interact = Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact") \
-		or _steam.button_pressed(0, "interact")
-	p1.revive = e[1] \
-		or pad_pressed(0, "revive") \
-		or _steam.button_pressed(0, "revive")
-	p1.buy = _update_wheel(0,
-		Input.is_physical_key_pressed(bind("buy")) or pad_pressed(0, "buy") or _steam.button_pressed(0, "buy"),
-		wheel_dir, Vector2(kx, ky))
+	var raw_p1 := _raw_accessibility_actions(0)
+	for action in ["grenade", "roll", "interact", "revive"]:
+		p1.set(action, _accessible_input.transform_action(0, action, raw_p1[action]))
+	p1.buy = _update_wheel(0, _accessible_input.transform_action(0, "buy", raw_p1["buy"]), wheel_dir, Vector2(kx, ky))
 	# While the wheel is open, the shared roll bind is the CANCEL (a UI action,
 	# not a dodge) and sector flicks steer the wheel, not the gun.
 	# #20: latch the raw press BEFORE it's zeroed below — the wheel silently ate
 	# the dodge with no tell at all; _check_dry_roll reads this to still cue it.
+	if _wheel_cancelled[0]:
+		p1.roll = false
 	_roll_intent[0] = p1.roll
 	if _wheel[0]["open"]:
 		p1.roll = false
@@ -7418,6 +8115,12 @@ func _gather_inputs() -> Array[SimInput]:
 			Input.get_joy_axis(1, JOY_AXIS_RIGHT_X), Input.get_joy_axis(1, JOY_AXIS_RIGHT_Y)), 0.25)
 		if _swap_sticks[1]:   # c1-18: P2's OWN independent left-handed swap
 			var t2 := p2_move; p2_move = p2_aim; p2_aim = t2
+		# Automatic aim must never choose a supply-wheel purchase. P1 already
+		# captures wheel_dir before resolving assistance; retain the same seam for P2.
+		var p2_wheel_dir := p2_aim
+		if not _wheel[1]["open"]:
+			p2_aim = _accessible_input.resolve_aim(1, p2_move, p2_aim, sim)
+			_detent_feedback(1)
 		p2.move_x = _quantize_axis(p2_move.x)
 		p2.move_y = _quantize_axis(p2_move.y)
 		p2.aim_x = _quantize_axis(p2_aim.x)
@@ -7428,13 +8131,13 @@ func _gather_inputs() -> Array[SimInput]:
 		# Always-fire (see P1): no trigger read at all. P2 is pad-only, so grenade (LB) and
 		# revive (Y) stay two distinct buttons and need no contextual arbitration.
 		p2.fire = true
-		p2.grenade = pad_pressed(1, "grenade") or _steam.button_pressed(1, "grenade")
-		p2.roll = pad_pressed(1, "roll") or _steam.button_pressed(1, "roll")
-		p2.interact = pad_pressed(1, "interact") or _steam.button_pressed(1, "interact")
-		p2.revive = pad_pressed(1, "revive") or _steam.button_pressed(1, "revive")
-		p2.buy = _update_wheel(1, pad_pressed(1, "buy") or _steam.button_pressed(1, "buy"),
-			p2_aim, p2_move)
+		var raw_p2 := _raw_accessibility_actions(1)
+		for action in ["grenade", "roll", "interact", "revive"]:
+			p2.set(action, _accessible_input.transform_action(1, action, raw_p2[action]))
+		p2.buy = _update_wheel(1, _accessible_input.transform_action(1, "buy", raw_p2["buy"]), p2_wheel_dir, p2_move)
 		# #20: same raw-press latch as P1, above.
+		if _wheel_cancelled[1]:
+			p2.roll = false
 		_roll_intent[1] = p2.roll
 		if _wheel[1]["open"]:
 			p2.roll = false
@@ -7547,6 +8250,14 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		# pick. The rebound roll key matches the roll verb (AZERTY-safe physical read).
 		var cancel: bool = (i == 0 and Input.is_physical_key_pressed(bind("roll"))) \
 			or pad_pressed(i, "roll") or _steam.button_pressed(i, "roll")
+		if cancel and accessibility_setting("toggle_buy"):
+			_accessible_input.cancel_action(i, "buy")
+			_accessible_input.prime_action(i, "roll", true)
+			w["open"] = false
+			w["sel"] = -1
+			_wheel_cancelled[i] = true
+			_sfx.play("click_dry", -12.0, 1.4)
+			return 0
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
 			_sfx.play("click_dry", -12.0, 1.4)   # soft declined tick — the dedicated dry-click voice
@@ -7933,7 +8644,7 @@ const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 # _draw_fx would discard them for most or all of their life. chopper ignores `pos`
 # entirely (a left->right sweep it re-derives); coin migrates to the HUD War Chest
 # at (16, 13). Only _draw_fx consults this; every _draw_glow kind is world-anchored.
-const _SCREEN_ANCHORED_FX := {"chopper": true, "coin": true}
+const _SCREEN_ANCHORED_FX := {"chopper": true, "coin": true, "edge_chev": true}   # edge_chev pins itself to the frame edge
 
 # Corpse sprite per enemy kind — mirrors the live-draw choices in _draw_enemies.
 # sol-08: rusher/elite/sniper corpses follow their new live RED-team sprites (a fallen body must match
@@ -7948,10 +8659,10 @@ const _CORPSE_TEX := {"rusher": "enemy_smg", "elite": "enemy_assault", "sniper":
 # clampi(kind - 4, 0, size-1) — an unknown kind must degrade, never crash (the
 # kind-4/5 glyph OOB bug once errored the pickup draw every frame).
 const _CAPSULE_TEX: Array[String] = ["cap_pierce", "cap_spread", "cap_triple", "cap_rend",
-	"cap_claymore", "cap_smoke", "cap_flash"]
-const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CLAYMORE", "SMOKE", "FLASH"]
+	"cap_claymore", "cap_smoke", "cap_flash", "cap_flash", "icon_flame", "icon_rocket"]   # [7] = kind 11 (sandbag: a wheel buy, never a pickup); [8]/[9] = kinds 12/13
+const _CAPSULE_LABEL: Array[String] = ["PIERCE", "SPREAD", "TRIPLE", "REND", "CLAYMORE", "SMOKE", "FLASH", "SANDBAG", "FLAMER", "ROCKET"]
 const _CAPSULE_CALLOUT: Array[String] = ["PIERCING ROUNDS!", "SPREAD SHOT!", "TRIPLE SHOT!",
-	"REND ROUNDS!", "CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!"]
+	"REND ROUNDS!", "CLAYMORE +1", "SMOKE SCREEN!", "FLASHBANG!", "SANDBAGS!", "FLAMETHROWER!", "ROCKET LAUNCHER!"]
 const GRENADE_PREVIEW_COL := Color(0.5, 0.85, 1.0)   # a2-15 LEG#5: FRIENDLY grenade preview is COOL (b>r), distinct from the warm/red enemy strike telegraph
 const STRIKE_UNDERLAY := {"scale": 2.1, "alpha": 0.30}   # a3-07: the dark seat-underlay — spans ~2.1x the kill radius (soft edge past the amber ring), 0.30a black
 # a3-06: muzzle heat caps. The ignition pop is warmed OFF white-hot (pop_lerp toward white
@@ -7985,7 +8696,7 @@ const PRIMARY_MARKER_RADIUS := 8.0
 # the one-hit enemy bullet is a 14px-wide lethal circle. Widen only the rendered
 # player poses so that circle stays visibly inside every standing silhouette;
 # movement/collision remain unchanged. Pinned by test_hitbox_fairness.gd.
-const PLAYER_POSE_X_STRETCH := 1.58
+const PLAYER_POSE_X_STRETCH := 1.0   # the 1.58 widening is now baked into assets/baked/hero (tools/bake_sprites.py)
 
 # a4-05 (AD#10, LEG#4): the reticle's dark backing rings the aim point on ALL 8 sides — a
 # CENTERED halo, not the old single down-right drop-shadow, so no edge camouflages into an
@@ -7999,7 +8710,7 @@ const ELITE_AURA_ALPHA := {"base": 0.12, "pulse": 0.07}   # a3-12: base holds un
 const MARSH_WET := {"pool_a": 0.30, "sheen_a": 0.17,   # a3-10: wet-silt pool + its cool specular sheen
 	"pool_col": Color(0.05, 0.11, 0.10), "sheen_col": Color(0.55, 0.70, 0.72)}   # cool-dark silt / lighter cool glint
 const _CAPSULE_COL: Array[Color] = [Color(0.5, 0.9, 1.0), Color(1.0, 0.8, 0.45), Color(1.0, 0.6, 0.9),
-	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family
+	Color(0.78, 0.38, 1.0), Color(0.75, 0.9, 0.6), Color(0.8, 0.85, 0.9), Color(1.0, 1.0, 0.65), Color(0.8, 0.7, 0.5), Color(0.92, 1.0, 0.78), Color(0.45, 0.62, 0.85)]   # a2-15 LEG#8: REND[3] red-orange -> violet, out of the danger family; [8] flame / [9] rocket left the red/amber band too: pale lime-white vs steel blue (hue 130 deg and 0.5 luminance apart)
 
 
 static func _tiny_decor_no_rim(tex_name: String, screen_w: float) -> bool:
@@ -8404,7 +9115,7 @@ const GROUND_BASE_SLOTS := 8        # 128px dihedral slots per 1024px strip
 # tests/test_assets.gd asserts all of this on the built pixels, not on the table.
 const GROUND_BASE_SLOT_DIHEDRAL := [0, 3, 6, 1, 4, 7, 2, 5]
 static var _sand_strips: Array[Texture2D] = []
-static var _jungle_strips: Array[Texture2D] = []   # a3-28: the CC0 jungle biome's own cache
+static var _biome_strips := {}   # biome id -> Array[Texture2D] (8 variants); jungle + the five owned cards
 static var _dirt_patch_tex: Array[Texture2D] = []   # [desert, jungle] soft dressing-patch atlases
 
 
@@ -8944,6 +9655,7 @@ func _draw() -> void:
 	_draw_opening_route()
 	_draw_foundry_arena()
 	_draw_vents()
+	_draw_atmosphere_ground()
 	_draw_hazard_telegraphs()
 	_draw_mines()
 	_draw_rocks()
@@ -9031,6 +9743,7 @@ func _draw() -> void:
 	var top_msg := _top_center_priority()
 	_band = _band_rows(top_msg)
 	_draw_fx()
+	_draw_atmosphere_over()
 	_draw_telegraphs()
 	_draw_wheel()   # world-anchored (rings the player) — must ride the shake
 	# The title's live demo is scenery, not the user's run. Keep its battlefield
@@ -9109,7 +9822,8 @@ func _draw_field_dim() -> void:
 		var lt := Engine.get_physics_frames() % 431
 		if lt < 3:
 			# wash-exempt: 3-frame sheet-lightning inside NIGHT OPS — a sky flash is full-frame by nature.
-			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0, (1.0 - float(lt) / 3.0) * 0.45 * _motion))
+			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0,
+				(1.0 - float(lt) / 3.0) * 0.45 * _motion * float(accessibility_setting("flash_level")) / 10.0))
 
 
 func _draw_landmark_previews() -> void:
@@ -9635,6 +10349,13 @@ func _draw_terrain() -> void:
 				var world_x := int(px / PX)
 				var world_y := sim.camera_top + int(wy_px / PX)
 				if _in_wbands(wbands, world_x, world_y):
+					continue
+				# ground-polish: a desert cactus does not stand in the marsh or on a concrete deck.
+				# Dress the same (view-only) grid cell as that biome's own litter instead.
+				var dec_b := GroundStructure.biome_at(_ground_campaign, ground_biome(sim.current_sector()),
+					cam_y + wy_px, _ground_biome_map)
+				if GroundDecor.replaces_cactus(dec_b):
+					GroundDecor.paint(self, dec_b, Vector2(px, wy_px), h2)
 					continue
 				var big := h2 % 5 == 0
 				var tsway := sin(float(Engine.get_physics_frames()) * 0.03 + float(h2)) * 0.04 * _motion
@@ -10440,9 +11161,21 @@ func _draw_water() -> void:
 		# wherever the offset dips inward (r2 fix — was drawn after and covered it).
 		# Alpha 0.75 -> 0.92 (c2 3v: half-speed ground must not read as a
 		# translucent decal you can ignore).
-		var mud_c := Color(0.42, 0.32, 0.2, 0.92).lerp(Color(0.3, 0.25, 0.2, 0.92), soot)
-		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy - 6 - 40, 640, 40), true, mud_c)
-		draw_texture_rect(Art.tex("dirt"), Rect2(0, wy + wh + 2, 640, 40), true, mud_c)
+		# ground-polish: the fill is the sector's own earth (GroundStructure.mud_bank_color) with
+		# churned dark/pale blobs over it, not one flat saturated orange slab. Same rects, same alpha.
+		var mud_b := GroundStructure.biome_at(_ground_campaign, ground_biome(sim.current_sector()),
+			float(w["y"]) * PX, _ground_biome_map)
+		var mud_p := GroundStructure.mud_bank_plan(mud_b, int(w["y"] / 4096), Vector2(640.0, 40.0), soot)
+		var mud_c: Color = mud_p["base"]
+		# The fill is the sector's OWN ground card darkened (the old shared "dirt" texture is a
+		# saturated orange that no modulate could desaturate), so the half-speed strip stays
+		# readable as a darker, churned band yet shares the biome's hue.
+		var mud_tex := Art.tex(ground_biome_source(mud_b))
+		var mud_mod: Color = mud_p["tex_mod"]
+		draw_texture_rect(mud_tex, Rect2(0, wy - 6 - 40, 640, 40), true, mud_mod)
+		draw_texture_rect(mud_tex, Rect2(0, wy + wh + 2, 640, 40), true, mud_mod)
+		GroundStructure.paint_mud_bank(self, mud_p, Vector2(0.0, wy - 6 - 40))
+		GroundStructure.paint_mud_bank(self, mud_p, Vector2(0.0, wy + wh + 2))
 		# Banks: a wobbling polygon (not a ruler-straight strip) that shares the
 		# exact sine curve the shader displaces its shoreline by, so sand and water
 		# edge track each other instead of drifting into two parallel tells.
@@ -10768,6 +11501,10 @@ static func pickup_full_text(kind: int) -> String:
 	match kind:
 		6:
 			return "TRIPLE SHOT OWNED"
+		12:
+			return "FLAMETHROWER FULL"
+		13:
+			return "LAUNCHER FULL"
 		8:
 			return "CLAYMORES FULL"
 	return "ALREADY STOCKED"
@@ -11160,13 +11897,26 @@ func _draw_pickups() -> void:
 			Art.circle(self, ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			Art.arc(self, ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			Art.line(self, ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			_world_label_centered(_CAPSULE_LABEL[cap_i], ppos.x, ppos.y - 24.0, pcol, ppos)
+			# CUES NOT WORDS: the ground word is for the first WORD_PICKUPS grabs of this kind only;
+			# afterwards the pulsing ring and beam above already say "a capsule" and the sprite says which.
+			if CuePolicy.pickup_word(_caption_mode, CuePolicy.count_of(_cue_seen, CuePolicy.KEY_PICK + str(int(pk["kind"]))), Art.text_scale):
+				_world_label_centered(_CAPSULE_LABEL[cap_i], ppos.x, ppos.y - 24.0, pcol, ppos)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_rect(Rect2(ppos + Vector2(-6, -23), Vector2(12, 12)), Color(0.02, 0.025, 0.02, 0.62))
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if maxed:
-			_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6), ppos)
+			# CUES NOT WORDS: a struck-through ring on a plate instead of the word MAXED (the crate
+			# is already greyed). It claims its pixels through the same arbiter the word did.
+			if WORLD_LABEL_SUBJECT_FRAME.has_point(ppos):
+				var mwant := Rect2(ppos.x - 6.5, ppos.y - 33.0, 13.0, 13.0)
+				var mgot := claim_label_slot(mwant, _label_slots, 0.0, false, _label_rail_ceiling,
+					_label_safe_l, _label_safe_r)
+				_label_slots.append(mgot)
+				draw_texture_rect(Art.tex("fx_softspot"), mgot.grow(3.0), false, Color(LABEL_PLATE_FILL, 0.9))
+				var mcen := mgot.get_center()
+				Art.arc(self, mcen, 4.5, 0, TAU, 14, Color(0.68, 0.68, 0.68), 1.3)
+				Art.line(self, mcen + Vector2(-3.2, 3.2), mcen + Vector2(3.2, -3.2), Color(0.68, 0.68, 0.68), 1.3)
 		elif pk.get("cost", 0) > 0:
 			# Price tinted by affordability (matches the spend-wheel language).
 			var afford: bool = sim.war_chest >= quoted_price
@@ -11349,6 +12099,13 @@ static func telegraph_dir(sw: SimWorld, e: Dictionary) -> Vector2:
 	return Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0)))
 
 
+## Half-width of the riot shield's drawn rear SAFE arc, centred on the heading + PI. It is
+## the complement of the sim's real block cone (SimWorld.SHIELD_BLOCK_DOT), so the green arc
+## covers exactly the bearings from which a round gets through.
+static func shield_safe_half_angle() -> float:
+	return PI - acos(-float(SimWorld.SHIELD_BLOCK_DOT) / float(SimWorld.F_ONE))
+
+
 static func enemy_pose_facing(sw: SimWorld, e: Dictionary, target_face: float,
 		previous_face: float) -> float:
 	var kind: String = e.get("kind", "")
@@ -11432,6 +12189,7 @@ func _draw_enemies() -> void:
 		var eflash: float = _enemy_flash.get(eidx, 0.0)
 		if eflash > 0.02:
 			epos.y -= eflash * 1.2 * _motion
+		epos += _time_fx.flinch_offset(eidx, _motion)
 		# gfx-loop opt: every sibling entity array (bunkers/mines/tanks/gates/pickups)
 		# already band-culls off-screen draws — enemies were the one array left out.
 		# Placed AFTER the flash-offset read above (state itself lives in
@@ -11485,6 +12243,9 @@ func _draw_enemies() -> void:
 		# breathes instead of jogging in place.
 		var e_moved := sample_character_motion(_enemy_pos_prev, eidx, e, sim.tick_count).length_squared() > 0.01
 		var enemy_phase := character_anim_phase(sim.tick_count, 7, eidx, _motion)
+		var flinch_sq := _time_fx.flinch_scale(eidx, _motion)
+		if flinch_sq != Vector2.ONE:   # squash about the body's own position, undone at the loop tail
+			draw_set_transform(epos * (Vector2.ONE - flinch_sq), 0.0, flinch_sq)
 		if e["kind"] != "frogman":
 			if e.get("windup", 0) == 0 and e_moved:
 				epos.y += absf(sin(float(sim.tick_count) * 0.35 + float(eidx) * 1.7)) * -1.4 * _motion
@@ -11800,7 +12561,8 @@ func _draw_enemies() -> void:
 			# flank counter. A faint green arc behind it (opposite the bright front
 			# arc) teaches "get around him" — Art.safe keeps it legible in colorblind.
 			var srear := face + PI
-			Art.arc(self, epos, 13.0, srear - 1.15, srear + 1.15, 14,
+			var ssafe := shield_safe_half_angle()
+			Art.arc(self, epos, 13.0, srear - ssafe, srear + ssafe, 24,
 				Art.safe(Color(0.4, 1.0, 0.5, 0.4)), 2.0)
 		elif e["kind"] == "sapper":
 			# Mine-layer EOD: real sapper bake; the pulsing armed-satchel pip stays —
@@ -11945,8 +12707,8 @@ func _draw_enemies() -> void:
 					Color(1.0, 0.3, 0.2, 0.12 + wfrac * 0.55), 1.0 + wfrac)
 			var esw := (1.0 + (1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)) * 0.14) if wu > 0 else 1.0
 			var elite_pose := enemy_anim_state(e, e_moved, enemy_phase, sim.flash_ticks > 0)
-			_spr_texture(Art.enemy_anim("enemy_assault", elite_pose), "enemy_assault",
-				epos, face, 0.62 * esw)
+			_spr_texture(Art.enemy_anim("enemy_elite", elite_pose), "enemy_assault",
+				epos, face, LIVE_RIFLEMAN_SCALE * esw)   # elite size (1.19x) is baked into enemy_elite
 		else:
 			var rusher_key: String = _RUSHER_SKINS[e.get("skin", 0)]
 			# The ordinary gunman's short aim tell is quieter/smaller than the elite
@@ -11990,6 +12752,8 @@ func _draw_enemies() -> void:
 						var sa := float(Engine.get_physics_frames()) * 0.12 + sd * TAU / 3.0
 						Art.circle(self, epos + Vector2(0, -10.0) + Vector2.from_angle(sa) * 5.5, 1.0,
 							Color(1.0, 1.0, 0.8, 0.9))
+		if flinch_sq != Vector2.ONE:
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _draw_observer() -> void:
@@ -12032,12 +12796,15 @@ func _draw_gunships() -> void:
 	for g in sim.gates:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
-		_draw_one_gunship(g["boss"], "BRIDGE GUNSHIP", slot)
+		if SiegeBoss.is_siege(g["boss"]):
+			SiegeView.draw(self, g["boss"], slot)
+		else:
+			_draw_one_gunship(g["boss"], "BRIDGE GUNSHIP", slot)
 		slot += 1
 	if not sim.endless_boss.is_empty() and sim.endless_boss["alive"]:
 		# Endless miniboss wears the attack-heli bake so it reads as its own threat,
 		# not a reskin of the campaign bridge boss (same PI = nose-down convention).
-		_draw_one_gunship(sim.endless_boss, "GUNSHIP", slot, "m_heli_attack2")
+		_draw_one_gunship(sim.endless_boss, EndlessRoster.boss_name(sim.wave / 5), slot, "m_heli_attack2")
 		slot += 1
 		_endless_boss_key = "boss%d" % sim.endless_boss["gate_y"]
 	elif _endless_boss_key != "":
@@ -12553,6 +13320,9 @@ func _world_label_centered(txt: String, cx: float, baseline_y: float, col: Color
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
+# HP-third acts 2 and 3 (GunshipPhases): [strafe-act name, mortar-act name]. Act 1 is the list above.
+const GUNSHIP_PHASE_NAMES_BY_HP := [["STRAFING RUN", "MORTAR VOLLEY"], ["COVER DENIAL", "MORTAR VOLLEY"],
+	["DESPERATE STRAFE", "CARPET BOMBING"]]
 # Not a phase — the 420-tick approach, which has no act at all: _step_one_boss
 # returns before any firing while phase_t < 0 ("the gunship holds its fire during
 # the approach"). The bar is now drawn for that whole window, so it needs a name
@@ -12715,13 +13485,14 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	_boss_chrome.append({"kind": "gunship", "boss": boss, "label": label, "slot": slot, "pt": pt})
 
 
-static func gunship_phase_label(label: String, pt: int) -> String:
+static func gunship_phase_label(label: String, pt: int, hp_phase := 1) -> String:
 	## The plate under the top-center boss bar. Same act boundary the sim uses to
 	## pick behavior in _step_one_boss (t < BOSS_STRAFE_TICKS).
 	if pt < 0:
 		return "%s — %s" % [label, GUNSHIP_INBOUND_NAME]
 	var gphase := 1 if pt < SimWorld.BOSS_STRAFE_TICKS else 2
-	return "%s — %s" % [label, GUNSHIP_PHASE_NAMES[gphase - 1]]
+	var names: Array = GUNSHIP_PHASE_NAMES_BY_HP[clampi(hp_phase, 1, 3) - 1]
+	return "%s — %s" % [label, names[gphase - 1]]
 
 
 func _boss_bar(boss: Dictionary, label: String, slot: int, pt: int) -> void:
@@ -12738,7 +13509,8 @@ func _boss_bar(boss: Dictionary, label: String, slot: int, pt: int) -> void:
 	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * HudIcons.BOSS_BAR_STRIDE
 	# a2-17 HUD#6: name the phase (actionable) instead of "PHASE 1/2"; HUD#1: plate it
 	# so the highest-stakes read has the plate language the rest of the top band has.
-	var gplabel := gunship_phase_label(label, pt)
+	var gplabel := SiegeView.label(boss) if SiegeBoss.is_siege(boss) else gunship_phase_label(label, pt, EndlessRoster.boss_act(sim.wave / 5 if is_same(boss, sim.endless_boss) else 0,
+		boss["hp"], boss.get("max_hp", int(_boss_hpmax[bkey]))))
 	var gpw := Art.tw(gplabel, 10)
 	draw_rect(_label_plate_rect(bar_x, bar_y, gpw), LABEL_PLATE_FILL)
 	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)
@@ -13036,6 +13808,7 @@ func _draw_projectiles() -> void:
 		draw_set_transform(bpos, dir.angle(), Vector2.ONE)
 		draw_texture_rect(bullet_tex, Rect2(-tlen, -twid / 2.0, tlen, twid), false, bullet_mod)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	WeaponFx.draw_world(self, sim, _to_screen, _motion)
 	for b in sim.enemy_bullets:
 		var bpos := _to_screen(b["x"], b["y"])
 		if bpos.y < -20.0 or bpos.y > 380.0:
@@ -13203,21 +13976,26 @@ func _draw_players() -> void:
 			# a1-18 LEG#2/LEG#3: P1 ring routes through Art.safe (green->blue in colorblind
 			# so it never reads as danger-red), and P1/P2 are SHAPE-distinct — P1 a SOLID
 			# ring, P2 a DASHED ring — so identity survives without the green-vs-gold hue.
-			var idc := _player_ident_color(i, 0.6)
 			# Neutral seat + soft cool footprint: the colored identity ring used to
 			# disappear on pale sand and water. The backing carries no team meaning;
 			# it only guarantees the ring's silhouette on every biome.
 			draw_texture_rect(Art.tex("fx_softspot"),
 				Rect2(pos + Vector2(-13.0, -4.0), Vector2(26.0, 18.0)), false,
 				Color(0.02, 0.025, 0.03, 0.16))
-			Art.arc(self, pos + Vector2(0, 5), 11.5, 0, TAU, 22,
-				Color(0.01, 0.015, 0.02, 0.58), 3.0)
-			if _player_ring_dashed(i):
-				for ds in 8:
-					var da := ds * TAU / 8.0
-					Art.arc(self, pos + Vector2(0, 5), 10.0, da, da + TAU / 16.0, 3, idc, 1.5)
-			else:
-				Art.arc(self, pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
+			# Dark under-ring with the identity rim INSIDE it (dark on both sides of the
+			# hairline), plus one expanding pulse on spawn / revive / roll end — see
+			# PlayerLocator. P2's rim is dashed (shape identity, hue-independent).
+			var ring_c := pos + Vector2(0, 5)
+			var ring_layers := PlayerLocator.layers(true, _player_ident_color(i, 1.0),
+				_locator.pulse_age[i] if i < _locator.pulse_age.size() else -1)
+			for ri in ring_layers.size():
+				var rl: Dictionary = ring_layers[ri]
+				if ri == 1 and _player_ring_dashed(i):
+					for ds in 8:
+						var da := ds * TAU / 8.0
+						Art.arc(self, ring_c, rl["r"], da, da + TAU / 16.0, 3, rl["col"], rl["w"])
+				else:
+					Art.arc(self, ring_c, rl["r"], 0, TAU, 20, rl["col"], rl["w"])
 			# The opening/respawn command chevron answers "where am I?" during the
 			# exact beats where a small overhead sprite is easiest to lose, then fades.
 			var locator_a := hero_locator_alpha(sim.tick_count, p.get("hurt_iframes", 0))
@@ -13736,6 +14514,26 @@ func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, 
 		_fx.append(entry)
 
 
+func _draw_atmosphere_ground() -> void:
+	# Per-sector weather (src/view/atmosphere.gd): cloud shadows + ground-level air.
+	# Laid down BEFORE hazard telegraphs / mines / actors so nothing readable is dimmed.
+	var sec := _atmosphere_sector()
+	var cam := -_to_screen(0, 0).y
+	var fr := int(Engine.get_physics_frames())
+	Atmosphere.draw(self, Atmosphere.plan(sec, fr, _motion, cam, Atmosphere.Layer.UNDER))
+	Atmosphere.draw(self, Atmosphere.plan(sec, fr, _motion, cam, Atmosphere.Layer.MID))
+
+
+func _draw_atmosphere_over() -> void:
+	# A handful of faint foreground specks above the actors, below telegraphs.
+	Atmosphere.draw(self, Atmosphere.plan(_atmosphere_sector(), int(Engine.get_physics_frames()),
+		_motion, -_to_screen(0, 0).y, Atmosphere.Layer.OVER))
+
+
+func _atmosphere_sector() -> int:
+	return Atmosphere.sector_for(_sector_march(), sim.mode == "endless", sim.wave)
+
+
 func _draw_sector_embers() -> void:
 	# Foundry-ash band (march > 0.8): sparse embers drift up-screen — the air
 	# itself says you are close to the end. Hash-driven placement (no shared
@@ -13910,6 +14708,19 @@ func _draw_fx() -> void:
 			draw_texture_rect(Art.tex("wep_grenade"), Rect2(-fs, -fs, fs * 2.0, fs * 2.0), false,
 				Color(1, 1, 1, 1.0 - t))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		elif fx["kind"] == "edge_chev":
+			# CUES NOT WORDS: the flank warning. A chevron on the frame edge nearest the breach,
+			# pointing at it, throbbing for its life and never printing a word.
+			var ec := CuePolicy.edge_chevron(pos)
+			var ec_pos: Vector2 = ec["pos"]
+			var ec_a := (1.0 - t * t) * (1.0 if _motion < 0.5 else 0.65 + Art.pulse(0.3) * 0.35)
+			var ec_col: Color = fx.get("col", Color(1.0, 0.5, 0.3))
+			draw_set_transform(ec_pos, float(ec["angle"]), Vector2.ONE)
+			Art.line(self, Vector2(-8, -9), Vector2(4, 1), Color(0, 0, 0, ec_a * 0.6), 4.0)
+			Art.line(self, Vector2(-8, 11), Vector2(4, 1), Color(0, 0, 0, ec_a * 0.6), 4.0)
+			Art.line(self, Vector2(-8, -10), Vector2(4, 0), Color(ec_col.r, ec_col.g, ec_col.b, ec_a), 3.0)
+			Art.line(self, Vector2(-8, 10), Vector2(4, 0), Color(ec_col.r, ec_col.g, ec_col.b, ec_a), 3.0)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "floattext":
 			if not toast_keep.has(idx):
 				continue   # over the on-screen cap — stacking arbitrates overlap, this bounds COUNT
@@ -13923,6 +14734,9 @@ func _draw_fx() -> void:
 			var fsz: int = fx.get("size", 9)   # headline callouts (power-ups) bump this
 			var ffont := Art.font()
 			var fw := Art.tw(String(fx["text"]), fsz)
+			var ficon: String = fx.get("icon", "")   # CUES NOT WORDS: icon toast, the word has been taught
+			if ficon != "":
+				fw = float(fsz)
 			# Ease-out rise (fast at spawn, settling at the top) + a ~3-frame scale
 			# punch pivoted on the text center — pops in, then glides.
 			var rise := 1.0 - (1.0 - t) * (1.0 - t)
@@ -13997,9 +14811,18 @@ func _draw_fx() -> void:
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)
-			for od in _TEXT_OUTLINE_OFFSETS:
-				draw_string(ffont, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
-			draw_string(ffont, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
+			if ficon != "":
+				# Pulse ring + the item's own sprite, centred in the same plate the word would use.
+				var icx := Vector2(0.0, -float(fsz) * 0.35)
+				var ipulse := 1.0 if _motion < 0.5 else Art.pulse(0.18)   # steady under reduce-motion
+				Art.arc(self, icx, float(fsz) * (0.55 + ipulse * 0.12), 0, TAU, 18,
+					Color(fc.r, fc.g, fc.b, fc.a * (0.55 + ipulse * 0.3)), 1.2)
+				draw_texture_rect(Art.tex(ficon), Rect2(icx - Vector2.ONE * float(fsz) * 0.36,
+					Vector2.ONE * float(fsz) * 0.72), false, Color(1, 1, 1, fc.a))
+			else:
+				for od in _TEXT_OUTLINE_OFFSETS:
+					draw_string(ffont, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
+				draw_string(ffont, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "smoke":
 			# smoothstep ramp-in: puffs swell into view instead of stamping at full alpha.
@@ -14477,7 +15300,7 @@ func _draw_threat_edges() -> void:
 	for g in sim.gates:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
-		var gsy: float = (g["boss"]["gate_y"] - SimWorld.BOSS_Y_OFFSET - sim.camera_top) * PX
+		var gsy: float = (SimWorld.boss_cy(g["boss"]) - sim.camera_top) * PX
 		if gsy < 0.0 and gsy > near_sy:
 			near_sy = gsy
 			near_x = clampf(g["boss"]["x"] * PX, 8.0, 632.0)
@@ -15048,6 +15871,19 @@ func _gate_objective_active() -> bool:
 	return false
 
 
+## HUD DIET: the gate/boss objective sentence is stated for HudDiet.OBJECTIVE_TICKS per gate, then
+## retires; the top-bar gate telegraph (shortened to its MID label) is the one statement left.
+func _gate_objective_live() -> bool:
+	_hud_icons.diet.sync(sim.get_instance_id())
+	for g in sim.gates:
+		if g["open"] or g.get("final", false):
+			continue
+		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
+			continue
+		return _hud_icons.diet.objective_live(int(g["y"]), sim.tick_count)
+	return true
+
+
 func _arena_hold_active() -> bool:
 	if sim.mode != "endless" or sim.intermission_ticks != 0 or sim.victory or sim.wiped:
 		return false
@@ -15081,7 +15917,7 @@ func _top_center_priority() -> String:
 		candidates.append("mortar")
 	if _hint_t > 0.02 and not _visible_hint_text().is_empty():
 		candidates.append("hint")
-	if _gate_objective_active():
+	if _gate_objective_active() and _gate_objective_live():
 		candidates.append("boss")
 	if _arena_hold_active():
 		candidates.append("hold")
@@ -15201,7 +16037,7 @@ func _band_top_text(top_msg: String) -> Dictionary:
 					continue
 				if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
 					continue
-				return {"text": "DESTROY THE GUNSHIP TO ADVANCE" if not g["boss"].is_empty()
+				return {"text": (SiegeView.BAND if SiegeBoss.is_siege(g["boss"]) else "DESTROY THE GUNSHIP TO ADVANCE") if not g["boss"].is_empty()
 					else "GRENADE THE BUNKERS TO ADVANCE", "size": 11}
 			return {}
 		"mortar":
@@ -15390,6 +16226,19 @@ func _draw_threat_pips() -> void:
 		else:
 			draw_colored_polygon(tri, Color(col.r, col.g, col.b, 0.9))
 		Art.polyline(self, PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]), Color(0, 0, 0, 0.55), 1.0)
+	# Off-screen riflemen/elites mid-windup (flank squads past the side edges): distinct
+	# DOUBLE-CHEVRON, clustered and capped so a breach never carpets an edge.
+	for gp in TeachTruth.gunner_pips(sim.enemies, _to_screen, SCREEN_W, SCREEN_H, plate_r, panel_b):
+		var gedge: Vector2 = gp["edge"]
+		var gdir: Vector2 = gp["dir"]
+		var gperp := Vector2(-gdir.y, gdir.x)
+		var gcol := Color(1.0, 0.86, 0.62)
+		Art.circle(self, gedge, 8.0, Color(gcol.r, gcol.g, gcol.b, 0.14))
+		for gi in (3 if int(gp["count"]) > 1 else 2):
+			var gb := gedge - gdir * (3.0 - gi * 4.0)
+			var gt := Art.rnd(PackedVector2Array([gb + gdir * 4.0, gb - gdir * 1.0 + gperp * 4.0, gb - gdir * 1.0 - gperp * 4.0]))
+			Art.polyline(self, PackedVector2Array([gt[0], gt[1], gt[2], gt[0]]), Color(0, 0, 0, 0.55), 3.0)
+			Art.polyline(self, PackedVector2Array([gt[0], gt[1], gt[2], gt[0]]), Color(gcol.r, gcol.g, gcol.b, 0.95), 1.0)
 	# Off-screen mortar strikes: a telegraph that scrolls off-frame between cast and
 	# impact gave zero warning; clamp an urgency-scaled amber-red wedge to the edge.
 	for st in sim.strikes:
@@ -15475,7 +16324,7 @@ func _draw_banners(top_msg: String) -> void:
 		# maxf floor (6/9 panel): zeroing the wash under reduce-motion erased the
 		# whole-field-stun gestalt entirely; siblings (damage vignette, airstrike
 		# wash) keep a dimmed floor. The decay is a fade, not a strobe — RM-safe.
-		var fla := _flash_alpha * maxf(_motion, 0.4)
+		var fla := _flash_alpha * _flash_strength()
 		# wash-exempt: impact flash is deliberately centre-HOT (a radial punch, not a
 		# budgeted wash card) — a WASH_KINDS entry would rightly fail the centre-clear ratchet.
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(-160, -180, SCREEN_W + 320, SCREEN_H + 360),
@@ -15610,8 +16459,7 @@ func _draw_banners(top_msg: String) -> void:
 		# predicate with the debrief) + a REDEPLOY prompt (redeploy input works on victory too,
 		# but the card never told you so — the death card does).
 		var vrp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
-		for vr in _victory_extra_rows(sim.score, best_score, vrp):
-			vrows.append(vr)
+		vrows.append_array(_victory_tail_rows(vrp))   # retry-meta: Campaign VP line + NEW BEST + REDEPLOY
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), vrows,
 			Color(1, 1, 1, 0.96), true,   # a1-11: gold shine sweep
 			{"band": "AFTER-ACTION REPORT", "band_col": Color(1.0, 0.85, 0.3),
@@ -15681,9 +16529,10 @@ func _draw_banners(top_msg: String) -> void:
 			rows.append({"text": vp_row, "color": Art.safe(Color(0.7, 0.95, 0.6)),
 				"icon": "mi_trophy", "icon_size": 14.0})
 		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
+		rows.append_array(_debrief_meta_rows(rp))   # retry-meta: Campaign VP line + RETRY SECTOR
 		# Device-branched prompt: the actual button glyph (pad START / ENTER key)
 		# fronts the row via the panel's icon slot.
-		rows.append({"text": "REDEPLOY", "color": Color(1.0, 0.9, 0.4, rp),
+		rows.append({"text": redeploy_label(), "color": Color(1.0, 0.9, 0.4, rp),
 			"icon": Art.glyph_key("start"), "icon_size": 14.0})
 		_draw_result_panel(_defeat_title(sim.last_stand), Color(0.95, 0.4, 0.35), rows, Color(1, 1, 1, 0.96),
 			false, {"band": "CASUALTY REPORT", "band_col": Color(0.95, 0.4, 0.35),

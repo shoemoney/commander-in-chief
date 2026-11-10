@@ -98,6 +98,29 @@ const SFX_CAPTIONS := {
 # would be pinned open by one sustained event and stop reading as news.
 const SFX_CAPTION_GAP := 180
 
+# CUES NOT WORDS: the compact chip that stands in for the bracket line on the strip. One or two
+# short words; hud.gd draws a warning glyph beside it. The bracket text above stays the canonical
+# caption (tests, translators, active_caption()["text"]); the chip is only how it is DRAWN.
+const SFX_CAPTION_CHIPS := {
+	"strike_warn": "MORTAR",
+	"sniper_paint": "SNIPER",
+	"drone_windup": "DRONE",
+	"mg_nest_aim": "MG NEST",
+	"elite_windup": "ELITE",
+	"grenadier_windup": "GRENADE",
+	"technical_rev": "TECHNICAL",
+	"rear_warn": "BEHIND",
+	"flank_warn": "FLANK",
+	"armor_block": "ARMOR",
+}
+# CAPTIONS: ALL / SMART / OFF (CuePolicy.CaptionMode), pushed in by main before each cue. SMART
+# needs the per-cue exposure counters (main's persisted dict, shared by reference) and the SFX
+# level (0..10 steps) to know whether the player can hear the cue at all.
+var caption_mode := 0
+var sfx_step := 10
+var cue_counts: Dictionary = {}
+var cue_counts_dirty := false
+
 var _sounds: Dictionary = {}
 var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
@@ -146,6 +169,11 @@ var _music_lull := AudioStreamPlayer.new()   # sparse lull bed, phase-locked to 
 # to the SAME 4-bar/110 BPM grid, so the score reads as composed, not just louder drums.
 var _music_riff := AudioStreamPlayer.new()        # combat riff, phase-locked to _music
 var _music_riff_lull := AudioStreamPlayer.new()   # sparse calm riff, phase-locked to _music_lull
+var _dir := MusicDirector.new()   # audio-director: per-place stem tracks + stingers (falls back to the beds above)
+var last_hit_sound := ""         # audio-director: hit-confirm state, readable by tests
+var last_hit_db := 0.0
+var _hit_rr := {"flesh": 0, "wall": 0}
+var _hit_next_frame := -1000
 var _river := AudioStreamPlayer.new()        # a3-15: river burble bed, up near water
 var _foundry := AudioStreamPlayer.new()      # a3-15: machinery bed, up deep in the march
 var _shop := AudioStreamPlayer.new()         # a3-15: calm pad, up in the intermission shop
@@ -167,6 +195,8 @@ enum CaptionTier { FLAVOR, TEACHING, OBJECTIVE, PLAYER_STATE, LETHAL }
 var _sfx_cap_next: Dictionary = {}   # SFX_CAPTIONS key -> earliest physics frame it may re-arm
 var _vo_fade_tween: Tween      # gfx-loop: in-flight fade-out on _vo (interrupt/click fix)
 var _vo_dry_fade_tween: Tween  # gfx-loop: in-flight fade-out on _vo_dry
+const VO_VOLUME_DB := -2.0
+const VO_DRY_VOLUME_DB := -4.0
 var _sfx_bus_idx := -1         # gfx-loop: cached once in _ready() instead of re-resolved every tick
 var _startup_audio_locked := false
 var _boot_audio_ready := false
@@ -298,6 +328,7 @@ func _notification(what: int) -> void:
 		_music_riff_lull, _amb, _vo, _vo_dry, _cmd, _river, _foundry, _shop]
 	owned.append_array(_pool)
 	owned.append_array(_engines.values())
+	owned.append_array(_dir.players())
 	for n in owned:
 		if is_instance_valid(n) and n.get_parent() == null:
 			n.free()
@@ -384,10 +415,10 @@ func _ready() -> void:
 		AudioServer.add_bus_effect(vi, dist)
 		AudioServer.add_bus_effect(vi, AudioEffectHardLimiter.new())
 	_vo.bus = "VO"
-	_vo.volume_db = -2.0
+	_vo.volume_db = VO_VOLUME_DB
 	add_child(_vo)
 	_vo_dry.bus = "UI"   # the pilot's close-mic plea: NO radio filter by design
-	_vo_dry.volume_db = -4.0
+	_vo_dry.volume_db = VO_DRY_VOLUME_DB
 	add_child(_vo_dry)
 	# The Commander (player) speaks in his own dry close-mic voice on the UI bus —
 	# he's on the field shouting, not a radio narrator, so NO band-pass/overdrive.
@@ -513,6 +544,8 @@ func _finish_boot_audio() -> void:
 		pl.bus = "Music"
 		pl.volume_db = -60.0
 		add_child(pl)
+	_dir.attach(self)
+	_load_hit_bank()
 	_boot_audio_ready = true
 	_start_bed_loops_if_ready()
 
@@ -605,6 +638,30 @@ func _fade_then_stop(ply: AudioStreamPlayer, is_dry: bool) -> void:
 	tw.tween_callback(func() -> void:
 		ply.stop()
 		ply.volume_db = orig_db)
+
+
+func reset_run_speech() -> void:
+	for fade in [_vo_fade_tween, _vo_dry_fade_tween]:
+		if fade != null and fade.is_valid():
+			fade.kill()
+	_vo_fade_tween = null
+	_vo_dry_fade_tween = null
+	_vo.volume_db = VO_VOLUME_DB
+	_vo_dry.volume_db = VO_DRY_VOLUME_DB
+	_vo.stop()
+	_vo.stream = null
+	_cmd.stop()
+	_cmd.stream = null
+	_cmd_next_frame = 0
+	_vo_pending.clear()
+	_sfx_cap_next.clear()
+	_cap_queue.clear()
+	if _startup_line_playing:
+		return
+	_vo_dry.stop()
+	_vo_dry.stream = null
+	_vo_priority = -1
+	clear_captions()
 
 
 func stop_vo() -> void:
@@ -813,8 +870,34 @@ func caption_sfx(key: String) -> void:
 	var f := Engine.get_physics_frames()
 	if f < int(_sfx_cap_next.get(key, 0)):
 		return
+	# SMART never drops a lethal cue: after SMART_EXPOSURES showings only its WORD retires (the HUD
+	# draws the glyph alone, see CuePolicy.caption_form). So every cue is armed, and counted.
+	var cap_key: String = CuePolicy.KEY_CAP + key
 	_sfx_cap_next[key] = f + SFX_CAPTION_GAP
+	if caption_mode != CuePolicy.CAP_OFF:
+		CuePolicy.bump(cue_counts, cap_key)
+		cue_counts_dirty = true
 	_arm_caption(SFX_CAPTIONS[key], null, false, false, CaptionTier.LETHAL)
+
+
+# bracket line -> chip word, so the strip can draw the compact form without the caption queue
+# having to carry a second field through its preempt/resume copies.
+var _cap_chip_by_text: Dictionary = _build_chip_index()
+var _cap_key_by_text: Dictionary = _build_key_index()
+
+
+static func _build_key_index() -> Dictionary:
+	var out := {}
+	for k in SFX_CAPTION_CHIPS:
+		out[SFX_CAPTIONS[k]] = k
+	return out
+
+
+static func _build_chip_index() -> Dictionary:
+	var out := {}
+	for k in SFX_CAPTION_CHIPS:
+		out[SFX_CAPTIONS[k]] = SFX_CAPTION_CHIPS[k]
+	return out
 
 
 func active_caption() -> Dictionary:
@@ -826,8 +909,12 @@ func active_caption() -> Dictionary:
 	var left := _cap_until - Engine.get_physics_frames()
 	if left <= 0:
 		return {"text": "", "radio": false, "fade": 0.0}
-	return {"text": _cap_text, "radio": _cap_radio, "tier": _cap_tier,
+	var out := {"text": _cap_text, "radio": _cap_radio, "tier": _cap_tier,
 		"fade": minf(float(left) / CAPTION_FADE_FRAMES, 1.0)}
+	if not _cap_is_vo and _cap_chip_by_text.has(_cap_text):
+		out["chip"] = _cap_chip_by_text[_cap_text]
+		out["cue"] = _cap_key_by_text[_cap_text]
+	return out
 
 
 func duck_sfx_under_vo(active: bool, base_db: float = 0.0) -> void:
@@ -1050,10 +1137,14 @@ func set_music_intensity(level: float, duck := 0.0, boss := false) -> void:
 	## Equal-power crossfade between the two phase-locked loops; mix by volume
 	## only — never stop/restart one, or the bars lose phase alignment.
 	level = clampf(level, 0.0, 1.0)
+	duck = maxf(duck, _dir.sting_duck())   # audio-director: a stinger ducks the whole score
+	_dir.update(1.0 / 60.0, _dir_pos())
+	_dir.mix(level, duck, boss)
+	var so := _dir.synth_offset_db()   # the synth beds step aside while a stem track owns the score
 	var rate := 0.15 if duck > 0.3 else 0.04
 	var base_db := lerpf(-24.0, -9.0, level) - duck * 16.0
-	var combat_db := base_db + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0)   # a1-15 AUD#7: boss music sits a touch louder
-	var lull_db := base_db + linear_to_db(maxf(0.001, cos(level * PI / 2.0)))
+	var combat_db := base_db + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0) + so   # a1-15 AUD#7: boss music sits a touch louder
+	var lull_db := base_db + linear_to_db(maxf(0.001, cos(level * PI / 2.0))) + so
 	_music.volume_db = lerpf(_music.volume_db, combat_db, rate)
 	# Wind is the lull's voice: -24 dB in dead calm, fading UNDER the drum
 	# floor (-36) at full combat; same duck as the drums.
@@ -1064,8 +1155,8 @@ func set_music_intensity(level: float, duck := 0.0, boss := false) -> void:
 	# sits ~8dB under them and a touch quieter still in the lull, so it reads as the score's
 	# melodic hook riding IN on top of the drums, not a third competing rhythm.
 	var riff_base := lerpf(-32.0, -17.0, level) - duck * 16.0
-	var riff_combat_db := riff_base + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0)
-	var riff_lull_db := riff_base + linear_to_db(maxf(0.001, cos(level * PI / 2.0))) - 6.0
+	var riff_combat_db := riff_base + linear_to_db(maxf(0.001, sin(level * PI / 2.0))) + (2.0 if boss else 0.0) + so
+	var riff_lull_db := riff_base + linear_to_db(maxf(0.001, cos(level * PI / 2.0))) - 6.0 + so
 	_music_riff.volume_db = lerpf(_music_riff.volume_db, riff_combat_db, rate)
 	_music_riff_lull.volume_db = lerpf(_music_riff_lull.volume_db, riff_lull_db, rate)
 	# a1-15 AUD#7: a boss fight drops the pitch FLOOR (heavier kick/low-tom) so it
@@ -1075,6 +1166,64 @@ func set_music_intensity(level: float, duck := 0.0, boss := false) -> void:
 	_music_lull.pitch_scale = p   # identical playback speed = zero drift
 	_music_riff.pitch_scale = p        # same key change as the drums — the riff can never drift sharp/flat
 	_music_riff_lull.pitch_scale = p
+
+
+func music_director() -> MusicDirector:
+	return _dir
+
+
+func stems_active() -> bool:
+	return _dir.stems_on
+
+
+func set_music_track(id: String) -> void:
+	## audio-director: which place the score is for. Changes land on a bar line.
+	_dir.request(id)
+
+
+func play_sting(name: String) -> void:
+	## One-shot stinger on the UI bus; ducks the score and hands it back on the next bar.
+	_dir.play_sting(name)
+
+
+func _dir_pos() -> float:
+	var src := _dir.position_source()
+	if src != null:
+		return src.get_playback_position()
+	return _music.get_playback_position() if _music.playing else -1.0
+
+
+const _HIT_FILES := {
+	"flesh": ["impactPunch_heavy_000", "impactSoft_heavy_000", "impactWood_heavy_000"],
+	"wall": ["impactMetal_medium_000", "impactMetal_medium_002", "impactPlate_medium_000"],
+}
+const HIT_GAP_FRAMES := 3
+
+
+func _load_hit_bank() -> void:
+	## audio-director: the Kenney CC0 impacts (assets/cc0_extra/sfx_impact), 3 variants each.
+	for kind in _HIT_FILES:
+		var files: Array = _HIT_FILES[kind]
+		for v in files.size():
+			var path := "res://assets/cc0_extra/sfx_impact/%s.ogg" % files[v]
+			if ResourceLoader.exists(path):
+				_sounds["hit_%s%d" % [kind, v]] = load(path)
+
+
+func play_hit(kind: String, screen_pos: Vector2, frame := -1) -> bool:
+	## Hit-confirm: a non-lethal bullet landed. Round-robin 3 variants, +-pitch, -14..-18 dB,
+	## positional, and at most one per HIT_GAP_FRAMES so a stream of rounds is a texture, not a roar.
+	if frame < 0:
+		frame = Engine.get_physics_frames()
+	if frame < _hit_next_frame + HIT_GAP_FRAMES or not _hit_rr.has(kind):
+		return false
+	_hit_next_frame = frame
+	var v: int = _hit_rr[kind]
+	_hit_rr[kind] = (v + 1) % 3
+	last_hit_sound = "hit_%s%d" % [kind, v]
+	last_hit_db = randf_range(-18.0, -14.0)
+	play_at(last_hit_sound, screen_pos, last_hit_db, randf_range(0.9, 1.12))
+	return true
 
 
 func set_ambience_march(march: float, near_water := false, in_shop := false) -> void:

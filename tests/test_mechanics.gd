@@ -117,7 +117,9 @@ func test_revive_cost_endless_compounds_and_wave_multiplies() -> void:
 	sim.wave = 25
 	Runner.T.eq(sim.revive_cost(p), 300, "wave 25 is a 6x multiplier on the base")
 	p["deaths"] = 6
-	Runner.T.eq(sim.revive_cost(p), 1800, "deaths compound past 3 (50 * 6 * 6) — no cap in endless")
+	# economy pass: was 1800 (50 * 6 * 6, uncapped). The combined multiplier now caps at
+	# REVIVE_MULT_CAP (8x), so deaths still compound past 3 but only up to 400.
+	Runner.T.eq(sim.revive_cost(p), 50 * SimWorld.REVIVE_MULT_CAP, "deaths compound past 3 until the 8x cap (was 1800 uncapped)")
 	# Campaign is untouched: the 3-death soft cap still guards the checkpointed run.
 	var camp := SimWorld.new(1, 2, "campaign")
 	var cp := camp.players[0]
@@ -133,7 +135,9 @@ func test_endless_death_spiral_reaches_the_wipe() -> void:
 	sim.wave = 20
 	var p := sim.players[0]
 	p["deaths"] = 5
-	sim.war_chest = 600   # a healthy late chest...
+	# economy pass: the price caps at 8x (solo 200 here, was 600 at wave 20 d5), so the chest
+	# that "cannot cover the body" is now under 200 rather than under 600.
+	sim.war_chest = 150
 	Runner.T.ok(sim.war_chest < sim.revive_cost(p),
 		"...still cannot cover the 6th body at wave 20 (%d)" % sim.revive_cost(p))
 	sim._kill_player(p)
@@ -583,6 +587,10 @@ func test_technical_does_not_rev_out_of_charge_range() -> void:
 	# ignore telegraphs. And the tell itself must clear the 24t reaction floor.
 	Runner.T.ok(SimWorld.TECHNICAL_REV_TICKS >= 24,
 		"the rev clears the 24-tick reaction floor the rest of the game pins")
+	Runner.T.ok(SimWorld.RIFLEMAN_WINDUP_TICKS >= 24,
+		"the rifleman's tell -- the most-fired telegraph in the game -- clears the same floor")
+	Runner.T.ok(SimWorld.new(1, 1)._windup_for("rusher") >= 24,
+		"the flashbang re-arm restores the rifleman to a tell that clears the floor")
 	Runner.T.eq(SimWorld.TECHNICAL_CHARGE_RANGE,
 		SimWorld.TECHNICAL_CHARGE_TICKS * SimWorld.TECHNICAL_SPEED,
 		"the gate is the charge's own reach, not a magic number")
@@ -902,6 +910,7 @@ func test_endless_pilot_is_catchable_from_the_band_bottom() -> void:
 	sim._start_wave()     # wave 5: fields the milestone miniboss (gate_y = camera_top + 90)
 	var boss := sim.endless_boss
 	Runner.T.ok(not boss.is_empty(), "wave 5 fields the endless miniboss")
+	boss["phase_t"] = 0   # landed: an approaching gunship cannot be killed (test_endless_variety)
 	sim._damage_boss(boss, boss["hp"])
 	# This is a pure pilot-speed footrace. Purchased/world sandbags are now
 	# truthful player collision, so remove the authored arena maze just as the

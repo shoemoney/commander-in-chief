@@ -26,6 +26,11 @@
 set -u
 
 GODOT=${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}
+# The default above is the macOS app bundle. On Linux (dev box, CI) Godot is a plain
+# binary on PATH, so fall back to that rather than failing with "No such file".
+if [ ! -x "$GODOT" ] && command -v godot >/dev/null 2>&1; then
+	GODOT=$(command -v godot)
+fi
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 # `pwd -P` is load-bearing, not tidiness: macOS $TMPDIR ends in a slash, so a raw
@@ -52,6 +57,14 @@ status=${PIPESTATUS[0]}
 if [ -z "$(find "$RUN_HOME" -type d -name logs -print -quit 2>/dev/null)" ]; then
 	echo "run_tests.sh: FAILED to isolate user:// — no logs under the private HOME ($RUN_HOME)." >&2
 	echo "run_tests.sh: the run used the SHARED user:// dir; treat its result as void." >&2
+	exit 1
+fi
+
+# Script parse/runtime failures may occur before the test runner installs its
+# gate. Their exit code can still be zero; stdout is the final fail-closed seam.
+if grep -qE 'SCRIPT ERROR|Parse Error|Compile Error' "$RUN_LOG"; then
+	echo "run_tests.sh: script error diagnostics on stdout -- execution was incomplete." >&2
+	grep -E 'SCRIPT ERROR|Parse Error|Compile Error' "$RUN_LOG" >&2
 	exit 1
 fi
 

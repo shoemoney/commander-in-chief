@@ -13,6 +13,21 @@ const Runner := preload("res://tests/run_tests.gd")
 const MockSteam := preload("res://tests/mock_steam_singleton.gd")
 
 
+class ScoreDetailsMock extends MockSteam:
+	var upload_calls: Array[Dictionary] = []
+
+	func uploadLeaderboardScore(score: int, keep_best: bool = true,
+			details: PackedInt32Array = PackedInt32Array(), handle: int = 0) -> void:
+		super.uploadLeaderboardScore(score, keep_best, details, handle)
+		upload_calls.append({"score": score, "keep_best": keep_best,
+			"details": details.duplicate(), "handle": handle})
+
+
+func _score_context(tags: Array[String] = [], players := 1, hard := false) -> Dictionary:
+	return {"player_count": players, "hard": hard, "assist_tags": tags,
+		"seed": 0xc0ffee, "ticks": 120}
+
+
 # Stash the dev's real achievement cache aside so this test's writes can
 # never touch it (mirrors the SAVE_PATH stash/restore pattern test_menu_layout
 # uses for MainScript.SAVE_PATH). GDScript has no try/finally, so like every
@@ -487,6 +502,213 @@ func test_mock_steam_leaderboard_not_found_clears_busy() -> void:
 	Runner.T.eq(mock.uploaded_scores.size(), 0, "no score is uploaded when the leaderboard isn't found")
 	Engine.unregister_singleton("Steam")
 	_unstash(stash)
+
+
+func test_legacy_score_upload_keeps_its_board_and_empty_details() -> void:
+	var stash := _stash()
+	var mock := ScoreDetailsMock.new()
+	Engine.register_singleton("Steam", mock)
+	var bridge := SteamBridge.new()
+	bridge.upload_score("campaign", 4200)
+	Runner.T.eq(mock.find_calls, [["scores_campaign", 2, 1]], "two-argument callers retain the legacy mode board")
+	Runner.T.eq(mock.upload_calls.size(), 0, "legacy upload waits for the actual find callback")
+	mock.fire_signal("leaderboard_find_result", [77, 1])
+	Runner.T.eq(mock.upload_calls, [{"score": 4200, "keep_best": true,
+		"details": PackedInt32Array(), "handle": 77}], "legacy callback retains empty typed details")
+	mock.fire_signal("leaderboard_score_uploaded", [true, 77, {}])
+	Runner.T.ok(not bridge._lb_busy, "legacy success callback permits the next score")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_context_score_boards_partition_mode_seats_hard_and_assists() -> void:
+	var names := {}
+	for mode in ["campaign", "arcade", "endless", "boss_rush", "daily"]:
+		for players in [1, 2]:
+			for hard in [false, true]:
+				for assisted in [false, true]:
+					var tags: Array[String] = []
+					if assisted:
+						tags.append("slow_mode")
+					var identity := SteamBridge.score_identity(mode, _score_context(tags, players, hard))
+					var name := String(identity["name"])
+					Runner.T.ok(not names.has(name), "every contextual ranking partition has a distinct board")
+					Runner.T.ok(name.begins_with("scores_v2_%s_p%d_" % [mode, players]), "board labels its mode and seats")
+					Runner.T.ok(name.ends_with("_%s_%s" % ["hard" if hard else "standard",
+						"assisted" if assisted else "unassisted"]), "board labels difficulty and assistance")
+					names[name] = true
+	Runner.T.eq(names.size(), 40, "all five modes have eight independent contextual boards")
+	Runner.T.ok(not names.has("scores_campaign"), "new production rankings do not reuse an unpartitioned legacy board")
+
+
+func test_score_details_assist_bits_are_complete_and_stable() -> void:
+	var expected := {"vest": 1, "single_stick_p1": 2, "single_stick_p2": 4,
+		"classic_aim_p1": 8, "classic_aim_p2": 16, "aim_low": 32, "aim_high": 64,
+		"toggle_grenade": 128, "toggle_roll": 256, "toggle_interact": 512,
+		"toggle_revive": 1024, "toggle_buy": 2048, "slow_mode": 4096}
+	Runner.T.eq(SteamBridge.ASSIST_BITS, expected, "published assist bits retain their meaning")
+	var all_tags: Array[String] = []
+	for tag in expected:
+		all_tags.append(tag)
+		var identity := SteamBridge.score_identity("campaign", _score_context([tag]))
+		Runner.T.eq(identity["details"][3], expected[tag], "each assist occupies its stable detail bit")
+	var together := SteamBridge.score_identity("campaign", _score_context(all_tags))
+	Runner.T.eq(together["details"][3], 8191, "all current assistance settings survive the full bitmask")
+	var duplicate := SteamBridge.score_identity("campaign", _score_context(["slow_mode", "slow_mode", "vest"]))
+	Runner.T.eq(duplicate["details"][3], 4097, "duplicate tag order cannot double count assistance")
+
+
+func test_score_details_preserve_full_integer_seed_and_tick_words() -> void:
+	var context := _score_context([], 2, true)
+	context["seed"] = 0x12345678ffffffff
+	context["ticks"] = 0x23456789ffffffff
+	var identity := SteamBridge.score_identity("arcade", context)
+	Runner.T.eq(identity["details"], PackedInt32Array([1, 2, 1, 0, -1, 0x12345678, -1, 0x23456789]),
+		"details store schema, seats, difficulty, mask and both signed 32-bit words of each integer")
+	context["seed"] = -1
+	Runner.T.eq(SteamBridge.score_identity("arcade", context)["details"].slice(4, 6),
+		PackedInt32Array([-1, -1]), "signed seed bit pattern is preserved without narrowing")
+
+
+func test_malformed_context_cannot_fall_back_to_a_normal_board() -> void:
+	for replacement in [{"player_count": 3}, {"player_count": "1"}, {"hard": 1},
+			{"assist_tags": ["unknown_assist"]}, {"assist_tags": [7]}, {"seed": 1.5}, {"ticks": -1}]:
+		var context := _score_context()
+		context.merge(replacement, true)
+		Runner.T.ok(SteamBridge.score_identity("campaign", context).is_empty(),
+			"ambiguous context is rejected before it can mix rankings")
+	Runner.T.ok(SteamBridge.score_identity("unknown_mode", _score_context()).is_empty(), "context mode must be a supported ranking")
+	Runner.T.ok(SteamBridge.score_identity("campaign", {"hard": false}).is_empty(), "partial context cannot silently default to normal")
+
+
+func test_assisted_context_uploads_after_find_with_its_full_typed_details() -> void:
+	var stash := _stash()
+	var mock := ScoreDetailsMock.new()
+	Engine.register_singleton("Steam", mock)
+	var bridge := SteamBridge.new()
+	bridge.upload_score("boss_rush", 7300, _score_context(["vest", "aim_high", "slow_mode"], 2, true))
+	Runner.T.eq(mock.find_calls, [["scores_v2_boss_rush_p2_hard_assisted", 2, 1]], "assisted run requests its labeled eligible board")
+	Runner.T.eq(mock.upload_calls.size(), 0, "assisted score cannot upload before the find callback")
+	mock.fire_signal("leaderboard_find_result", [92, 1])
+	Runner.T.eq(mock.upload_calls, [{"score": 7300, "keep_best": true,
+		"details": PackedInt32Array([1, 2, 1, 4161, 0xc0ffee, 0, 120, 0]), "handle": 92}],
+		"native-shaped callback uploads the exact assisted score and details")
+	Runner.T.ok(bridge._lb_busy, "pending upload remains busy until its result callback")
+	mock.fire_signal("leaderboard_score_uploaded", [true, 92, {"score": 7300}])
+	Runner.T.ok(not bridge._lb_busy, "three-argument result callback finishes the contextual upload")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_pending_score_context_is_captured_before_async_callback() -> void:
+	var stash := _stash()
+	var mock := ScoreDetailsMock.new()
+	Engine.register_singleton("Steam", mock)
+	var bridge := SteamBridge.new()
+	var context := _score_context(["slow_mode"])
+	bridge.upload_score("campaign", 200, context)
+	context["assist_tags"].clear()
+	context["player_count"] = 2
+	context["seed"] = 7
+	mock.fire_signal("leaderboard_find_result", [10, 1])
+	Runner.T.eq(mock.find_calls[0][0], "scores_v2_campaign_p1_standard_assisted", "caller mutation cannot change the requested board")
+	Runner.T.eq(mock.upload_calls[0]["details"], PackedInt32Array([1, 1, 0, 4096, 0xc0ffee, 0, 120, 0]),
+		"caller mutation cannot change the pending detail identity")
+	mock.fire_signal("leaderboard_score_uploaded", [true, 10, {}])
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_busy_upload_cannot_replace_another_board_context() -> void:
+	var stash := _stash()
+	var mock := ScoreDetailsMock.new()
+	Engine.register_singleton("Steam", mock)
+	var bridge := SteamBridge.new()
+	bridge.upload_score("campaign", 100, _score_context())
+	bridge.upload_score("endless", 999, _score_context(["slow_mode"], 2, true))
+	Runner.T.eq(mock.find_calls, [["scores_v2_campaign_p1_standard_unassisted", 2, 1]], "busy guard retains the first board lookup")
+	mock.fire_signal("leaderboard_find_result", [15, 1])
+	Runner.T.eq(mock.upload_calls[0]["score"], 100, "busy caller cannot overwrite the pending score")
+	Runner.T.eq(mock.upload_calls[0]["details"], PackedInt32Array([1, 1, 0, 0, 0xc0ffee, 0, 120, 0]),
+		"busy caller cannot overwrite the pending score identity")
+	mock.fire_signal("leaderboard_score_uploaded", [true, 15, {}])
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_failed_context_find_allows_a_fresh_board_identity() -> void:
+	var stash := _stash()
+	var mock := ScoreDetailsMock.new()
+	Engine.register_singleton("Steam", mock)
+	var bridge := SteamBridge.new()
+	bridge.upload_score("campaign", 100, _score_context())
+	mock.fire_signal("leaderboard_find_result", [0, 0])
+	Runner.T.eq(mock.upload_calls.size(), 0, "failed lookup does not post the first score")
+	bridge.upload_score("endless", 999, _score_context(["toggle_roll"], 2, true))
+	Runner.T.eq(mock.find_calls[1][0], "scores_v2_endless_p2_hard_assisted", "next request selects its own contextual board")
+	mock.fire_signal("leaderboard_find_result", [16, 1])
+	Runner.T.eq(mock.upload_calls[0]["details"], PackedInt32Array([1, 2, 1, 256, 0xc0ffee, 0, 120, 0]),
+		"next request owns its exact metadata after the failed lookup")
+	mock.fire_signal("leaderboard_score_uploaded", [true, 16, {}])
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_stale_callbacks_cannot_route_a_new_score_to_the_old_board() -> void:
+	var stash := _stash()
+	var mock := ScoreDetailsMock.new()
+	Engine.register_singleton("Steam", mock)
+	var bridge := SteamBridge.new()
+	bridge.upload_score("campaign", 100, _score_context())
+	mock.fire_signal("leaderboard_find_result", [77, 1])
+	mock.fire_signal("leaderboard_score_uploaded", [true, 77, {}])
+	bridge.upload_score("endless", 999, _score_context(["slow_mode"], 2, true))
+	mock.fire_signal("leaderboard_find_result", [77, 1])
+	Runner.T.eq(mock.upload_calls.size(), 1, "stale campaign handle cannot receive the pending endless score")
+	Runner.T.ok(bridge._lb_busy, "unrelated handle leaves the correct pending identity waiting")
+	mock.fire_signal("leaderboard_score_uploaded", [true, 77, {}])
+	Runner.T.ok(bridge._lb_busy, "old upload result cannot finish the new pending find")
+	mock.fire_signal("leaderboard_find_result", [88, 1])
+	Runner.T.eq(mock.upload_calls[1], {"score": 999, "keep_best": true,
+		"details": PackedInt32Array([1, 2, 1, 4096, 0xc0ffee, 0, 120, 0]), "handle": 88},
+		"matching new handle receives exactly the captured endless score and assist metadata")
+	mock.fire_signal("leaderboard_find_result", [88, 1])
+	Runner.T.eq(mock.upload_calls.size(), 2, "duplicate matching find cannot repeat an in-flight upload")
+	mock.fire_signal("leaderboard_score_uploaded", [true, 77, {}])
+	Runner.T.ok(bridge._lb_busy, "foreign upload result cannot finish the new handle")
+	mock.fire_signal("leaderboard_score_uploaded", [true, 88, {}])
+	Runner.T.ok(not bridge._lb_busy, "matching result completes the new upload")
+	mock.fire_signal("leaderboard_find_result", [77, 1])
+	Runner.T.eq(mock.upload_calls.size(), 2, "idle late find cannot upload a stale score")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_legacy_upload_also_rejects_an_unrelated_board_name() -> void:
+	var stash := _stash()
+	var mock := ScoreDetailsMock.new()
+	mock.leaderboard_names[12] = "scores_endless"
+	Engine.register_singleton("Steam", mock)
+	var bridge := SteamBridge.new()
+	bridge.upload_score("campaign", 250)
+	mock.fire_signal("leaderboard_find_result", [12, 1])
+	Runner.T.eq(mock.upload_calls.size(), 0, "legacy campaign score cannot post to an unrelated endless handle")
+	Runner.T.ok(bridge._lb_busy, "legacy upload waits for its correctly named board")
+	mock.fire_signal("leaderboard_find_result", [13, 1])
+	Runner.T.eq(mock.upload_calls[0], {"score": 250, "keep_best": true,
+		"details": PackedInt32Array(), "handle": 13}, "matching legacy board preserves the two-argument contract")
+	mock.fire_signal("leaderboard_score_uploaded", [true, 13, {}])
+	Runner.T.ok(not bridge._lb_busy, "legacy correct result finishes after the unrelated callback")
+	Engine.unregister_singleton("Steam")
+	_unstash(stash)
+
+
+func test_context_upload_is_inert_without_a_real_or_mock_steam_singleton() -> void:
+	Runner.T.ok(not Engine.has_singleton("Steam"), "offline contextual upload starts without a Steam singleton")
+	var bridge := SteamBridge.new()
+	bridge.upload_score("campaign", 500, _score_context(["slow_mode"]))
+	Runner.T.ok(not bridge._lb_busy, "offline context never starts an external lookup")
+	Runner.T.eq(bridge._pending_score, 0, "offline context never changes an in-flight external score")
 
 
 func test_mock_steam_button_and_trigger_actions_resolve_both_players() -> void:

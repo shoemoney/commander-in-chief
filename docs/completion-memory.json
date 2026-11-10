@@ -1,0 +1,1447 @@
+{
+  "scope": "Completed: three hours of accelerated Endless simulation with debug auto-restoration. All ticks advanced, entity bounds passed, and the process exited without errors or leaks. Godot allocations exclude renderer/driver memory and are not total process RSS.",
+  "log_sha256": "1a226d2b589cce4a4e195af270b2437b7b0b4d74943395e3a1b3c6724bef70f2",
+  "sim_sha256": "d2413b946e6cb38395bb95cf3ac7d6a952de9ebe8f30e44ace976beaa765c4ea",
+  "samples": [
+    {
+      "bullets": 6,
+      "enemies": 0,
+      "sandbags": 22,
+      "static_bytes": 28806239,
+      "tick": 3600,
+      "wave": 4
+    },
+    {
+      "bullets": 4,
+      "enemies": 0,
+      "sandbags": 4,
+      "static_bytes": 28802695,
+      "tick": 7200,
+      "wave": 5
+    },
+    {
+      "bullets": 7,
+      "enemies": 0,
+      "sandbags": 13,
+      "static_bytes": 28810239,
+      "tick": 10800,
+      "wave": 5
+    },
+    {
+      "bullets": 11,
+      "enemies": 1,
+      "sandbags": 5,
+      "static_bytes": 28809747,
+      "tick": 14400,
+      "wave": 9
+    },
+    {
+      "bullets": 15,
+      "enemies": 6,
+      "sandbags": 5,
+      "static_bytes": 28825063,
+      "tick": 18000,
+      "wave": 10
+    },
+    {
+      "bullets": 8,
+      "enemies": 3,
+      "sandbags": 3,
+      "static_bytes": 28812563,
+      "tick": 21600,
+      "wave": 10
+    },
+    {
+      "bullets": 9,
+      "enemies": 14,
+      "sandbags": 1,
+      "static_bytes": 28829083,
+      "tick": 25200,
+      "wave": 11
+    },
+    {
+      "bullets": 20,
+      "enemies": 16,
+      "sandbags": 4,
+      "static_bytes": 28848027,
+      "tick": 28800,
+      "wave": 13
+    },
+    {
+      "bullets": 9,
+      "enemies": 9,
+      "sandbags": 1,
+      "static_bytes": 28826939,
+      "tick": 32400,
+      "wave": 13
+    },
+    {
+      "bullets": 5,
+      "enemies": 14,
+      "sandbags": 1,
+      "static_bytes": 28829515,
+      "tick": 36000,
+      "wave": 14
+    },
+    {
+      "bullets": 6,
+      "enemies": 11,
+      "sandbags": 5,
+      "static_bytes": 28836031,
+      "tick": 39600,
+      "wave": 15
+    },
+    {
+      "bullets": 3,
+      "enemies": 1,
+      "sandbags": 4,
+      "static_bytes": 28822575,
+      "tick": 43200,
+      "wave": 15
+    },
+    {
+      "bullets": 6,
+      "enemies": 0,
+      "sandbags": 4,
+      "static_bytes": 28820007,
+      "tick": 46800,
+      "wave": 15
+    },
+    {
+      "bullets": 4,
+      "enemies": 9,
+      "sandbags": 2,
+      "static_bytes": 28849871,
+      "tick": 50400,
+      "wave": 17
+    },
+    {
+      "bullets": 11,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28832447,
+      "tick": 54000,
+      "wave": 17
+    },
+    {
+      "bullets": 13,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28831855,
+      "tick": 57600,
+      "wave": 17
+    },
+    {
+      "bullets": 12,
+      "enemies": 29,
+      "sandbags": 1,
+      "static_bytes": 28861195,
+      "tick": 61200,
+      "wave": 18
+    },
+    {
+      "bullets": 10,
+      "enemies": 23,
+      "sandbags": 1,
+      "static_bytes": 28869447,
+      "tick": 64800,
+      "wave": 19
+    },
+    {
+      "bullets": 9,
+      "enemies": 4,
+      "sandbags": 1,
+      "static_bytes": 28838847,
+      "tick": 68400,
+      "wave": 19
+    },
+    {
+      "bullets": 7,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28832995,
+      "tick": 72000,
+      "wave": 20
+    },
+    {
+      "bullets": 5,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28819415,
+      "tick": 75600,
+      "wave": 20
+    },
+    {
+      "bullets": 5,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28815283,
+      "tick": 79200,
+      "wave": 20
+    },
+    {
+      "bullets": 16,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28821827,
+      "tick": 82800,
+      "wave": 20
+    },
+    {
+      "bullets": 7,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28815907,
+      "tick": 86400,
+      "wave": 20
+    },
+    {
+      "bullets": 6,
+      "enemies": 9,
+      "sandbags": 2,
+      "static_bytes": 28831647,
+      "tick": 90000,
+      "wave": 21
+    },
+    {
+      "bullets": 10,
+      "enemies": 11,
+      "sandbags": 1,
+      "static_bytes": 28845203,
+      "tick": 93600,
+      "wave": 22
+    },
+    {
+      "bullets": 8,
+      "enemies": 9,
+      "sandbags": 1,
+      "static_bytes": 28837547,
+      "tick": 97200,
+      "wave": 23
+    },
+    {
+      "bullets": 8,
+      "enemies": 1,
+      "sandbags": 1,
+      "static_bytes": 28827387,
+      "tick": 100800,
+      "wave": 23
+    },
+    {
+      "bullets": 13,
+      "enemies": 16,
+      "sandbags": 2,
+      "static_bytes": 28855687,
+      "tick": 104400,
+      "wave": 24
+    },
+    {
+      "bullets": 16,
+      "enemies": 6,
+      "sandbags": 1,
+      "static_bytes": 28855335,
+      "tick": 108000,
+      "wave": 25
+    },
+    {
+      "bullets": 6,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28831391,
+      "tick": 111600,
+      "wave": 25
+    },
+    {
+      "bullets": 12,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28834799,
+      "tick": 115200,
+      "wave": 25
+    },
+    {
+      "bullets": 9,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28828823,
+      "tick": 118800,
+      "wave": 25
+    },
+    {
+      "bullets": 18,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28832527,
+      "tick": 122400,
+      "wave": 25
+    },
+    {
+      "bullets": 23,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28833975,
+      "tick": 126000,
+      "wave": 25
+    },
+    {
+      "bullets": 3,
+      "enemies": 49,
+      "sandbags": 0,
+      "static_bytes": 28876231,
+      "tick": 129600,
+      "wave": 26
+    },
+    {
+      "bullets": 12,
+      "enemies": 8,
+      "sandbags": 0,
+      "static_bytes": 28841579,
+      "tick": 133200,
+      "wave": 26
+    },
+    {
+      "bullets": 6,
+      "enemies": 2,
+      "sandbags": 1,
+      "static_bytes": 28831207,
+      "tick": 136800,
+      "wave": 27
+    },
+    {
+      "bullets": 6,
+      "enemies": 9,
+      "sandbags": 1,
+      "static_bytes": 28851843,
+      "tick": 140400,
+      "wave": 29
+    },
+    {
+      "bullets": 6,
+      "enemies": 1,
+      "sandbags": 1,
+      "static_bytes": 28834259,
+      "tick": 144000,
+      "wave": 29
+    },
+    {
+      "bullets": 2,
+      "enemies": 1,
+      "sandbags": 1,
+      "static_bytes": 28830227,
+      "tick": 147600,
+      "wave": 29
+    },
+    {
+      "bullets": 2,
+      "enemies": 1,
+      "sandbags": 1,
+      "static_bytes": 28830259,
+      "tick": 151200,
+      "wave": 29
+    },
+    {
+      "bullets": 7,
+      "enemies": 1,
+      "sandbags": 1,
+      "static_bytes": 28833811,
+      "tick": 154800,
+      "wave": 29
+    },
+    {
+      "bullets": 6,
+      "enemies": 7,
+      "sandbags": 2,
+      "static_bytes": 28845639,
+      "tick": 158400,
+      "wave": 30
+    },
+    {
+      "bullets": 6,
+      "enemies": 2,
+      "sandbags": 2,
+      "static_bytes": 28833759,
+      "tick": 162000,
+      "wave": 30
+    },
+    {
+      "bullets": 9,
+      "enemies": 0,
+      "sandbags": 2,
+      "static_bytes": 28830711,
+      "tick": 165600,
+      "wave": 30
+    },
+    {
+      "bullets": 14,
+      "enemies": 0,
+      "sandbags": 1,
+      "static_bytes": 28834499,
+      "tick": 169200,
+      "wave": 30
+    },
+    {
+      "bullets": 10,
+      "enemies": 0,
+      "sandbags": 1,
+      "static_bytes": 28830467,
+      "tick": 172800,
+      "wave": 30
+    },
+    {
+      "bullets": 3,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28823391,
+      "tick": 176400,
+      "wave": 30
+    },
+    {
+      "bullets": 4,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28823311,
+      "tick": 180000,
+      "wave": 30
+    },
+    {
+      "bullets": 16,
+      "enemies": 30,
+      "sandbags": 0,
+      "static_bytes": 28876583,
+      "tick": 183600,
+      "wave": 31
+    },
+    {
+      "bullets": 6,
+      "enemies": 11,
+      "sandbags": 0,
+      "static_bytes": 28840579,
+      "tick": 187200,
+      "wave": 31
+    },
+    {
+      "bullets": 6,
+      "enemies": 9,
+      "sandbags": 0,
+      "static_bytes": 28838371,
+      "tick": 190800,
+      "wave": 31
+    },
+    {
+      "bullets": 8,
+      "enemies": 9,
+      "sandbags": 0,
+      "static_bytes": 28839311,
+      "tick": 194400,
+      "wave": 31
+    },
+    {
+      "bullets": 5,
+      "enemies": 9,
+      "sandbags": 0,
+      "static_bytes": 28836851,
+      "tick": 198000,
+      "wave": 31
+    },
+    {
+      "bullets": 5,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28828939,
+      "tick": 201600,
+      "wave": 31
+    },
+    {
+      "bullets": 4,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28827023,
+      "tick": 205200,
+      "wave": 31
+    },
+    {
+      "bullets": 7,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28829387,
+      "tick": 208800,
+      "wave": 31
+    },
+    {
+      "bullets": 9,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28832111,
+      "tick": 212400,
+      "wave": 31
+    },
+    {
+      "bullets": 5,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28830747,
+      "tick": 216000,
+      "wave": 31
+    },
+    {
+      "bullets": 5,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28828863,
+      "tick": 219600,
+      "wave": 31
+    },
+    {
+      "bullets": 4,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28828075,
+      "tick": 223200,
+      "wave": 31
+    },
+    {
+      "bullets": 4,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28828171,
+      "tick": 226800,
+      "wave": 31
+    },
+    {
+      "bullets": 5,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28828863,
+      "tick": 230400,
+      "wave": 31
+    },
+    {
+      "bullets": 8,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28827831,
+      "tick": 234000,
+      "wave": 31
+    },
+    {
+      "bullets": 11,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28830291,
+      "tick": 237600,
+      "wave": 31
+    },
+    {
+      "bullets": 7,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28826447,
+      "tick": 241200,
+      "wave": 31
+    },
+    {
+      "bullets": 6,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28826211,
+      "tick": 244800,
+      "wave": 31
+    },
+    {
+      "bullets": 16,
+      "enemies": 28,
+      "sandbags": 0,
+      "static_bytes": 28867315,
+      "tick": 248400,
+      "wave": 32
+    },
+    {
+      "bullets": 11,
+      "enemies": 9,
+      "sandbags": 0,
+      "static_bytes": 28845639,
+      "tick": 252000,
+      "wave": 33
+    },
+    {
+      "bullets": 4,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28825907,
+      "tick": 255600,
+      "wave": 33
+    },
+    {
+      "bullets": 12,
+      "enemies": 51,
+      "sandbags": 0,
+      "static_bytes": 28894635,
+      "tick": 259200,
+      "wave": 34
+    },
+    {
+      "bullets": 4,
+      "enemies": 4,
+      "sandbags": 0,
+      "static_bytes": 28836939,
+      "tick": 262800,
+      "wave": 34
+    },
+    {
+      "bullets": 5,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28830883,
+      "tick": 266400,
+      "wave": 34
+    },
+    {
+      "bullets": 7,
+      "enemies": 29,
+      "sandbags": 0,
+      "static_bytes": 28875039,
+      "tick": 270000,
+      "wave": 35
+    },
+    {
+      "bullets": 13,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28843159,
+      "tick": 273600,
+      "wave": 35
+    },
+    {
+      "bullets": 6,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28834499,
+      "tick": 277200,
+      "wave": 35
+    },
+    {
+      "bullets": 6,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28833339,
+      "tick": 280800,
+      "wave": 35
+    },
+    {
+      "bullets": 3,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28829343,
+      "tick": 284400,
+      "wave": 35
+    },
+    {
+      "bullets": 9,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28835051,
+      "tick": 288000,
+      "wave": 35
+    },
+    {
+      "bullets": 2,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28828399,
+      "tick": 291600,
+      "wave": 35
+    },
+    {
+      "bullets": 6,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28829167,
+      "tick": 295200,
+      "wave": 35
+    },
+    {
+      "bullets": 5,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28826135,
+      "tick": 298800,
+      "wave": 35
+    },
+    {
+      "bullets": 8,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28827999,
+      "tick": 302400,
+      "wave": 35
+    },
+    {
+      "bullets": 3,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28825015,
+      "tick": 306000,
+      "wave": 35
+    },
+    {
+      "bullets": 10,
+      "enemies": 28,
+      "sandbags": 0,
+      "static_bytes": 28857159,
+      "tick": 309600,
+      "wave": 36
+    },
+    {
+      "bullets": 2,
+      "enemies": 10,
+      "sandbags": 0,
+      "static_bytes": 28831475,
+      "tick": 313200,
+      "wave": 36
+    },
+    {
+      "bullets": 3,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28821351,
+      "tick": 316800,
+      "wave": 36
+    },
+    {
+      "bullets": 19,
+      "enemies": 64,
+      "sandbags": 0,
+      "static_bytes": 28920355,
+      "tick": 320400,
+      "wave": 38
+    },
+    {
+      "bullets": 1,
+      "enemies": 20,
+      "sandbags": 0,
+      "static_bytes": 28861699,
+      "tick": 324000,
+      "wave": 38
+    },
+    {
+      "bullets": 9,
+      "enemies": 11,
+      "sandbags": 0,
+      "static_bytes": 28858631,
+      "tick": 327600,
+      "wave": 38
+    },
+    {
+      "bullets": 8,
+      "enemies": 11,
+      "sandbags": 0,
+      "static_bytes": 28856863,
+      "tick": 331200,
+      "wave": 38
+    },
+    {
+      "bullets": 7,
+      "enemies": 7,
+      "sandbags": 0,
+      "static_bytes": 28846591,
+      "tick": 334800,
+      "wave": 38
+    },
+    {
+      "bullets": 4,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28837559,
+      "tick": 338400,
+      "wave": 38
+    },
+    {
+      "bullets": 15,
+      "enemies": 13,
+      "sandbags": 2,
+      "static_bytes": 28865687,
+      "tick": 342000,
+      "wave": 39
+    },
+    {
+      "bullets": 6,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28844819,
+      "tick": 345600,
+      "wave": 39
+    },
+    {
+      "bullets": 8,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28844151,
+      "tick": 349200,
+      "wave": 39
+    },
+    {
+      "bullets": 3,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28840167,
+      "tick": 352800,
+      "wave": 39
+    },
+    {
+      "bullets": 1,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28835395,
+      "tick": 356400,
+      "wave": 39
+    },
+    {
+      "bullets": 7,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28838731,
+      "tick": 360000,
+      "wave": 39
+    },
+    {
+      "bullets": 1,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28832031,
+      "tick": 363600,
+      "wave": 39
+    },
+    {
+      "bullets": 5,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28833443,
+      "tick": 367200,
+      "wave": 39
+    },
+    {
+      "bullets": 4,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28833039,
+      "tick": 370800,
+      "wave": 39
+    },
+    {
+      "bullets": 7,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28835571,
+      "tick": 374400,
+      "wave": 39
+    },
+    {
+      "bullets": 4,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28833039,
+      "tick": 378000,
+      "wave": 39
+    },
+    {
+      "bullets": 4,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28832515,
+      "tick": 381600,
+      "wave": 39
+    },
+    {
+      "bullets": 3,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28831727,
+      "tick": 385200,
+      "wave": 39
+    },
+    {
+      "bullets": 3,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28831607,
+      "tick": 388800,
+      "wave": 39
+    },
+    {
+      "bullets": 3,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28830603,
+      "tick": 392400,
+      "wave": 39
+    },
+    {
+      "bullets": 3,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28830603,
+      "tick": 396000,
+      "wave": 39
+    },
+    {
+      "bullets": 2,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28830435,
+      "tick": 399600,
+      "wave": 39
+    },
+    {
+      "bullets": 4,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28833183,
+      "tick": 403200,
+      "wave": 39
+    },
+    {
+      "bullets": 5,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28833303,
+      "tick": 406800,
+      "wave": 39
+    },
+    {
+      "bullets": 3,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28831607,
+      "tick": 410400,
+      "wave": 39
+    },
+    {
+      "bullets": 2,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28831535,
+      "tick": 414000,
+      "wave": 39
+    },
+    {
+      "bullets": 5,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28833303,
+      "tick": 417600,
+      "wave": 39
+    },
+    {
+      "bullets": 8,
+      "enemies": 10,
+      "sandbags": 2,
+      "static_bytes": 28858771,
+      "tick": 421200,
+      "wave": 40
+    },
+    {
+      "bullets": 8,
+      "enemies": 4,
+      "sandbags": 2,
+      "static_bytes": 28845571,
+      "tick": 424800,
+      "wave": 40
+    },
+    {
+      "bullets": 4,
+      "enemies": 1,
+      "sandbags": 2,
+      "static_bytes": 28837035,
+      "tick": 428400,
+      "wave": 40
+    },
+    {
+      "bullets": 7,
+      "enemies": 0,
+      "sandbags": 2,
+      "static_bytes": 28834555,
+      "tick": 432000,
+      "wave": 40
+    },
+    {
+      "bullets": 4,
+      "enemies": 0,
+      "sandbags": 2,
+      "static_bytes": 28826987,
+      "tick": 435600,
+      "wave": 40
+    },
+    {
+      "bullets": 6,
+      "enemies": 0,
+      "sandbags": 1,
+      "static_bytes": 28826911,
+      "tick": 439200,
+      "wave": 40
+    },
+    {
+      "bullets": 2,
+      "enemies": 0,
+      "sandbags": 1,
+      "static_bytes": 28823163,
+      "tick": 442800,
+      "wave": 40
+    },
+    {
+      "bullets": 5,
+      "enemies": 0,
+      "sandbags": 1,
+      "static_bytes": 28826451,
+      "tick": 446400,
+      "wave": 40
+    },
+    {
+      "bullets": 3,
+      "enemies": 0,
+      "sandbags": 1,
+      "static_bytes": 28823283,
+      "tick": 450000,
+      "wave": 40
+    },
+    {
+      "bullets": 5,
+      "enemies": 0,
+      "sandbags": 1,
+      "static_bytes": 28825599,
+      "tick": 453600,
+      "wave": 40
+    },
+    {
+      "bullets": 7,
+      "enemies": 12,
+      "sandbags": 1,
+      "static_bytes": 28850959,
+      "tick": 457200,
+      "wave": 41
+    },
+    {
+      "bullets": 3,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28829875,
+      "tick": 460800,
+      "wave": 41
+    },
+    {
+      "bullets": 4,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28830451,
+      "tick": 464400,
+      "wave": 41
+    },
+    {
+      "bullets": 13,
+      "enemies": 48,
+      "sandbags": 1,
+      "static_bytes": 28892159,
+      "tick": 468000,
+      "wave": 42
+    },
+    {
+      "bullets": 4,
+      "enemies": 4,
+      "sandbags": 0,
+      "static_bytes": 28844015,
+      "tick": 471600,
+      "wave": 42
+    },
+    {
+      "bullets": 4,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28839159,
+      "tick": 475200,
+      "wave": 42
+    },
+    {
+      "bullets": 6,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28840691,
+      "tick": 478800,
+      "wave": 42
+    },
+    {
+      "bullets": 2,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28837443,
+      "tick": 482400,
+      "wave": 42
+    },
+    {
+      "bullets": 2,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28838563,
+      "tick": 486000,
+      "wave": 42
+    },
+    {
+      "bullets": 2,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28834007,
+      "tick": 489600,
+      "wave": 42
+    },
+    {
+      "bullets": 5,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28835199,
+      "tick": 493200,
+      "wave": 42
+    },
+    {
+      "bullets": 16,
+      "enemies": 55,
+      "sandbags": 0,
+      "static_bytes": 28904287,
+      "tick": 496800,
+      "wave": 43
+    },
+    {
+      "bullets": 4,
+      "enemies": 37,
+      "sandbags": 0,
+      "static_bytes": 28880967,
+      "tick": 500400,
+      "wave": 43
+    },
+    {
+      "bullets": 5,
+      "enemies": 37,
+      "sandbags": 0,
+      "static_bytes": 28881747,
+      "tick": 504000,
+      "wave": 43
+    },
+    {
+      "bullets": 6,
+      "enemies": 21,
+      "sandbags": 0,
+      "static_bytes": 28866843,
+      "tick": 507600,
+      "wave": 43
+    },
+    {
+      "bullets": 2,
+      "enemies": 19,
+      "sandbags": 0,
+      "static_bytes": 28866859,
+      "tick": 511200,
+      "wave": 43
+    },
+    {
+      "bullets": 6,
+      "enemies": 17,
+      "sandbags": 0,
+      "static_bytes": 28858323,
+      "tick": 514800,
+      "wave": 43
+    },
+    {
+      "bullets": 3,
+      "enemies": 17,
+      "sandbags": 0,
+      "static_bytes": 28855863,
+      "tick": 518400,
+      "wave": 43
+    },
+    {
+      "bullets": 5,
+      "enemies": 16,
+      "sandbags": 0,
+      "static_bytes": 28853959,
+      "tick": 522000,
+      "wave": 43
+    },
+    {
+      "bullets": 5,
+      "enemies": 9,
+      "sandbags": 0,
+      "static_bytes": 28845119,
+      "tick": 525600,
+      "wave": 43
+    },
+    {
+      "bullets": 1,
+      "enemies": 8,
+      "sandbags": 0,
+      "static_bytes": 28838787,
+      "tick": 529200,
+      "wave": 43
+    },
+    {
+      "bullets": 5,
+      "enemies": 8,
+      "sandbags": 0,
+      "static_bytes": 28842123,
+      "tick": 532800,
+      "wave": 43
+    },
+    {
+      "bullets": 3,
+      "enemies": 8,
+      "sandbags": 0,
+      "static_bytes": 28841151,
+      "tick": 536400,
+      "wave": 43
+    },
+    {
+      "bullets": 3,
+      "enemies": 5,
+      "sandbags": 0,
+      "static_bytes": 28839247,
+      "tick": 540000,
+      "wave": 43
+    },
+    {
+      "bullets": 10,
+      "enemies": 42,
+      "sandbags": 0,
+      "static_bytes": 28900363,
+      "tick": 543600,
+      "wave": 44
+    },
+    {
+      "bullets": 6,
+      "enemies": 9,
+      "sandbags": 0,
+      "static_bytes": 28850043,
+      "tick": 547200,
+      "wave": 44
+    },
+    {
+      "bullets": 22,
+      "enemies": 30,
+      "sandbags": 3,
+      "static_bytes": 28884427,
+      "tick": 550800,
+      "wave": 45
+    },
+    {
+      "bullets": 20,
+      "enemies": 5,
+      "sandbags": 3,
+      "static_bytes": 28851919,
+      "tick": 554400,
+      "wave": 45
+    },
+    {
+      "bullets": 13,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28839771,
+      "tick": 558000,
+      "wave": 45
+    },
+    {
+      "bullets": 7,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28834399,
+      "tick": 561600,
+      "wave": 45
+    },
+    {
+      "bullets": 16,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28838055,
+      "tick": 565200,
+      "wave": 45
+    },
+    {
+      "bullets": 7,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28831147,
+      "tick": 568800,
+      "wave": 45
+    },
+    {
+      "bullets": 14,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28835979,
+      "tick": 572400,
+      "wave": 45
+    },
+    {
+      "bullets": 9,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28832135,
+      "tick": 576000,
+      "wave": 45
+    },
+    {
+      "bullets": 9,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28832031,
+      "tick": 579600,
+      "wave": 45
+    },
+    {
+      "bullets": 10,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28831871,
+      "tick": 583200,
+      "wave": 45
+    },
+    {
+      "bullets": 9,
+      "enemies": 16,
+      "sandbags": 0,
+      "static_bytes": 28854455,
+      "tick": 586800,
+      "wave": 46
+    },
+    {
+      "bullets": 7,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28839351,
+      "tick": 590400,
+      "wave": 46
+    },
+    {
+      "bullets": 10,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28838843,
+      "tick": 594000,
+      "wave": 46
+    },
+    {
+      "bullets": 8,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28837267,
+      "tick": 597600,
+      "wave": 46
+    },
+    {
+      "bullets": 10,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28838843,
+      "tick": 601200,
+      "wave": 46
+    },
+    {
+      "bullets": 10,
+      "enemies": 35,
+      "sandbags": 0,
+      "static_bytes": 28882303,
+      "tick": 604800,
+      "wave": 47
+    },
+    {
+      "bullets": 12,
+      "enemies": 6,
+      "sandbags": 0,
+      "static_bytes": 28853027,
+      "tick": 608400,
+      "wave": 47
+    },
+    {
+      "bullets": 9,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28845471,
+      "tick": 612000,
+      "wave": 47
+    },
+    {
+      "bullets": 5,
+      "enemies": 5,
+      "sandbags": 3,
+      "static_bytes": 28848367,
+      "tick": 615600,
+      "wave": 48
+    },
+    {
+      "bullets": 5,
+      "enemies": 0,
+      "sandbags": 13,
+      "static_bytes": 28851403,
+      "tick": 619200,
+      "wave": 48
+    },
+    {
+      "bullets": 7,
+      "enemies": 3,
+      "sandbags": 0,
+      "static_bytes": 28844835,
+      "tick": 622800,
+      "wave": 49
+    },
+    {
+      "bullets": 5,
+      "enemies": 2,
+      "sandbags": 0,
+      "static_bytes": 28851847,
+      "tick": 626400,
+      "wave": 50
+    },
+    {
+      "bullets": 5,
+      "enemies": 1,
+      "sandbags": 0,
+      "static_bytes": 28847147,
+      "tick": 630000,
+      "wave": 50
+    },
+    {
+      "bullets": 8,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28842387,
+      "tick": 633600,
+      "wave": 50
+    },
+    {
+      "bullets": 2,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28834751,
+      "tick": 637200,
+      "wave": 50
+    },
+    {
+      "bullets": 6,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28837427,
+      "tick": 640800,
+      "wave": 50
+    },
+    {
+      "bullets": 7,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28836427,
+      "tick": 644400,
+      "wave": 50
+    },
+    {
+      "bullets": 7,
+      "enemies": 0,
+      "sandbags": 0,
+      "static_bytes": 28834183,
+      "tick": 648000,
+      "wave": 50
+    }
+  ]
+}

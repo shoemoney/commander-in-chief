@@ -152,6 +152,11 @@ func _run() -> void:
 	# freeze). Early game is near-static: ~170 px of HUD motion at frame 120.
 	for _i in 150:
 		await process_frame
+	# The per-sector weather (src/view/atmosphere.gd) drifts on the engine's physics-frame
+	# clock, which the sim freeze below does not stop: measured 517 / 1008 px of baseline
+	# top-band motion with it on (ceiling 400), 0 px before the layer existed. It is ambient
+	# and not under test, so it comes out of the frame — same reason as the two passes below.
+	Atmosphere.enabled = false
 	# Take the always-on grade + scanline passes out of the frame: their animated /
 	# FRAGCOORD content is not under test, and A/B may differ ONLY through the
 	# concussion pass. Matched by identity against main's own material refs so the
@@ -176,7 +181,8 @@ func _run() -> void:
 	for px in SWEEP_X:
 		if await _pose(px):
 			fail = true
-	_main.set_physics_process(true)
+	await preload("res://tools/quiesce.gd").teardown(self, _main)
+	_main = null
 	if fail:
 		print("PROBE FAILED")
 		quit(1)

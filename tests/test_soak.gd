@@ -39,6 +39,14 @@ func test_long_run_arrays_stay_bounded() -> void:
 		sim.step([Determinism.scripted_input(tick, 0), Determinism.scripted_input(tick, 1)])
 		if (tick + 1) % CHECK_EVERY == 0:
 			_assert_bounded(sim, tick + 1)
+			print("SOAK SAMPLE: ", JSON.stringify({
+				"tick": tick + 1,
+				"static_bytes": OS.get_static_memory_usage(),
+				"wave": sim.wave,
+				"enemies": sim.enemies.size(),
+				"bullets": sim.bullets.size() + sim.enemy_bullets.size(),
+				"sandbags": sim.sandbags.size(),
+			}))
 	print("SOAK: %d/%d live ticks, wave %d, %d enemies / %d sandbags at the end" % [live, ticks, sim.wave, sim.enemies.size(), sim.sandbags.size()])
 	Runner.T.ok(live >= ticks * 9 / 10,
 		"only %d of %d soak ticks were live — frozen arrays are trivially bounded, so the leak gate proved nothing" % [live, ticks])

@@ -21,6 +21,12 @@ shader_type canvas_item;
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
 uniform float grade : hint_range(0.0, 1.0) = 1.0;
 uniform float breather : hint_range(0.0, 1.0) = 0.0;
+// Per-sector look (src/view/sector_look.gd holds the CPU twin of this block).
+// Lift/gamma/gain/saturation only: no hue rotation. Neutral values are an exact no-op.
+uniform vec3 look_lift = vec3(0.0);
+uniform vec3 look_gamma = vec3(1.0);
+uniform vec3 look_gain = vec3(1.0);
+uniform float look_sat : hint_range(0.0, 2.0) = 1.0;
 
 void fragment() {
 	vec3 c = texture(screen_tex, SCREEN_UV).rgb;
@@ -41,6 +47,12 @@ void fragment() {
 
 	// Master scale (grade=0 -> untouched original).
 	c = mix(c, g, grade);
+
+	// (3b) Sector look: gamma, then gain with lift filling the shadows, then saturation.
+	vec3 lk = pow(max(c, vec3(0.0)), vec3(1.0) / look_gamma);
+	lk = lk * look_gain + look_lift * (vec3(1.0) - lk);
+	float ll = dot(lk, vec3(0.299, 0.587, 0.114));
+	c = clamp(mix(vec3(ll), lk, look_sat), 0.0, 1.0);
 
 	// (4) Shop/intermission breather (a4-15's leftover visual half): a calm exposure
 	// lift + a cooler extra desaturation so "you're safe to buy" reads as a breath.

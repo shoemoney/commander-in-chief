@@ -152,7 +152,7 @@ const ELITE_WINDUP_TICKS := 24
 # contain visible incoming fire without producing an unavoidable bullet curtain.
 const RIFLEMAN_STANDOFF := 100 * F_ONE
 const RIFLEMAN_FIRE_CD_TICKS := 132
-const RIFLEMAN_WINDUP_TICKS := 20
+const RIFLEMAN_WINDUP_TICKS := 24   # the project reaction floor (TECHNICAL_REV 24, VENT_WARN 30, ...)
 # Starting value: spread first-shot phases across 0.6s by spawn X. Test:
 # place a three-rifle line and verify no two painted lanes resolve on one tick;
 # if the opening feels too sparse, reduce in 6-tick steps, never to zero.
@@ -175,9 +175,14 @@ const SNIPER_BULLET_SPEED := 6 * F_ONE
 # persistent facing turns toward the target at a capped rate, so a committed lateral move can
 # earn the rear arc while explosives and Rend remain the immediate counters.
 const SHIELD_SPEED := F_ONE
-# Starting value: component approach of ~1/32 unit per tick. Test: one tick can never reverse
-# a shield, while a player circling at safe standoff can get outside the 120-degree block cone.
-const SHIELD_TURN_STEP := F_ONE / 32
+# 1/96 rad per tick (0.6 deg). Measured by tools/probe_shield_flank.gd: a solo player circling at
+# run speed opens an unblocked shot in 16/16 trials at 60-150 px (was 16/16 at 60 px only; 0/16 at
+# 90-150 px with 1/32), while a player who never circles is blocked 40/40. Test: one tick can never
+# reverse a shield, and a deliberate circle at 120 px earns the rear arc.
+const SHIELD_TURN_STEP := F_ONE / 96
+# A round is blocked when dot(bullet dir, facing) < this: cos(120 deg) = the front 120-degree cone.
+# The view's green rear SAFE arc is derived from this same number (main.gd), never retyped.
+const SHIELD_BLOCK_DOT := -(F_ONE / 2)
 # Sapper (both modes — SECTOR_SPECIALS sectors 2/5, Endless wave 3+): advances like a rusher but seeds armed mines behind it,
 # authoring a hazard trail between you and the top edge. Reuses fire_cd as the
 # mine-drop timer — no new hashed field.
@@ -256,6 +261,12 @@ const OPENING_BUNKER_FIRST_SPAWN_TICKS := 180
 const BUNKER_SPAWN_INTERVAL_TICKS := 120
 const MAX_ENEMIES := 64
 const REVIVE_BASE_COST := 50
+## Endless revive price = BASE x min(deaths x (1 + wave/5), CAP). Uncapped it hit 4,400 at wave 15
+## against a 2,100 chest; at 8x a body stays a real decision (400 2P / 200 solo) at any depth.
+const REVIVE_MULT_CAP := 8
+## Kill-streak ladder: [kills, score bonus %]. The old top (20 -> +100%) left a 121-streak
+## unrecognised; 40/80 add diminishing-but-real steps (+50 each, where 5->10->20 doubled).
+const STREAK_TIERS := [[5, 25], [10, 50], [20, 100], [40, 150], [80, 200]]
 # What a stand-up guarantees an empty-handed body: a top-up floor, not a kit.
 # Kept at or under the cheapest revive's shop value at every depth (see _respawn).
 const RESPAWN_MG_FLOOR := 8
@@ -499,9 +510,9 @@ const SHOP_CLAYMORE_COST := 50       # crate-only: one carried charge (grenade 3
 # nothing to shoot, and the flashbang would resolve into an empty arena.
 # Airstrike (3) still stays out — a priced crate is bought on PROXIMITY, so it
 # would call a strike on an empty screen; it remains a telegraphed wheel buy.
-const CRATE_POOL: Array[int] = [0, 1, 2, 6, 8]
+const CRATE_POOL: Array[int] = [0, 1, 2, 6, 8, 12, 13]
 const CRATE_POOL_BASE: Array[int] = [SHOP_AMMO_COST, SHOP_GRENADE_COST, SHOP_VEST_COST,
-	SHOP_TRIPLE_COST, SHOP_CLAYMORE_COST]
+	SHOP_TRIPLE_COST, SHOP_CLAYMORE_COST, 80, 90]   # 80 / 90 = Weapons.TABLE flame / rocket "shop"
 const WIPE_SCORE_PCT := 25           # airstrike screen-clear kills score at a quarter rate (see _fire_mission)
 # ONE spend->score rate for EVERY way a coin leaves the chest (spend-wheel and priced
 # ground crates both). It used to be two literals, 6 in _try_buy and 10 in
@@ -783,6 +794,7 @@ const FROGMAN_SURFACE_TICKS := 30
 # Bridge Gunship: every 3rd gate is a bridge boss fight. Bullets chip it,
 # grenades chunk it; strafe sprays and mortar volleys alternate.
 const BOSS_GATE_EVERY := 3
+const SIEGE_GATE_INDEX := 5   # CRASHED CONVOY: the convoy's surviving armor (SiegeBoss) holds this gate
 const BOSS_HP := 40
 const BOSS_GRENADE_DAMAGE := 8
 const BOSS_HIT_RADIUS := 20 * F_ONE
@@ -845,6 +857,7 @@ var rng: SimRng
 var players: Array[Dictionary] = []
 var bullets: Array[Dictionary] = []
 var grenades: Array[Dictionary] = []
+var rockets: Array[Dictionary] = []   # Weapons.ROCKET rounds in flight (hashed when non-empty)
 var enemies: Array[Dictionary] = []
 var bunkers: Array[Dictionary] = []
 var pickups: Array[Dictionary] = []
@@ -1006,6 +1019,8 @@ func _init(seed_value: int, player_count: int, game_mode: String = "campaign") -
 			"smoke_ticks": 0,
 			"claymores": 0,
 			"triple": false,
+			"weapon": Weapons.NONE,   # special weapon held (Weapons.TABLE key); 0 = the MG
+			"wpn_ammo": 0,
 			"flush_cd": 0,   # c3 2v: tall-grass flush-grenade cooldown (0 = clear; runs only while camping grass near enemies)
 		})
 	if game_mode == "boss_rush":
@@ -1084,6 +1099,28 @@ static func zone_info(gate_idx: int) -> Dictionary:
 	return ZONE_INFO[clampi(gate_idx, 1, ZONE_INFO.size()) - 1]
 
 
+static func ammo_burn(p: Dictionary) -> int:
+	## Rounds spent per trigger pull: 2 with ANY fan (Trench Gun and/or Triple Shot), else 1.
+	## Flat on purpose: owning both fans used to cost 3, so the dearer buy made the cheaper worse.
+	return 2 if (p["spread_ticks"] > 0 or p["triple"]) else 1
+
+
+static func streak_bonus_pct(streak: int) -> int:
+	var pct := 0
+	for t: Array in STREAK_TIERS:
+		if streak >= t[0]:
+			pct = t[1]
+	return pct
+
+
+static func streak_tier(streak: int) -> int:
+	var tier := 0
+	for t: Array in STREAK_TIERS:
+		if streak >= t[0]:
+			tier = t[0]
+	return tier
+
+
 func is_solo() -> bool:
 	return players.size() == 1
 
@@ -1097,7 +1134,7 @@ func revive_cost(p: Dictionary) -> int:
 		# became unreachable. Here deaths COMPOUND uncapped and the price is
 		# wave-MULTIPLIED, so a fat late chest is one bad patch from zero: keep
 		# clean and the surcharge never touches you, chain deaths and the run ends.
-		cost = REVIVE_BASE_COST * maxi(p["deaths"], 1) * (1 + wave / 5)
+		cost = REVIVE_BASE_COST * mini(maxi(p["deaths"], 1) * (1 + wave / 5), REVIVE_MULT_CAP)
 	else:
 		# Campaign keeps the soft cap at 3 deaths: with checkpoints and a finish
 		# line, a linear ramp against flat kill income is just a death spiral.
@@ -1154,6 +1191,7 @@ func step(inputs: Array) -> void:
 	_step_tanks()
 	_tanks_stepped_this_tick = true
 	_step_bullets()
+	_step_rockets()
 	_step_enemy_bullets()
 	_step_grenades()
 	# Hitbox fairness: contact death resolves AFTER the player's own offense has
@@ -1281,6 +1319,8 @@ func _step_players(inputs: Array) -> void:
 		p["buy_prev"] = buy_cmd
 		var grenade_edge: bool = inp.grenade and not p["grenade_prev"]
 		p["grenade_prev"] = inp.grenade
+		var roll_edge: bool = inp.roll and not p["roll_prev"]
+		p["roll_prev"] = inp.roll
 
 		if not p["alive"]:
 			_step_dead_player(i, p, inp)
@@ -1329,8 +1369,6 @@ func _step_players(inputs: Array) -> void:
 		# perpetual i-frame chain (18 i-frames per 120 ticks) off one held button,
 		# which also made the buffer meaningless (it only ever mattered for held
 		# input). Tapping still buffers exactly as before.
-		var roll_edge: bool = inp.roll and not p["roll_prev"]
-		p["roll_prev"] = inp.roll
 		if roll_edge:
 			if wading:
 				# Rolling is forbidden in water, and this was the last silent refusal:
@@ -1501,7 +1539,8 @@ func _step_players(inputs: Array) -> void:
 		# dry in a swarm still buys survival and nothing else. `fire_prev` is kept (hashed
 		# state, and the honest record of the wire input) even though nothing reads it.
 		p["fire_prev"] = inp.fire
-		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0:
+		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] <= 0 \
+				and (p["weapon"] == Weapons.NONE or p["in_tank"] >= 0 or not _special_has_target(p)):
 			# Empty-clip bash: one enemy in reach dies (no coin), on a long
 			# cooldown — running dry is a beat of danger, not pure helplessness.
 			var bashed := false
@@ -1563,7 +1602,13 @@ func _step_players(inputs: Array) -> void:
 				# fire is gone: with the edge gate removed its condition is now identical
 				# to the branch above, so it was unreachable.)
 				events.append({"t": "dry_fire", "x": p["x"], "y": p["y"], "i": i})
-		if inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
+		# A held special OWNS the trigger only while it has something to hit; with nothing in
+		# its cone / lane the same tick falls through to the MG (a flamethrower holder under
+		# a gunship used to stand mute: the flame cannot hurt it and the MG branch was dead).
+		var special_engaged := false
+		if inp.fire and p["weapon"] != Weapons.NONE and p["in_tank"] < 0:
+			special_engaged = _fire_special(p, i)
+		if not special_engaged and inp.fire and p["fire_cd"] == 0 and p["mg_ammo"] > 0:
 			p["fire_cd"] = FIRE_COOLDOWN_TICKS
 			p["mg_ammo"] = p["mg_ammo"] - 1
 			events.append({"t": "shot", "x": p["x"], "y": p["y"], "i": i})
@@ -1575,12 +1620,11 @@ func _step_players(inputs: Array) -> void:
 			# free 3-5x DPS multiplier and ammo stopped being a resource at all —
 			# the softest sink in the game. One extra round per pellet PAIR keeps the
 			# upgrade clearly worth taking while making it cost something.
-			# Starting values (+1 for a 3-fan, +2 for a 5-fan); test: time-to-empty
+			# Flat +1 for any fan (ammo_burn): Trench + Triple together used to cost +2. Test: time-to-empty
 			# from 99 should fall to roughly half the base gun's, not stay identical.
 			# If Triple then feels punitive rather than powerful, drop the 5-fan to +1.
 			if p["spread_ticks"] > 0 or p["triple"]:
-				var fan_cost := 2 if (p["spread_ticks"] > 0 and p["triple"]) else 1
-				p["mg_ammo"] = maxi(0, p["mg_ammo"] - fan_cost)
+				p["mg_ammo"] = maxi(0, p["mg_ammo"] - (ammo_burn(p) - 1))
 				# Trench Gun (timed) / Triple Shot (held until death) both spray this one
 				# fan: two extra pellets +/-12 deg off the aim (fixed-point rotate).
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) - Fixed.mul(fay, SPREAD_SIN),
@@ -2366,7 +2410,7 @@ func _try_revive(reviver_index: int, reviver: Dictionary) -> void:
 ## _respawn's own body, so a strip added here without a word for it goes red the day it lands.
 const DEATH_LOSS_KEYS: PackedStringArray = [
 	"vest", "triple", "claymores",
-	"pierce_ticks", "spread_ticks", "rend_ticks", "smoke_ticks",
+	"pierce_ticks", "spread_ticks", "rend_ticks", "smoke_ticks", "weapon",
 ]
 
 
@@ -2402,6 +2446,7 @@ func _respawn(p: Dictionary, at_y: int, cost := 0) -> void:
 	p["smoke_ticks"] = 0              # ...and the smoke concealment
 	p["claymores"] = 0                # ...and any carried claymore charges
 	p["triple"] = false               # ...and the Triple Shot mod (held until death)
+	p["weapon"] = 0                   # ...and any special weapon (flamethrower / rocket launcher)
 	p["hurt_iframes"] = VEST_IFRAME_TICKS   # post-spawn mercy window
 	p["y"] = clampi(at_y, camera_top + 16 * F_ONE, camera_top + CAMERA_BAND_BOTTOM)
 	p["x"] = clampi(p["x"], WORLD_LEFT, WORLD_RIGHT)
@@ -2533,6 +2578,13 @@ func _apply_supply(p: Dictionary, kind: int) -> int:
 			p["rend_ticks"] = REND_TICKS       # Rend Rounds capsule (drop-only)
 		8:
 			p["claymores"] = mini(CLAYMORE_CAP, p["claymores"] + 1)   # a carried charge
+		12, 13:
+			# Special weapon: replaces whatever special is held; the same one just refills.
+			var wid := Weapons.id_for_kind(kind)
+			var wt: Dictionary = Weapons.TABLE[wid]
+			var have: int = p["wpn_ammo"] if p["weapon"] == wid else 0
+			p["weapon"] = wid
+			p["wpn_ammo"] = mini(wt["cap"], have + wt["grant"])
 		9:
 			p["smoke_ticks"] = SMOKE_TICKS     # smoke concealment capsule (drop-only)
 		10:
@@ -2745,6 +2797,9 @@ func _supply_full(p: Dictionary, kind: int) -> bool:
 			return pending_airstrike > 0 or (mode == "endless" and intermission_ticks > 0)
 		6:
 			return p["triple"]
+		12, 13:
+			var wid := Weapons.id_for_kind(kind)
+			return p["weapon"] == wid and p["wpn_ammo"] >= Weapons.TABLE[wid]["cap"]
 		8:
 			return p["claymores"] >= CLAYMORE_CAP
 	return false
@@ -3220,6 +3275,13 @@ func _detonate_tank(tank: Dictionary) -> void:
 	# hashed but dead-unused after death, so it becomes the hulk lifetime.
 	# Zero new fields, zero new entities; behavior change -> golden re-record.
 	tank["burn_ticks"] = HULK_TICKS
+	# FAIRNESS: the BAIL OUT! countdown promises the cook-off hurts whoever is still
+	# on the hull. Same player-hurt rule as _detonate_barrel (roll i-frames and the
+	# bail mercy window dodge it; riders were already ejected or killed by the callers).
+	for p in players:
+		if p["alive"] and _exposed(p) and not p["roll_iframe"] \
+				and _dist_lte(tank["x"], tank["y"], p["x"], p["y"], GRENADE_RADIUS):
+			_hurt_player(p)
 	_explode(tank["x"], tank["y"])
 
 
@@ -3564,8 +3626,8 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		_kill_observer()
 	for g in gates:
 		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
-				and _dist_lte(x, y, g["boss"]["x"], g["boss"]["gate_y"] - BOSS_Y_OFFSET, GRENADE_RADIUS + BOSS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": g["boss"]["gate_y"] - BOSS_Y_OFFSET})
+				and _dist_lte(x, y, g["boss"]["x"], boss_cy(g["boss"]), GRENADE_RADIUS + boss_hr(g["boss"])):
+			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": boss_cy(g["boss"])})
 			_damage_boss(g["boss"], BOSS_GRENADE_DAMAGE)
 	# EVERY explosive (grenades, airbursts, barrels, mines/claymores, tank-death
 	# blasts) routes through this one branch, so tracking the approach here makes
@@ -3577,8 +3639,7 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		var gbx: int = endless_boss["x"] + int(goff[0])
 		var gby: int = endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1])
 		if _dist_lte(x, y, gbx, gby, GRENADE_RADIUS + BOSS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": gbx, "y": gby})
-			_damage_boss(endless_boss, BOSS_GRENADE_DAMAGE)
+			_hit_endless_boss(gbx, gby, BOSS_GRENADE_DAMAGE)
 	# The Colossus is pure armor: grenades are the only thing it respects.
 	if not colossus.is_empty() and colossus["alive"] \
 			and _dist_lte(x, y, colossus["x"], colossus["y"], GRENADE_RADIUS + COLOSSUS_HIT_RADIUS):
@@ -3685,15 +3746,12 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 	if e["kind"] != "mg_nest" and not no_score:
 		kill_streak = kill_streak + 1 if kill_streak_timer > 0 else 1
 		kill_streak_timer = KILL_STREAK_WINDOW_TICKS
-		var streak_bonus_pct := 0
-		if kill_streak >= 20:
-			streak_bonus_pct = 100
-		elif kill_streak >= 10:
-			streak_bonus_pct = 50
-		elif kill_streak >= 5:
-			streak_bonus_pct = 25
-		if streak_bonus_pct > 0:
-			score += (coin * 10 * streak_bonus_pct * score_pct) / 10000
+		var streak_pct := streak_bonus_pct(kill_streak)
+		if streak_pct > 0:
+			score += (coin * 10 * streak_pct * score_pct) / 10000
+		if kill_streak == 40 or kill_streak == 80:
+			# Past the 20-surge the ladder keeps its own beat per tier (view-only, golden-safe).
+			events.append({"t": "streak_tier", "x": e["x"], "y": e["y"], "tier": kill_streak})
 		if kill_streak == 20:
 			# The 20-streak stops being just a number: every alive fighter gets a
 			# ~3s adrenaline surge (reuses the tank-bail speed boost), so the reward
@@ -3713,7 +3771,7 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 		# offense capsules should be ≥40% of rare drops — if <30%, raise them.
 		var pkind: int
 		if rng.range_i(0, 5) == 0:
-			pkind = [4, 4, 5, 5, 6, 6, 7, 8, 9, 10][rng.range_i(0, 9)]
+			pkind = _pick_rare_kind()
 			if pkind == 7 and not _shields_possible():
 				pkind = 4   # Rend before any shield can exist is a dead draw — give Pierce
 		else:
@@ -4819,7 +4877,7 @@ func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
 	# dot of unit vectors, in fixed-point; block when < -0.5 (front 120° cone).
 	var dot := Fixed.mul(Fixed.div(fx, flen), Fixed.div(b["vx"], blen)) \
 		+ Fixed.mul(Fixed.div(fy, flen), Fixed.div(b["vy"], blen))
-	return dot < -(F_ONE / 2)
+	return dot < SHIELD_BLOCK_DOT
 
 
 func _turn_shield_toward(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
@@ -4867,6 +4925,339 @@ func _spawn_mg_bullet(p: Dictionary, i: int, ax: int, ay: int) -> void:
 		"ttl": BULLET_TTL_TICKS, "owner": i})
 
 
+func _pick_rare_kind() -> int:
+	## The rare-capsule roll. Below sector 2 this is byte-for-byte the old 10-slot draw
+	## (same single rng call, same range), so the opening of a run is unchanged; the special
+	## weapons join the pool by sector (Weapons.TABLE min_sector) at three slots apiece.
+	var sec := _sector_index(_econ_depth())
+	var pool: Array[int] = [4, 4, 5, 5, 6, 6, 7, 8, 9, 10]
+	if sec >= Weapons.TABLE[Weapons.FLAME]["min_sector"]:
+		pool.append_array([Weapons.KIND_FLAME, Weapons.KIND_FLAME, Weapons.KIND_FLAME])
+	if sec >= Weapons.TABLE[Weapons.ROCKET]["min_sector"]:
+		pool.append_array([Weapons.KIND_ROCKET, Weapons.KIND_ROCKET, Weapons.KIND_ROCKET])
+	return pool[rng.range_i(0, pool.size() - 1)]
+
+
+func _flame_target_ok(e: Dictionary) -> bool:
+	## A body the flame can still do something to: alive, surfaced, not the rescue objective
+	## and not one of the inherent heavies it cannot cook.
+	return _enemy_strikeable(e) and e["kind"] != "pilot" and not (e["kind"] in Weapons.FLAME_IMMUNE)
+
+
+func _special_has_target(p: Dictionary) -> bool:
+	## Something the held special would fire at right now (cooldown ignored): a flameable body
+	## in the cone, or a rocket target in the lane. Shared by the trigger, the MG fall-through
+	## and the empty-clip bash so the three can never disagree about who owns the trigger.
+	if p["weapon"] == Weapons.FLAME:
+		var wt: Dictionary = Weapons.TABLE[Weapons.FLAME]
+		var reach: int = flame_reach(p)
+		for e in enemies:
+			if _flame_target_ok(e) and Weapons.in_cone(e["x"] - p["x"], e["y"] - p["y"], p["aim_x"], p["aim_y"],
+					reach, wt["tan"], wt["pad"]):
+				return true
+		return false
+	if p["weapon"] == Weapons.ROCKET:
+		return _rocket_lane_has_target(p, Weapons.TABLE[Weapons.ROCKET])
+	return false
+
+
+func _fire_special(p: Dictionary, i: int) -> bool:
+	## One call per tick while a special is held and fire is down (always-fire). It only
+	## spends the magazine when there is something to hit: the player has no trigger.
+	## Returns true while the special OWNS the trigger this tick (it fired, is cooling down,
+	## or its rocket is still in flight at a live target); false means it has nothing to hit
+	## and the caller lets the MG shoot instead.
+	if p["fire_cd"] > 0:
+		return true
+	var wt: Dictionary = Weapons.TABLE[p["weapon"]]
+	var ax: int = p["aim_x"]
+	var ay: int = p["aim_y"]
+	if not _special_has_target(p):
+		return false
+	if p["weapon"] == Weapons.FLAME:
+		_flame_burst(p, i)
+	else:
+		# One rocket in the air per launcher: without this the 36-tick cooldown re-fires at the
+		# very target the first rocket is still flying toward and wastes the second.
+		for fr in rockets:
+			if fr["owner"] == i:
+				return true
+		rockets.append({"x": p["x"] + Fixed.mul(ax, 8 * F_ONE), "y": p["y"] + Fixed.mul(ay, 8 * F_ONE),
+			"vx": Fixed.mul(ax, wt["speed"]), "vy": Fixed.mul(ay, wt["speed"]),
+			"ttl": wt["ttl"], "owner": i})
+		events.append({"t": "rocket_launch", "x": p["x"], "y": p["y"], "i": i})
+	p["fire_cd"] = wt["cd"]
+	p["wpn_ammo"] = p["wpn_ammo"] - 1
+	if p["wpn_ammo"] <= 0:
+		p["wpn_ammo"] = 0
+		p["weapon"] = Weapons.NONE   # magazine spent: back to the MG (its mods wake up)
+		events.append({"t": "weapon_empty", "x": p["x"], "y": p["y"], "i": i})
+	return true
+
+
+func flame_reach(p: Dictionary) -> int:
+	## How far the flame cone really runs from this player, fixed px: the open-field reach,
+	## clipped at the near face of the first INDESTRUCTIBLE blocker (stone, hero wreck: solid and
+	## not _rk_burnable) on the aim line. Sandbags, grass and wall slabs burn, so they never
+	## clip it. The view draws the cone with this same number (WeaponFx).
+	var wt: Dictionary = Weapons.TABLE[Weapons.FLAME]
+	var reach: int = wt["reach"]
+	var ax: int = p["aim_x"]
+	var ay: int = p["aim_y"]
+	var pad: int = wt["pad"]
+	var aax: int = absi(ax)
+	var aay: int = absi(ay)
+	for rk in rocks:
+		if not _rk_solid(rk) or _rk_burnable(rk):
+			continue
+		var dx: int = rk["x"] - p["x"]
+		var dy: int = rk["y"] - p["y"]
+		if absi(dx) > reach + ROCK_HALF_W_MAX or absi(dy) > reach + ROCK_HALF_W_MAX:
+			continue
+		var hw: int = _rk_hw(rk)
+		var hh: int = _rk_hh(rk)
+		var along: int = Fixed.mul(dx, ax) + Fixed.mul(dy, ay)
+		var cross: int = Fixed.mul(dx, ay) - Fixed.mul(dy, ax)
+		var ext_along: int = Fixed.mul(hw, aax) + Fixed.mul(hh, aay)
+		var ext_cross: int = Fixed.mul(hw, aay) + Fixed.mul(hh, aax)
+		if absi(cross) > ext_cross + pad or along + ext_along < 0:
+			continue
+		reach = mini(reach, maxi(0, along - ext_along))
+	return reach
+
+
+func _flame_burst(p: Dictionary, i: int) -> void:
+	## One burst of the flame cone. Fire is not stopped by cover: infantry hugging a sandbag
+	## burn through it, and the bag itself heats up and eventually goes. Armor does not care.
+	var wt: Dictionary = Weapons.TABLE[Weapons.FLAME]
+	var ax: int = p["aim_x"]
+	var ay: int = p["aim_y"]
+	var reach: int = flame_reach(p)
+	events.append({"t": "flame", "x": p["x"], "y": p["y"], "i": i, "ax": ax, "ay": ay})
+	var shrugged := false
+	for e in enemies:
+		if not _enemy_strikeable(e) or e["kind"] == "pilot":
+			continue
+		var dx: int = e["x"] - p["x"]
+		var dy: int = e["y"] - p["y"]
+		if not Weapons.in_cone(dx, dy, ax, ay, reach, wt["tan"], wt["pad"]):
+			continue
+		if e["kind"] in Weapons.FLAME_IMMUNE or (e["kind"] == "shield" and _shield_blocks(e, {"vx": dx, "vy": dy})):
+			shrugged = true
+			continue
+		if e.get("hp", 1) > 1:
+			e["hp"] = e["hp"] - 1   # veteran armor: fire strips it a point per burst
+			if e["hp"] > 0:
+				shrugged = true
+				continue
+		_kill_enemy(e)
+	if shrugged:
+		events.append({"t": "armor_block", "x": p["x"] + Fixed.mul(ax, reach / 2),
+			"y": p["y"] + Fixed.mul(ay, reach / 2)})
+	var si := sandbags.size() - 1
+	while si >= 0:
+		var sb := sandbags[si]
+		if Weapons.in_cone(sb["x"] - p["x"], sb["y"] - p["y"], ax, ay, reach, wt["tan"], SANDBAG_HALF_W):
+			sb["scorch"] = sb.get("scorch", 0) + 1
+			if sb["scorch"] >= wt["cover_hits"]:
+				events.append({"t": "bag_burn", "x": sb["x"], "y": sb["y"]})
+				_break_sandbag_at(si)
+				si = mini(si - 1, sandbags.size() - 1)
+				continue
+		si -= 1
+	# Soft terrain cover burns exactly as it does in a vent jet (_rk_burnable: grass, wall slabs;
+	# stone and hero wrecks are immune). burn_ticks is the vent's existing, unhashed accrual.
+	for ri in range(rocks.size() - 1, -1, -1):
+		var brk := rocks[ri]
+		if not _rk_burnable(brk):
+			continue
+		if Weapons.in_cone(brk["x"] - p["x"], brk["y"] - p["y"], ax, ay, reach, wt["tan"], _rk_hw(brk)):
+			brk["burn_ticks"] = brk.get("burn_ticks", 0) + 1
+			if brk["burn_ticks"] >= wt["cover_hits"]:
+				events.append({"t": "cover_burn" if brk.get("kind", 0) == 1 else "cover_crack",
+					"x": brk["x"], "y": brk["y"]})
+				rocks.remove_at(ri)
+
+
+func _rocket_lane_has_target(p: Dictionary, wt: Dictionary) -> bool:
+	## Auto-trigger for the launcher: something worth a rocket sits in the lane ahead.
+	var ax: int = p["aim_x"]
+	var ay: int = p["aim_y"]
+	for e in enemies:
+		if _enemy_strikeable(e) and e["kind"] != "pilot" \
+				and Weapons.in_lane(e["x"] - p["x"], e["y"] - p["y"], ax, ay, wt["reach"], wt["lane"]):
+			return true
+	for bk in bunkers:
+		if bk["alive"] and Weapons.in_lane(bk["x"] + BUNKER_W / 2 - p["x"], bk["y"] + BUNKER_H / 2 - p["y"],
+				ax, ay, wt["reach"], wt["lane"] + BUNKER_W / 2):
+			return true
+	for g in gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
+				and Weapons.in_lane(_rocket_lead_x(p, g["boss"], g["boss"]["x"], boss_cy(g["boss"]), wt) - p["x"],
+					boss_cy(g["boss"]) - p["y"], ax, ay, wt["reach"], wt["lane"] + boss_hr(g["boss"])):
+			return true
+	if not endless_boss.is_empty() and endless_boss["alive"] \
+			and Weapons.in_lane(_rocket_lead_x(p, endless_boss, endless_boss["x"], endless_boss["gate_y"] - BOSS_Y_OFFSET, wt) - p["x"],
+				endless_boss["gate_y"] - BOSS_Y_OFFSET - p["y"], ax, ay, wt["reach"], wt["lane"] + BOSS_HIT_RADIUS):
+		return true
+	if not colossus.is_empty() and colossus["alive"] \
+			and Weapons.in_lane(colossus["x"] - p["x"], colossus["y"] - p["y"], ax, ay, wt["reach"],
+				wt["lane"] + COLOSSUS_HIT_RADIUS):
+		return true
+	return false
+
+
+func _boss_vx(boss: Dictionary) -> int:
+	## The gunship's sideways drift in fixed px per tick (the same expression _step_one_boss
+	## integrates). The Siege Tank drives in bursts it telegraphs, so it reports 0 here.
+	if SiegeBoss.is_siege(boss):
+		return 0
+	var act: int = EndlessRoster.boss_act(wave / 5, boss["hp"], boss.get("max_hp", _scaled_boss_hp(BOSS_HP)))
+	return GunshipPhases.speed(act, BOSS_SPEED) * boss["dir"]
+
+
+func _rocket_lead_x(p: Dictionary, boss: Dictionary, bx: int, by: int, wt: Dictionary) -> int:
+	## Where a drifting hull will be when a rocket launched now along the aim reaches it:
+	## its x advanced by (distance / rocket speed) ticks of its own drift, kept inside the
+	## rails it bounces between. Used by the auto-trigger only, so the rocket is released
+	## when the hull will MEET it rather than when the hull is merely in the lane.
+	var vx: int = _boss_vx(boss)
+	if vx == 0:
+		return bx
+	var along: int = Fixed.mul(bx - p["x"], p["aim_x"]) + Fixed.mul(by - p["y"], p["aim_y"])
+	var ticks: int = clampi(along / wt["speed"], 0, wt["ttl"])
+	return clampi(bx + vx * ticks, 60 * F_ONE, 580 * F_ONE)
+
+
+## Proximity fuse reach past a big hull's edge: a rocket that passes within this of a gate
+## boss's hull detonates (the splash, `blast`, still reaches the hull from here).
+const ROCKET_FUSE_PAD := 14 * F_ONE
+
+
+func _rocket_fuses(x: int, y: int) -> bool:
+	for g in gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
+				and _dist_lte(x, y, g["boss"]["x"], boss_cy(g["boss"]), boss_hr(g["boss"]) + ROCKET_FUSE_PAD):
+			return true
+	if not endless_boss.is_empty() and endless_boss["alive"]:
+		var goff: Array = boss_flyin_offset(endless_boss["phase_t"])
+		if _dist_lte(x, y, endless_boss["x"] + int(goff[0]),
+				endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1]), BOSS_HIT_RADIUS + ROCKET_FUSE_PAD):
+			return true
+	return false
+
+
+func _rocket_hits(x: int, y: int) -> bool:
+	## True when a rocket centred at (x,y) has struck something solid.
+	for bk in bunkers:
+		if bk["alive"] and _point_in_aabb(x, y, bk):
+			return true
+	for sb in sandbags:
+		if absi(x - sb["x"]) <= _sb_hw(sb) and absi(y - sb["y"]) <= _sb_hh(sb):
+			return true
+	for hk in tanks:
+		if ((hk["alive"] and hk["occupant"] < 0) or (not hk["alive"] and hk["burn_ticks"] > 0)) \
+				and absi(x - hk["x"]) <= HULK_HALF_W and absi(y - hk["y"]) <= HULK_HALF_H:
+			return true
+	for rk in rocks:
+		if _rk_solid(rk) and absi(x - rk["x"]) <= _rk_hw(rk) and absi(y - rk["y"]) <= _rk_hh(rk):
+			return true
+	for e in enemies:
+		var ehr: int = KIND_HIT_RADIUS.get(e["kind"], BULLET_HIT_RADIUS)
+		if e["alive"] and e["kind"] != "pilot" and not e.get("submerged", false) \
+				and _dist_lte(x, y, e["x"], e["y"], ehr):
+			return true
+	for bl in barrels:
+		if bl["armed"] and _dist_lte(x, y, bl["x"], bl["y"], BULLET_HIT_RADIUS):
+			return true
+	for g in gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
+				and _dist_lte(x, y, g["boss"]["x"], boss_cy(g["boss"]), boss_hr(g["boss"])):
+			return true
+	if not endless_boss.is_empty() and endless_boss["alive"]:
+		var goff: Array = boss_flyin_offset(endless_boss["phase_t"])
+		if _dist_lte(x, y, endless_boss["x"] + int(goff[0]),
+				endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1]), BOSS_HIT_RADIUS):
+			return true
+	if not colossus.is_empty() and colossus["alive"] and _dist_lte(x, y, colossus["x"], colossus["y"], COLOSSUS_HIT_RADIUS):
+		return true
+	return not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, OBSERVER_HIT_RADIUS)
+
+
+func _step_rockets() -> void:
+	if rockets.is_empty():
+		return
+	var ylo := camera_top - 40 * F_ONE
+	var yhi := camera_top + 400 * F_ONE
+	for i in range(rockets.size() - 1, -1, -1):
+		var r := rockets[i]
+		r["x"] = r["x"] + r["vx"]
+		r["y"] = r["y"] + r["vy"]
+		r["ttl"] = r["ttl"] - 1
+		if r["y"] < ylo or r["y"] > yhi or r["x"] < 0 or r["x"] > SCREEN_W_FP:
+			rockets.remove_at(i)   # left the arena unspent
+			continue
+		if r["ttl"] <= 0 or _rocket_hits(r["x"], r["y"]) or _rocket_fuses(r["x"], r["y"]):
+			var bx: int = r["x"]
+			var by: int = r["y"]
+			rockets.remove_at(i)
+			_rocket_blast(bx, by)
+
+
+func _rocket_blast(x: int, y: int) -> void:
+	## Small splash that reaches ARMOR. Like the grenade it never hurts the shooter or the
+	## friendly tanks; unlike it, armored bodies lose Weapons armor_dmg hp instead of
+	## dying outright, and bunkers/bosses are hit for the rocket's own numbers.
+	var wt: Dictionary = Weapons.TABLE[Weapons.ROCKET]
+	var rad: int = wt["blast"]
+	events.append({"t": "explosion", "x": x, "y": y, "src": "rocket", "r": rad})
+	for e in enemies:
+		if e["alive"] and e["kind"] != "pilot" and not (e["kind"] == "ghillie" and e.get("submerged", false)) \
+				and _dist_lte(x, y, e["x"], e["y"], rad):
+			if e.get("hp", 1) > 1:
+				e["hp"] = e["hp"] - wt["armor_dmg"]
+				if e["hp"] > 0:
+					events.append({"t": "armor_block", "x": e["x"], "y": e["y"]})
+					continue
+			_kill_enemy(e)
+	var si := sandbags.size() - 1
+	while si >= 0:
+		if _dist_lte(x, y, sandbags[si]["x"], sandbags[si]["y"], rad):
+			_break_sandbag_at(si)
+			si = mini(si - 1, sandbags.size() - 1)
+		else:
+			si -= 1
+	for ki in range(rocks.size() - 1, -1, -1):
+		if rocks[ki].get("kind", 0) == 2 and _dist_lte(x, y, rocks[ki]["x"], rocks[ki]["y"], rad):
+			events.append({"t": "cover_crack", "x": rocks[ki]["x"], "y": rocks[ki]["y"]})
+			rocks.remove_at(ki)
+	for bk in bunkers:
+		if bk["alive"] and _point_in_aabb_expanded(x, y, bk, rad):
+			bk["alive"] = false
+			war_chest += COIN_BUNKER
+			score += COIN_BUNKER * 10
+			events.append({"t": "bunker_break", "x": bk["x"] + BUNKER_W / 2,
+				"y": bk["y"] + BUNKER_H / 2, "coin": COIN_BUNKER})
+	for bl in barrels:
+		if bl["armed"] and bl["fuse_ticks"] == 0 and _dist_lte(x, y, bl["x"], bl["y"], rad):
+			bl["fuse_ticks"] = BARREL_FUSE_TICKS
+	for g in gates:
+		if not g["boss"].is_empty() and g["boss"]["alive"] and not g["open"] \
+				and _dist_lte(x, y, g["boss"]["x"], boss_cy(g["boss"]), rad + boss_hr(g["boss"])):
+			events.append({"t": "boss_hit", "x": g["boss"]["x"], "y": boss_cy(g["boss"])})
+			_damage_boss(g["boss"], wt["boss_dmg"])
+	if not endless_boss.is_empty() and endless_boss["alive"]:
+		var goff: Array = boss_flyin_offset(endless_boss["phase_t"])
+		var gbx: int = endless_boss["x"] + int(goff[0])
+		var gby: int = endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1])
+		if _dist_lte(x, y, gbx, gby, rad + BOSS_HIT_RADIUS):
+			_hit_endless_boss(gbx, gby, wt["boss_dmg"])
+	if not colossus.is_empty() and colossus["alive"] and _dist_lte(x, y, colossus["x"], colossus["y"], rad + COLOSSUS_HIT_RADIUS):
+		_damage_colossus(wt["colossus_dmg"])
+	if not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, rad):
+		_kill_observer()
+
+
 func _spawn_courier() -> void:
 	# A fleeing supply runner, dropped into the lower-middle so it has to cross
 	# the arena on its way to the top edge — a window to catch it. +300 (was
@@ -4878,6 +5269,8 @@ func _spawn_courier() -> void:
 
 # c4-19: the rooted spawn ROW is a range, not a pixel. See _rooted_spawn_y().
 const ROOTED_SPAWN_Y_MIN := 56    # >= 36dcff1's camera_top+40 plus the kind-0 rock's 12px half-height
+const ROOTED_NORTH_MARGIN := 16 * F_ONE   # a rooted gun is born at least this far north of the front-most player
+const ROOTED_SPAWN_Y_FLOOR := 16  # _clamp_actor's ceiling: the highest row a player can stand on
 const ROOTED_SPAWN_Y_SPAN := 232  # 56..287, wholly inside _clamp_actor's 16 .. CAMERA_BAND_BOTTOM 344
 
 
@@ -4910,7 +5303,25 @@ func _rooted_spawn_y(x: int) -> int:
 	## ENDLESS_GOLDEN. Same house pattern as the checksum-excluded `skin` field.
 	var h: int = ((x / F_ONE) & 1023) * 1103515245 + tick_count * 12345
 	h = (h >> 7) & 0x7FFFFFFF
-	var y := camera_top + (ROOTED_SPAWN_Y_MIN + h % ROOTED_SPAWN_Y_SPAN) * F_ONE
+	var span := ROOTED_SPAWN_Y_SPAN
+	var y := camera_top + (ROOTED_SPAWN_Y_MIN + h % span) * F_ONE
+	## FAIRNESS (owner decision #29): a rooted gun never materialises SOUTH of the
+	## northernmost living player -- a nest born behind your back is an unseen,
+	## unwinnable shot. Shrink the draw range to the rows north of that player's line
+	## (minus a margin) so the rows stay spread, never above the reachable band's
+	## ceiling; a closed gate still wins below.
+	var north := 0
+	var any_alive := false
+	for p in players:
+		if p["alive"] and (not any_alive or p["y"] < north):
+			north = p["y"]
+			any_alive = true
+	if any_alive:
+		var cap_rows: int = (north - ROOTED_NORTH_MARGIN - camera_top) / F_ONE
+		if cap_rows < ROOTED_SPAWN_Y_MIN + ROOTED_SPAWN_Y_SPAN:
+			var lo_rows: int = mini(ROOTED_SPAWN_Y_MIN, maxi(cap_rows, ROOTED_SPAWN_Y_FLOOR))
+			span = maxi(1, cap_rows - lo_rows + 1)
+			y = camera_top + (lo_rows + h % span) * F_ONE
 	for g in gates:
 		if not g["open"] and y < g["y"] + GATE_BLOCK_PAD:
 			y = g["y"] + GATE_BLOCK_PAD
@@ -5148,8 +5559,10 @@ func _step_grass_flush() -> void:
 	## reusing _add_strike, but DELIBERATELY without the _concealed guard (that
 	## omission IS the feature). Keyed on _in_grass, not _concealed, so smoke
 	## keeps full ranged-immunity. Grass streams seg>=2 only -> torture-inert.
+	## FAIRNESS: the trench conceals exactly like grass (_concealed), so it gets the
+	## same flush -- before, a camper in a trench was immune to aimed fire forever.
 	for p in players:
-		if not p["alive"] or p["in_tank"] >= 0 or not _in_grass(p):
+		if not p["alive"] or p["in_tank"] >= 0 or not (_in_grass(p) or _in_trench(p["x"], p["y"])):
 			p["flush_cd"] = 0
 			continue
 		var threat := false
@@ -5713,6 +6126,10 @@ func _step_camera() -> void:
 			_stamp_gunship_gate(_next_gate_y, 0, true)
 			# Boss stretches compose too (c2 3v — see _stamp_stretch_setpieces).
 			_stamp_stretch_setpieces()
+		elif _gate_counter == SIEGE_GATE_INDEX:
+			# Crashed Convoy: a ground boss holds this gate instead of two bunkers.
+			_stamp_gunship_gate(_next_gate_y, 0, true, "siege")
+			_stamp_stretch_setpieces()
 		else:
 			# Arena template lookup (unlisted indexes fall back to classic —
 			# future-proof if FINAL_GATE_INDEX ever grows).
@@ -6072,7 +6489,7 @@ func _step_camera() -> void:
 		_next_rear_y -= REAR_TRICKLE_SPACING
 
 
-func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void:
+func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool, kind := "gunship") -> void:
 	## Bridge Gunship gate: no arena bunkers -- the Gunship IS the lock. Shared
 	## by the campaign gate-3 stream and Boss Rush (authored-campaign-and-
 	## modes), which restamps this exact arena back-to-back with an escalating
@@ -6081,6 +6498,15 @@ func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void
 	## stripped-down stand-in. include_approach skips the MG-nest approach ramp
 	## for Boss Rush (a deliberate "no field filler between fights" design
 	## choice -- see _setup_boss_rush) while the campaign stream keeps it.
+	if kind == "siege":
+		# Boss-kind parameter (not a copy of this function): the SiegeBoss gets the same
+		# gate record, the same approach ramp and the same death -> gate-open plumbing.
+		gates.append({"y": gy, "open": false, "b1": {}, "b2": {},
+			"boss": SiegeBoss.make(gy, _scaled_boss_hp(SiegeBoss.HP + hp_bonus))})
+		_stamp_siege_cover(gy)
+		if include_approach:
+			_stamp_boss_approach(gy)
+		return
 	gates.append({"y": gy, "open": false, "b1": {}, "b2": {},
 		"boss": {"alive": true, "hp": _scaled_boss_hp(BOSS_HP + hp_bonus),
 			"max_hp": _scaled_boss_hp(BOSS_HP + hp_bonus), "x": SCREEN_CX,
@@ -6110,8 +6536,26 @@ func _stamp_gunship_gate(gy: int, hp_bonus: int, include_approach: bool) -> void
 	barrels.append({"x": 110 * F_ONE, "y": gy + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
 	barrels.append({"x": 128 * F_ONE, "y": gy + 120 * F_ONE, "armed": true, "fuse_ticks": 0})
 	pickups.append({"x": 120 * F_ONE, "y": gy + 150 * F_ONE, "kind": 0, "cost": 0})
-	if not include_approach:
-		return
+	if include_approach:
+		_stamp_boss_approach(gy)
+
+
+func _stamp_siege_cover(gy: int) -> void:
+	## The Siege Tank's arena: the shelled convoy. Sandbag rows are the cover its shells
+	## crater; two wreck slabs flank a CLEAR centre lane (the charge runs down it and a
+	## slab stops it dead); an ammo cache and a free grenade crate on the left are the
+	## supply (grenades are what hurt the hull, bullets only the open rear plate).
+	for bag in SiegeBoss.COVER_BAGS:
+		sandbags.append({"x": bag[0] * F_ONE, "y": gy + bag[1] * F_ONE})
+	for wk in SiegeBoss.WRECKS:
+		rocks.append({"x": wk[0] * F_ONE, "y": gy + wk[1] * F_ONE, "kind": wk[2]})
+	barrels.append({"x": 110 * F_ONE, "y": gy + 130 * F_ONE, "armed": true, "fuse_ticks": 0})
+	barrels.append({"x": 128 * F_ONE, "y": gy + 130 * F_ONE, "armed": true, "fuse_ticks": 0})
+	pickups.append({"x": 120 * F_ONE, "y": gy + 160 * F_ONE, "kind": 1, "cost": 0})
+	pickups.append({"x": 520 * F_ONE, "y": gy + 170 * F_ONE, "kind": 0, "cost": 0})
+
+
+func _stamp_boss_approach(gy: int) -> void:
 	# c3 2v APPROACH RAMP (gate 3 / Bridge Gunship only — the final gate
 	# already ships the calm band + parapets + vents). Density ESCALATES
 	# toward the gate so the boss room does not appear with no warning: 1
@@ -6437,53 +6881,51 @@ func _step_waves(inputs: Array = []) -> void:
 			# Deliberately reads the PRIMARY slot only: a wave-15+ stacked Blitz
 			# must not veto its partner's theme, or the stack would read as a
 			# downgrade. Blitz-as-primary keeps its shipped "pure bodies" identity.
-			if wave >= 3 and is_elite and wave_mod != 1:
+			# TIERED ROSTER (EndlessRoster): each archetype DEBUTS alone on its own wave at
+			# a fixed slot (any mutator, Blitz included, so the first-sight card is never
+			# skipped) and joins the rotation the wave after; locked rolls fall back to the
+			# already-debuted specials. The roll is still drawn, so the stream is unchanged.
+			var debut_k: String = ""
+			var theme: int = EndlessRoster.theme_of(wave_mod, second_mod())
+			if mode == "endless" and wave >= 3 and is_elite:
+				var dk: String = EndlessRoster.debut_kind(wave)
+				if dk != "" and wave_pending == EndlessRoster.debut_slot(EndlessRoster.wave_budget(wave, theme), elite_every):
+					debut_k = dk
+			if debut_k != "" or (wave >= 3 and is_elite and wave_mod != 1):
 				var roll := rng.range_i(0, 9)
 				# c3 2v per-wave COMPOSITION THEMES: remap the SAME draw (no extra rng)
 				# onto a themed subset so a marksmen/bombardment wave reads as a unit.
-				if has_mod(7):   # MARKSMEN: balanced sniper(1)/ghillie(4)/drone(5)
-					roll = [1, 4, 5, 1, 4, 5, 1, 4, 5, 4][roll]   # ranged paint, even weights
-				elif has_mod(8):   # BOMBARDMENT: balanced grenadier(0)/sapper(3)
-					roll = [0, 3, 0, 3, 0, 3, 0, 3, 0, 3][roll]   # area denial, 50/50
-				if roll == 0:
-					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
-				elif roll == 1:
-					_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
-				elif roll == 2:
-					_spawn_special(x, camera_top - 24 * F_ONE, "shield")
-				elif roll == 3:
-					_spawn_special(x, camera_top - 24 * F_ONE, "sapper")
-				elif roll == 4:
+				# MARKSMEN: sniper/ghillie/drone, even weights. BOMBARDMENT: grenadier/sapper, 50/50.
+				roll = EndlessRoster.themed_roll(roll, theme)
+				# A still-locked theme member falls back to the nearest UNLOCKED member of the
+				# SAME theme, never to a plain elite (the debut itself is kept: first-sight cards stay).
+				var spawn_kind: String = debut_k if debut_k != "" else EndlessRoster.themed_kind(roll, wave, theme)
+				if spawn_kind == "ghillie":
 					# ROOTED, like the nest and the mast: _step_ghillie writes
 					# neither x nor y on ANY branch (submerged / revealing /
 					# winding up / firing / re-cloaking all return in place), so
 					# it inherits its spawn y forever. At camera_top-24 that is
 					# 40px above the player's _clamp_actor ceiling and 24px above
-					# the drawn viewport — unkillable, and _wave_hostiles_cleared
+					# the drawn viewport - unkillable, and _wave_hostiles_cleared
 					# still counts it, holding the wave open.
 					_spawn_special(x, rooted_y, "ghillie")
-				elif roll == 5:
-					# Tracked-AoE is the hardest special to answer — waves 3-4 teach
-					# the dodge-by-aim shooters first, then the drone layers on at 5
-					# (the same beat the first miniboss lands).
-					_spawn_special(x, camera_top - 24 * F_ONE, "drone" if wave >= 5 else "sniper")
-				elif roll == 6:
+				elif spawn_kind == "mg_nest":
 					_spawn_mg_nest(x, rooted_y)
-				elif roll == 7:
-					_spawn_special(x, camera_top - 24 * F_ONE, "technical")
-				elif roll == 8 and wave >= 7:
-					# Late-debut archetype: deep waves stop being static. Roll 8 fell
-					# to plain-elite before, and still does under wave 7 — the rng
-					# stream is untouched, only the wave-7+ interpretation changes.
+				elif spawn_kind == "broadcast":
 					_spawn_broadcast(x, rooted_y)
-				else:
+				elif spawn_kind == "elite":
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
-			elif has_mod(7) and wave_pending % 3 == 0:
+				else:
+					# grenadier / sniper / shield / sapper / drone / technical walk or
+					# fly in from the top edge. Tracked-AoE (drone) is the hardest
+					# special to answer, hence its late debut.
+					_spawn_special(x, camera_top - 24 * F_ONE, spawn_kind)
+			elif has_mod(7) and wave_pending % 3 == 0 and EndlessRoster.unlocked("sniper", wave):
 				# c3-17 r2: ~1/3 of the NON-elite bulk also reads thematic on a themed
 				# wave (deterministic from wave_pending, NO rng draw) so the WHOLE wave
 				# reads as the theme, not only its elites. Endless wave>=3 -> golden-inert.
 				_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
-			elif has_mod(8) and wave_pending % 3 == 0:
+			elif has_mod(8) and wave_pending % 3 == 0 and EndlessRoster.unlocked("grenadier", wave):
 				_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 			else:
 				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
@@ -6622,7 +7064,7 @@ func _cover_blocked(bx: int, by: int, recycle: bool) -> bool:
 func _start_wave() -> void:
 	wave += 1
 	wave_start_tick = tick_count
-	wave_pending = WAVE_BASE_ENEMIES + WAVE_ENEMIES_PER_WAVE * (wave - 1)
+	wave_pending = EndlessRoster.wave_budget(wave)   # base + the tiered roster's compensation bodies
 	wave_spawn_cd = 1
 	deaths_this_wave = 0
 	# Dynamic arena geometry (c2 4v): the learned kiting loop goes stale on a
@@ -6746,6 +7188,9 @@ func _start_wave() -> void:
 	# stay legal for flavor. Roll-then-clamp preserves the rng stream.
 	if wave % 5 == 0 and wave_mod in [1, 2, 3, 6, 7, 8]:
 		wave_mod = 0
+	# The theme is only known now (the mutator rolls after the base budget was set), so the
+	# themed wave's compensation bodies are re-derived here: a theme is NEVER an easier wave.
+	wave_pending = EndlessRoster.wave_budget(wave, EndlessRoster.theme_of(wave_mod, second_mod()))
 	if has_mod(3):
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {
@@ -7110,7 +7555,10 @@ func _step_boss() -> void:
 		# Engage only while the bridge is in view.
 		if g["y"] < camera_top or g["y"] > camera_top + VIEW_H:
 			continue
-		_step_one_boss(g["boss"])
+		if SiegeBoss.is_siege(g["boss"]):
+			SiegeBoss.step(self, g["boss"])
+		else:
+			_step_one_boss(g["boss"])
 
 
 static func boss_mortar_ticks(tier: int) -> Array:
@@ -7122,6 +7570,18 @@ static func boss_mortar_ticks(tier: int) -> Array:
 	if tier == 2:
 		return BOSS_MORTAR_TICKS_T2
 	return BOSS_MORTAR_TICKS
+
+
+static func boss_cy(boss: Dictionary) -> int:
+	## Where a gate boss IS on the y axis. The gunship hovers a fixed BOSS_Y_OFFSET above
+	## its gate; the SiegeBoss is a ground unit that drives, so it carries its own y.
+	if SiegeBoss.is_siege(boss):
+		return boss["y"]
+	return boss["gate_y"] - BOSS_Y_OFFSET
+
+
+static func boss_hr(boss: Dictionary) -> int:
+	return SiegeBoss.HIT_R if SiegeBoss.is_siege(boss) else BOSS_HIT_RADIUS
 
 
 static func boss_flyin_offset(phase_t: int) -> Array:
@@ -7150,14 +7610,30 @@ static func boss_spray_interval(tier: int) -> int:
 	return maxi(6, BOSS_SPRAY_INTERVAL_TICKS - 2 * maxi(0, tier - 1))
 
 
+func _spawn_boss_escorts(boss: Dictionary) -> void:
+	## Wardens/Reapers (EndlessRoster.boss_escorts) land with grenadier escorts either
+	## side of the hull. Existing enemy dicts only (nothing new to hash); skipped, not
+	## queued, when the arena is at its enemy cap.
+	var n: int = EndlessRoster.boss_escorts(wave / 5)
+	for i in n:
+		if enemies.size() >= MAX_ENEMIES:
+			return
+		var side: int = -1 if i % 2 == 0 else 1
+		var ex: int = clampi(boss["x"] + side * 90 * F_ONE, 24 * F_ONE, 616 * F_ONE)
+		_spawn_special(ex, camera_top - 24 * F_ONE, "grenadier")
+
+
 func _step_one_boss(boss: Dictionary) -> void:
 	if boss["phase_t"] < 0:
 		# Endless fly-in: the gunship holds its fire during the approach (campaign
-		# bosses start at 0 and never enter this branch). It is NOT invulnerable —
-		# see boss_flyin_offset and the two damage seams. The `endless_boss`
+		# bosses start at 0 and never enter this branch). It is TARGETABLE but not
+		# killable: _hit_endless_boss bounces every shot (armor_block) until it
+		# lands, so the arrival beat always plays. The `endless_boss`
 		# warning is emitted at the SPAWN, in _start_wave: firing it here on
 		# arrival meant the "incoming" card landed 7 s after the thing appeared.
 		boss["phase_t"] = boss["phase_t"] + 1
+		if boss["phase_t"] == 0 and is_same(boss, endless_boss):
+			_spawn_boss_escorts(boss)
 		return
 	boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
 	var t: int = boss["phase_t"]
@@ -7185,16 +7661,27 @@ func _step_one_boss(boss: Dictionary) -> void:
 	# Endless tier escalation (9v: waves 5/10/15/20 differed only by HP).
 	# wave is 0 in campaign, so tier 0/1 reproduce today's numbers exactly.
 	var tier: int = wave / 5
+	# HP-third act (GunshipPhases): pure function of hp / the spawn-time pool, no new state.
+	# EndlessRoster.boss_act floors it at the tier's OPENING act (wave 10 opens in act 2, ...).
+	var bphase: int = EndlessRoster.boss_act(tier, boss["hp"], boss.get("max_hp", _scaled_boss_hp(BOSS_HP)))
 	# The boss drifts through BOTH halves now (8v: parking during the mortar
 	# volley made the whole phase a stand-still pinata).
-	boss["x"] = boss["x"] + BOSS_SPEED * boss["dir"]
+	boss["x"] = boss["x"] + GunshipPhases.speed(bphase, BOSS_SPEED) * boss["dir"]
 	if boss["x"] < 60 * F_ONE or boss["x"] > 580 * F_ONE:
 		boss["dir"] = -boss["dir"]
 		boss["x"] = clampi(boss["x"], 60 * F_ONE, 580 * F_ONE)
 	if t < BOSS_STRAFE_TICKS:
 		# Strafe run: spray tightens with depth (jitter 40px -> 16px by w20,
 		# cadence 12t -> 6t; starting values, staged-tier test asserts both).
-		var spray_iv: int = boss_spray_interval(tier)
+		var spray_iv: int = GunshipPhases.spray_interval(bphase, boss_spray_interval(tier))
+		if bphase >= 2 and t in GunshipPhases.SALVO_TICKS:
+			# COVER DENIAL: shell the spot the nearest player is hiding at (telegraphed
+			# like every strike: STRIKE_TELEGRAPH_TICKS, ring = GRENADE_RADIUS).
+			var vic := _nearest_alive_player(boss["x"], boss["gate_y"] - BOSS_Y_OFFSET)
+			if not vic.is_empty():
+				var bags: Array = GUNSHIP_COVER_BAGS if is_campaign_world() else []
+				var dn := GunshipPhases.denial_point(vic["x"], vic["y"], bags, boss["gate_y"])
+				_add_strike(dn[0], dn[1])
 		if t % spray_iv == 0:
 			var jit: int = maxi(16, 40 - 8 * maxi(0, tier - 1))
 			var by: int = boss["gate_y"] - BOSS_Y_OFFSET
@@ -7219,6 +7706,12 @@ func _step_one_boss(boss: Dictionary) -> void:
 		# never catch a walker without aiming ahead). Poor-man's velocity:
 		# delta since the last sample, projected one telegraph forward.
 		# Deeper waves add a 4th (w10+) and 5th (w15+) strike.
+		if bphase >= 3 and t in GunshipPhases.carpet_ticks():
+			# DESPERATION CARPET: five columns across the arena, one every
+			# CARPET_STEP ticks, on the row the nearest player is standing on.
+			var cv := _nearest_alive_player(boss["x"], boss["gate_y"] - BOSS_Y_OFFSET)
+			if not cv.is_empty():
+				_add_strike(GunshipPhases.carpet_x((t - GunshipPhases.CARPET_START) / GunshipPhases.CARPET_STEP, boss["dir"]), cv["y"])
 		if t in boss_mortar_ticks(tier):
 			var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target2 := _nearest_alive_player(boss["x"], by2)
@@ -7238,21 +7731,31 @@ func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
 		if g["boss"].is_empty() or not g["boss"]["alive"] or g["open"]:
 			continue
 		var boss: Dictionary = g["boss"]
+		if SiegeBoss.is_siege(boss):
+			# Ground armor: the ONE rule is SiegeBoss.bullet_result (rear plate only, only while it is open).
+			var sres: String = SiegeBoss.bullet_result(boss, b["x"], b["y"])
+			if sres == "weak":
+				events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
+				_damage_boss(boss, SiegeBoss.WEAK_DAMAGE)
+				return true
+			if sres == "armor":
+				events.append({"t": "armor_block", "x": b["x"], "y": b["y"]})
+				return true
+			continue
 		if _dist_lte(b["x"], b["y"], boss["x"], boss["gate_y"] - BOSS_Y_OFFSET, BOSS_HIT_RADIUS):
 			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
 			_damage_boss(boss, 1)
 			return true
-	# The miniboss is engageable from the first tick it is DRAWN, at the point it
+	# The miniboss is targetable from the first tick it is DRAWN, at the point it
 	# is drawn: boss_flyin_offset slides the disc down the approach ramp with the
-	# sprite ([0,0] once it lands). It used to refuse every round for the whole
-	# 420-tick fly-in, silently — the last silent damage refusal in this file,
-	# while the screen showed a helicopter absorbing 53 rounds.
+	# sprite ([0,0] once it lands). During the approach the round is consumed and
+	# BOUNCES (armor_block, via _hit_endless_boss): the refusal is audible and visible,
+	# not the old silent eat, and the gunship cannot be killed before it arrives.
 	if not endless_boss.is_empty() and endless_boss["alive"]:
 		var eoff: Array = boss_flyin_offset(endless_boss["phase_t"])
 		if _dist_lte(b["x"], b["y"], endless_boss["x"] + int(eoff[0]),
 				endless_boss["gate_y"] - BOSS_Y_OFFSET + int(eoff[1]), BOSS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
-			_damage_boss(endless_boss, 1)
+			_hit_endless_boss(b["x"], b["y"], 1)
 			return true
 	return false
 
@@ -7282,7 +7785,21 @@ func _crack_bridge_span(boss: Dictionary) -> void:
 	rocks.append({"x": rx, "y": span_y + 40 * F_ONE, "kind": 0, "burn_ticks": 0})
 
 
+func _hit_endless_boss(ex: int, ey: int, amount: int) -> void:
+	## One door for every hit on the endless miniboss. While it is still on its
+	## approach (phase_t < 0) shots BOUNCE: it cannot be killed before its arrival beat
+	## lands, and the refusal is LOUD - the same armor_block ricochet every other
+	## deflection uses (the view captions it), never a silent eat. Landed: boss_hit + damage.
+	if endless_boss["phase_t"] < 0:
+		events.append({"t": "armor_block", "x": ex, "y": ey})
+		return
+	events.append({"t": "boss_hit", "x": ex, "y": ey})
+	_damage_boss(endless_boss, amount)
+
+
 func _damage_boss(boss: Dictionary, amount: int) -> void:
+	if boss.get("phase_t", 0) < 0:
+		return   # backstop for any caller that skips _hit_endless_boss: an approaching hull cannot die
 	var old_hp: int = boss["hp"]
 	boss["hp"] = boss["hp"] - amount
 	# c4 5v GUNSHIP ARENA CRACK: unlike the colossus, the gunship never mutated
@@ -7323,7 +7840,7 @@ func _damage_boss(boss: Dictionary, amount: int) -> void:
 		# boss dicts. A boss with no phase field is an arrived one — offset [0, 0].
 		var doff: Array = boss_flyin_offset(boss.get("phase_t", 0))
 		var bx: int = boss["x"] + int(doff[0])
-		var by: int = boss["gate_y"] - BOSS_Y_OFFSET + int(doff[1])
+		var by: int = boss_cy(boss) + int(doff[1])
 		events.append({"t": "explosion", "x": bx, "y": by})
 		events.append({"t": "kill", "x": bx, "y": by, "coin": bounty, "kind": "boss"})
 		# The gunship's pilot punches out at the crash site and staggers for the
@@ -7601,6 +8118,15 @@ func _resolve_strikes() -> void:
 		for tank in tanks:
 			if tank["alive"] and _dist_lte(s["x"], s["y"], tank["x"], tank["y"], GRENADE_RADIUS):
 				_ignite_tank(tank, true)
+		if s.get("crater", false):
+			# Siege Tank shell: the ring that hurts you also breaks the bags inside it.
+			var cbi := sandbags.size() - 1
+			while cbi >= 0:
+				if _dist_lte(s["x"], s["y"], sandbags[cbi]["x"], sandbags[cbi]["y"], GRENADE_RADIUS):
+					_break_sandbag_at(cbi)
+					cbi = mini(cbi - 1, sandbags.size() - 1)
+				else:
+					cbi -= 1
 		strikes.remove_at(i)
 
 
@@ -7705,6 +8231,11 @@ func checksum() -> int:
 		if wp > 0:
 			h = feed.call(wp, h)   # conditional (flush_cd precedent): 0 while the wheel is shut, so a run that never shops leaves the stream byte-identical
 	for p in players:
+		if p["weapon"] != Weapons.NONE:
+			# Conditional feed: holding the MG (every torture run) leaves the stream byte-identical.
+			h = feed.call(p["weapon"], h)
+			h = feed.call(p["wpn_ammo"], h)
+	for p in players:
 		if p["flush_cd"] > 0:
 			h = feed.call(p["flush_cd"], h)   # c3 2v: conditional — flush_cd is 0 unless camping grass near a threat (never in either torture window)
 	if not rocks.is_empty():
@@ -7723,6 +8254,8 @@ func checksum() -> int:
 			h = feed.call(sb.get("player", 0), h)
 			h = feed.call(sb.get("vertical", 0), h)
 			h = feed.call(sb.get("nest", 0), h)
+			if sb.get("scorch", 0) > 0:
+				h = feed.call(sb["scorch"], h)   # flamethrower heat; conditional, absent on every unburnt bag
 	if not vents.is_empty():
 		# Conditional feed (sandbags precedent): vents exist only past seg 4 —
 		# neither torture window ever streams one, so goldens hold.
@@ -7730,6 +8263,12 @@ func checksum() -> int:
 		for vt in vents:
 			h = feed.call(vt["x"], h)
 			h = feed.call(vt["y"], h)
+	if not rockets.is_empty():
+		# Conditional feed (sandbags precedent): no rocket in flight leaves the stream untouched.
+		h = feed.call(rockets.size(), h)
+		for rk in rockets:
+			for v in [rk["x"], rk["y"], rk["vx"], rk["vy"], rk["ttl"], rk["owner"]]:
+				h = feed.call(v, h)
 	if not colossus.is_empty():
 		for v in [colossus["hp"], colossus["x"], colossus["y"], int(colossus["alive"]),
 				colossus.get("core_open", 0), colossus.get("core_cd", 0)]:
@@ -7760,6 +8299,11 @@ func checksum() -> int:
 		h = feed.call(e.get("face_y", 0), h)
 		h = feed.call(int(e.get("marked", false)), h)
 		h = feed.call(e.get("hp", 0), h)   # MG Nest armor (other kinds have none)
+		if e.get("escort", false):
+			h = feed.call(0xE5C027, h)   # Siege Tank escort tag (decides _dismount's respawn count); conditional, absent on every other enemy
+	for s in strikes:
+		if s.get("crater", false):
+			h = feed.call(0xC4A7E4, h)   # Siege Tank cover-cratering shell (_resolve_strikes breaks bags only when set); conditional
 	for pk in pickups:
 		h = feed.call(pk["kind"], h)
 		h = feed.call(pk.get("cost", 0), h)
@@ -7796,6 +8340,10 @@ func checksum() -> int:
 		if not g["boss"].is_empty():
 			for v in [g["boss"]["hp"], g["boss"]["x"], int(g["boss"]["alive"]), g["boss"]["phase_t"], g["boss"]["dir"]]:
 				h = feed.call(v, h)
+			if SiegeBoss.is_siege(g["boss"]):
+				# Conditional feed (sandbag-scorch precedent): the gunship's stream is untouched.
+				for k in SiegeBoss.HASHED_KEYS:
+					h = feed.call(g["boss"][k], h)
 	if not observer.is_empty():
 		h = feed.call(observer["x"], h)
 		h = feed.call(observer["strike_cd"], h)

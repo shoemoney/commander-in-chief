@@ -580,29 +580,35 @@ func test_px_is_only_ever_applied_to_fixed_point_quantities() -> void:
 ## a number out from under this table and turn the suite red. When that happens
 ## the fix is to re-tune SCALE by the same factor the canvas moved (that is all
 ## three fixes above were) and THEN update the row — never the row alone.
+## NOTE (sprite bake): player1/2, enemy_*, frogman* are now BAKED screen-sized
+## canvases (tools/bake_sprites.py) whose SCALE is 1 / call scale (net 1.0), so their
+## rows here are the baked canvas, not a master. Re-bake -> re-measure these rows.
+# props-style: bunker/crate/cover/rock/vehicle/boss keys are now BAKED PNGs (tools/bake_sprites.py
+# PROP_FAMILIES) whose canvas IS the on-screen size, with SCALE = 1/call scale (net 1.0).
 const SPRITE_CANVAS := {
-	"ammobox": 160, "barbedwire": 220, "barrel": 160, "barricade": 200, "barrier": 220, "bridge_mid": 220,
-	"bridge_ramp": 220, "bunker": 128, "bunker2": 128, "cactus_dead1": 120, "cactus_dead2": 120,
+	"icon_flame": 64, "icon_rocket": 64,   # special-weapon chip + capsule art (tools/gen_ui_icons.py)
+	"ammobox": 160, "barbedwire": 220, "barrel": 26, "barricade": 200, "barrier": 220, "bridge_mid": 220,
+	"bridge_ramp": 220, "bunker": 58, "bunker2": 58, "cactus_dead1": 120, "cactus_dead2": 120,
 	"cactus_dead3": 120, "cactus_large": 120, "cactus_small": 96, "cap_claymore": 128, "cap_flash": 128,
 	"cap_pierce": 128, "cap_rend": 128, "cap_smoke": 128, "cap_spread": 128, "cap_triple": 128,
-	"colossus_barrel": 72, "colossus_body": 128, "corpse_soldier1": 140, "corpse_soldier2": 140,
-	"courier": 64, "crate_airstrike": 56, "crate_ammo": 56, "crate_grenade": 56, "crate_stack": 220,
+	"colossus_barrel": 56, "colossus_body": 144, "corpse_soldier1": 140, "corpse_soldier2": 140,
+	"courier": 64, "crate_airstrike": 26, "crate_ammo": 26, "crate_grenade": 26, "crate_stack": 220,
 	"crater": 160, "crater_field": 240, "crater_water": 240, "dropped_shield": 140, "dry_shrub": 220,
-	"elite": 256, "enemy_assault": 128, "enemy_lmg": 128, "enemy_shotgun": 128, "enemy_smg": 128,
-	"enemy_sniper": 128, "explosion0": 128, "explosion1": 128, "explosion2": 128, "explosion3": 128,
-	"fallen_merc": 180, "flag_iran": 600, "flag_marker": 200, "flak_gun": 220, "frogman": 128,
-	"frogman_speargun": 128, "fx_bubble1": 64, "fx_bubble2": 64, "fx_flame": 200, "fx_fumes": 128,
-	"fx_impactdark": 200, "fx_muzzle_fan": 128, "fx_smoke": 200, "ghillie": 128, "gunship_barrel": 48,
-	"gunship_body": 112, "hud_flag": 128, "item_binoculars": 40, "item_bullet": 32, "item_bullet_shotgun": 32,
+	"elite": 256, "enemy_assault": 28, "enemy_lmg": 32, "enemy_shotgun": 32, "enemy_smg": 30,
+	"enemy_sniper": 30, "explosion0": 128, "explosion1": 128, "explosion2": 128, "explosion3": 128,
+	"fallen_merc": 180, "flag_iran": 600, "flag_marker": 200, "flak_gun": 220, "frogman": 26,
+	"frogman_speargun": 32, "fx_bubble1": 64, "fx_bubble2": 64, "fx_flame": 200, "fx_fumes": 128,
+	"fx_impactdark": 200, "fx_muzzle_fan": 128, "fx_smoke": 200, "ghillie": 128, "gunship_barrel": 32,
+	"gunship_body": 98, "hud_flag": 128, "item_binoculars": 40, "item_bullet": 32, "item_bullet_shotgun": 32,
 	"m_bombsuit": 128, "m_drone": 48, "m_heli_attack2": 112, "m_heli_transport": 112, "m_jet": 128,
-	"m_pilot": 56, "m_radar_tank": 104, "m_rocket_truck": 104, "m_soldier2": 128, "m_technical": 96,
-	"mg_stand": 160, "mg_tripod": 160, "mz_pop": 128, "observer": 128, "pickup_vest": 56, "player1": 256,
-	"player2": 256, "radio_tower": 220, "riot_shield": 64, "rock1": 220, "rock2": 260, "rusher": 256,
-	"sandbag_beige": 80, "sapper": 128, "scrub": 72, "skyline_chimney": 160, "skyline_mast": 200,
-	"tank_barrel": 72, "tank_body": 104, "tank_hulk": 104, "tank_shell": 32, "tank_trap": 200,
+	"m_pilot": 56, "m_radar_tank": 104, "m_rocket_truck": 104, "m_soldier2": 128, "m_technical": 32,
+	"mg_stand": 160, "mg_tripod": 160, "mz_pop": 128, "observer": 128, "pickup_vest": 56, "player1": 36,
+	"player2": 36, "radio_tower": 220, "riot_shield": 64, "rock1": 38, "rock2": 38, "rusher": 256,
+	"sandbag_beige": 32, "sapper": 128, "scrub": 72, "skyline_chimney": 160, "skyline_mast": 200,
+	"tank_barrel": 32, "tank_body": 46, "tank_hulk": 46, "tank_shell": 32, "tank_trap": 26,
 	"tent": 260, "trench": 260, "tumbleweed": 200, "wall_sandbag": 240, "wall_sandbag_b": 240,
 	"wall_sandbag_c": 240, "wall_sandbag_end": 120, "watchtower": 260, "wep_claymore": 40, "wep_flashbang": 40,
-	"wep_grenade": 40, "wep_mg": 56, "wep_rifle": 56, "wep_shotgun": 56, "wep_smoke": 40, "wreck": 220,
+	"wep_grenade": 40, "wep_mg": 56, "wep_rifle": 56, "wep_shotgun": 56, "wep_smoke": 40, "wreck": 38,
 	"wreck_apc": 104, "wreck_halftrack": 240, "wreck_light_tank": 96, "wreck_technical": 96,
 }
 
@@ -2214,8 +2220,12 @@ func test_colossus_screen_bar_opts_out_under_the_result_card() -> void:
 func test_hall_tags_the_score_inflating_hard_toggle() -> void:
 	## *ASSIST and *DAILY already stamp the board. NG+ HARD was the one toggle
 	## that moved score (~1.58x) with no marker.
+	# review-fixes: the tag text moved out of menu.gd into CampaignMeta.hall_tags (one source for the
+	# full and abbreviated forms); the menu must still route the Hall cell through it.
 	var menu_src := FileAccess.get_file_as_string("res://src/view/menu.gd")
-	Runner.T.ok(menu_src.contains("tag += \"  *HARD\""),
+	var meta_src := FileAccess.get_file_as_string("res://src/view/campaign_meta.gd")
+	Runner.T.ok(menu_src.contains("CampaignMeta.hall_tags(run, false)") and meta_src.contains("tag += \"  *D\" if short else \"  *DAILY\"") \
+			and meta_src.contains("\"  *H\" if short else \"  *HARD\""),
 		"the Hall stamps *HARD on NG+ runs the same way it stamps *ASSIST")
 	var rec := _view_src()
 	var arm := rec.find("func _record_run(")
@@ -3073,17 +3083,15 @@ func test_mast_telegraph_sleeps_with_the_shop() -> void:
 # --- r4-menu #2: REDUCE MOTION's copy must not promise more than the floors deliver -----
 
 func test_reduce_motion_copy_does_not_overclaim_past_its_own_floors() -> void:
-	## main.gd deliberately keeps a floor under two motion effects even with REDUCE MOTION
-	## on (main.gd:1264's blast-warp maxf(_motion, 0.25) and :12934's flash-alpha
-	## maxf(_motion, 0.4) — both commented as intentional, "the strongest motion effect in
-	## the game" / a dimmed-not-zeroed wash). The SETTING_HELP copy used to say "NO ...
-	## FLASH" outright, which was simply false. This pins both halves so a floor edit
-	## without a copy edit (or vice versa) goes red instead of quietly drifting apart again.
+	# Reduce Motion damps the default flash; the separate Flash Level can remove it.
 	var msrc := FileAccess.get_file_as_string("res://src/main.gd")
 	Runner.T.ok(msrc.contains("maxf(_motion, 0.25)"),
 		"the blast-warp motion floor still exists at its documented value")
-	Runner.T.ok(msrc.contains("maxf(_motion, 0.4)"),
-		"the flash-alpha motion floor still exists at its documented value")
+	var main := Main.new()
+	main._motion = 0.0
+	Runner.T.eq(main._flash_strength(), 0.4,
+		"reduced motion leaves the documented dimmed flash at the default flash level")
+	main.free()
 	var help: String = GameMenu.setting_help("motion")
 	Runner.T.ok(not help.contains("NO SHAKE, FLASH"),
 		"REDUCE MOTION copy no longer claims FLASH is fully eliminated alongside SHAKE (%s)" % help)
@@ -3118,13 +3126,14 @@ func test_fan_ammo_tax_is_disclosed_in_the_hint_copy() -> void:
 	inp2.aim_y = -256
 	inp2.fire = true
 	sim2.step([inp2])
-	Runner.T.eq(ammo1 - p2["mg_ammo"], 3, "the stacked 5-round fan costs 3 ammo/pull")
+	# economy pass: the surcharge no longer stacks - the 5-round fan costs the same 2 as a lone fan.
+	Runner.T.eq(ammo1 - p2["mg_ammo"], 2, "the stacked 5-round fan costs 2 ammo/pull (flat, non-compounding)")
 
 	var src := _view_src()
 	Runner.T.ok(src.contains("2 AMMO A PULL"),
 		"the Trench Gun / Triple Shot hint copy must state the real per-pull ammo cost")
-	Runner.T.ok(src.contains("5 FOR 3"),
-		"the stacked-fan hint copy must state the real 3-ammo cost for the 5-way fan")
+	Runner.T.ok(src.contains("5 FOR 2"),
+		"the stacked-fan hint copy must state the real 2-ammo cost for the 5-way fan")
 
 
 # --- R4: getting shot boils a second off the tank, and the only feedback said "safe" ---
@@ -3571,7 +3580,17 @@ func test_endless_boss_is_hittable_wherever_it_is_drawn() -> void:
 		for e in sim.events:
 			if e["t"] == "boss_hit":
 				got_ev = true
-		if hit and got_ev and sim.endless_boss["hp"] == hp0 - 1:
+		# Owner decision 23/25 (endless-variety): while phase_t < 0 the round is consumed and
+		# BOUNCES (armor_block, hp untouched) so the arrival beat always lands; once landed
+		# it damages as before.
+		var bounced := false
+		for e in sim.events:
+			if e["t"] == "armor_block":
+				bounced = true
+		if pt < 0:
+			if hit and bounced and not got_ev and sim.endless_boss["hp"] == hp0:
+				bullet_ok += 1
+		elif hit and got_ev and sim.endless_boss["hp"] == hp0 - 1:
 			bullet_ok += 1
 		# --- explosive family (grenade / airburst / barrel / mine) ---
 		var sim2 := _flyin_boss_sim(pt)
@@ -3579,10 +3598,16 @@ func test_endless_boss_is_hittable_wherever_it_is_drawn() -> void:
 		var at2 := _flyin_drawn_px(sim2)
 		sim2._explode(int(at2.x * Fixed.ONE), int(at2.y * Fixed.ONE))
 		var got2 := false
+		var bounced2 := false
 		for e in sim2.events:
 			if e["t"] == "boss_hit":
 				got2 = true
-		if got2 and sim2.endless_boss["hp"] < hp2:
+			if e["t"] == "armor_block":
+				bounced2 = true
+		if pt < 0:
+			if bounced2 and not got2 and sim2.endless_boss["hp"] == hp2:
+				blast_ok += 1
+		elif got2 and sim2.endless_boss["hp"] < hp2:
 			blast_ok += 1
 	Runner.T.eq(bullet_ok, samples.size(),
 		"a round on the drawn hull damages the miniboss at every sampled tick (%d/%d)"
@@ -3820,6 +3845,12 @@ func test_flyin_death_fx_land_on_the_wreck_not_the_pad() -> void:
 			float(boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(off[1])) * PX)
 		boss["hp"] = 1
 		sim._damage_boss(boss, 1)
+		if pt < 0:
+			# Owner decision 23/25: an approaching gunship cannot die, so there is no
+			# mid-approach wreck to misplace any more (the seam below still guards the
+			# landed samples, where the offset is [0, 0]).
+			Runner.T.ok(boss["alive"] and boss["hp"] == 1, "an approaching hull refuses the killing hit (phase_t %d)" % pt)
+			continue
 		Runner.T.ok(not boss["alive"], "the sampled hit kills the miniboss (phase_t %d)" % pt)
 		var seen := 0
 		for ev in sim.events:
@@ -4228,6 +4259,10 @@ const TEXT_XFORM_SCALE_ALLOW := {
 	"Vector2.ONE * fpunch":
 		"main.gd _draw_fx floattext toast. `fpunch = 1.0 + maxf(0.0, (FLOAT_PUNCH_MAX - 1.0) - t * 4.0)`,"
 		+ " so it is 1.0..1.5 — scale-UP only (same measurement: 15 ink rows at 1.5).",
+	"flinch_sq":
+		"main.gd _draw_enemies flinch squash. `TimeFx.flinch_scale` returns Vector2(1+s, 1) or"
+		+ " Vector2(1, 1+s) with s = 0.08 * remaining/6 (0..0.08), else Vector2.ONE, and the transform is"
+		+ " only set when it differs from ONE — scale-UP only, well inside the measured-safe 1.28.",
 }
 const _TEXT_DRAW_CALLS := ["Art.text(", "Art.text_center(", "draw_string(", "draw_string_outline("]
 
@@ -4967,11 +5002,26 @@ const WORLD_TEXT_SITES := {
 const OPAQUE_GROUND_ALLOW := {
 	# MUD_BANK_H half-speed bands: full 640px wide, no corners on screen, and the edge
 	# IS the sim's wading boundary (with a deliberate lip) — art == collision.
-	"_draw_water:dirt": "mud-bank band edge is the half-speed sim boundary",
+	# ground-polish: the bands no longer paint the shared saturated-orange "dirt" card; they
+	# paint the sector's own ground card through a RUNTIME key (ground_biome_source(mud_b)), so
+	# there is no Art.tex("dirt") literal left to license. The same art == collision licence
+	# now rides on that dynamic fill: test_mud_bank_fill_keeps_the_half_speed_licence below pins it.
 	# Shore polygon + ford dry rects from ford_visual: the hard edge is where the
 	# water collision starts and stops — art == collision.
 	"_draw_water:sand": "shore / ford dry ground edge is the water collision edge",
 }
+
+
+func test_mud_bank_fill_keeps_the_half_speed_licence() -> void:
+	var body := _fn_src(_view_src(), "_draw_water")
+	Runner.T.ok(body.contains("Art.tex(ground_biome_source(mud_b))") and body.contains("mud_p[\"tex_mod\"]"),
+		"_draw_water fills the mud bank from the sector's own card via mud_bank_plan (the licence moved here)")
+	Runner.T.ok(body.contains("mud_lip"), "the half-speed edge keeps its dark lip, so the boundary still reads")
+	for biome in range(0, 7):
+		var p: Dictionary = preload("res://src/view/ground_structure.gd").mud_bank_plan(biome, 3, Vector2(640.0, 40.0), 0.0)
+		var tm: Color = p["tex_mod"]
+		Runner.T.ok(tm.a >= 0.9 and tm.v <= 0.75,
+			"biome %d bank is a near-opaque DARKENED card (a %.2f, v %.2f): readable as the half-speed band" % [biome, tm.a, tm.v])
 
 
 func _fn_src(src: String, fn: String) -> String:

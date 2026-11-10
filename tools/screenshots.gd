@@ -124,6 +124,7 @@ func _run() -> void:
 		digests[digest] = path
 		print("SAVED %s (colors=%d stddev=%.2f)" % [path, st["colors"], st["stddev"]])
 	await preload("res://tools/quiesce.gd").teardown(self, main)
+	main = null
 	if failures > 0:
 		push_error("screenshots: %d of %d shots are unusable — refusing to report success" % [failures, shots.size()])
 		print("SHOTS UNUSABLE — %d of %d failed; do not hand these to a reviewer" % [failures, shots.size()])
@@ -208,6 +209,25 @@ func _pose(idx: int) -> void:
 	for w in main._wheel:
 		w["open"] = false
 		w["sel"] = -1
+	# The debrief is view state, not sim state, so a fresh sim does not clear it. The
+	# defeat-card pose sets _debrief = true; before this scrub that K.I.A. card rode along
+	# into every later pose that did not happen to overwrite it — the Endless shop and the
+	# off-screen-pip shot were both captured UNDER a casualty report nobody had earned
+	# (seen in the 19-shot capture, 2026-11-10). Same rule as the garnish above: a pose
+	# starts clean and opts in.
+	main._debrief = false
+	main._result_t = 0.0
+	main._run_vp_gain = 0
+	main.svc = ServiceRecord.new()   # service-record: medals / bests / call-out must not carry between poses
+	main._menu.mode = GameMenu.Mode.HIDDEN   # ...nor may the previous pose's open menu page (the record page rode into the debrief shot)
+	# Same class, older: the OPTIONS pose turns REDUCE MOTION, COLORBLIND, ASSIST and
+	# FULLSCREEN on to exercise the header summary, and nothing ever turned them off. It
+	# went unnoticed while only menu poses followed it; the first gameplay pose added after
+	# it rendered with the colourblind palette and CB / RM status pips in its corner.
+	main._motion = 1.0
+	main._set_colorblind(false)
+	main._assist = false
+	main._fullscreen = false
 	main._set_text_scale(100)   # each pose starts from the shipped baseline; a shot may opt up
 	if shots[current].has("dress"):
 		shots[current]["dress"].call(main)   # view-layer garnish (fx, recoil)
@@ -238,6 +258,10 @@ func _dress_victoly(m: Node2D) -> void:
 	# fade a t=0 pose would render the card near-invisible instead. Every other shot in
 	# this harness poses a SETTLED state — this one never did. It does now.
 	m._result_t = 1.0
+	# A full campaign clear banks 22 VP (2 per sector + 10 for the win). Unposed, the card's
+	# new progression row read "0 VP BANKED" on the one screen that is supposed to brag.
+	m.vet_points = 83
+	m._run_vp_gain = 22
 	# The card's widest row ("%d¢ WAR CHEST BANKED -> +%s") reads _victory_banked /
 	# _victory_banked_score, not sim.war_chest (the sim zeroes that on the same tick —
 	# see sim_world.gd's victory payout). Unposed both stay 0, rendering the narrowest
@@ -283,13 +307,23 @@ func _build_shots() -> void:
 		{"name": "tank-assault", "build": _shot_tank},
 		{"name": "river-crossing", "build": _shot_river, "dress": _dress_river},
 		{"name": "bridge-gunship", "build": _shot_gunship},
+		{"name": "gunship-act2-cover-denial", "build": _shot_gunship_act2},
+		{"name": "gunship-act3-carpet", "build": _shot_gunship_act3},
+		{"name": "siege-tank-charge-lane", "build": _shot_siege_charge},
+		{"name": "siege-tank-rear-window", "build": _shot_siege_window},
+		{"name": "siege-tank-sweep-fan", "build": _shot_siege_sweep},
 		{"name": "foundry-colossus-last-stand", "build": _shot_colossus, "dress": _dress_colossus},
 		{"name": "victoly", "build": _shot_victoly, "dress": _dress_victoly},
+		# retry-meta: the Campaign K.I.A. card with its VP line and RETRY SECTOR row.
+		{"name": "defeat-retry-sector", "build": _shot_defeat, "dress": _dress_defeat},
 		{"name": "endless-war-shop", "build": _shot_shop, "dress": _dress_shop},
 		{"name": "title-screen", "build": _shot_firefight, "dress": _dress_title},
 		{"name": "pause-menu", "build": _shot_firefight, "dress": _dress_pause},
 		{"name": "how-to-play", "build": _shot_firefight, "dress": _dress_howto},
 		{"name": "hall-of-fame", "build": _shot_firefight, "dress": _dress_hall},
+		# service-record: the Hall's RECORD tab, and a Campaign debrief that just earned medals.
+		{"name": "service-record", "build": _shot_firefight, "dress": _dress_service_record},
+		{"name": "debrief-new-medal", "build": _shot_defeat, "dress": _dress_new_medal},
 		{"name": "options-screen", "build": _shot_firefight, "dress": _dress_options},
 		# 7 of the 12 framed modes had NEVER been rendered by this harness while the
 		# bezel was being rebuilt, and REBIND is the one that was actually broken:
@@ -297,6 +331,8 @@ func _build_shots() -> void:
 		# an 11px stroke inward from. CHAPTERS is the widest row content of the ten.
 		{"name": "rebind-controls", "build": _shot_firefight, "dress": _dress_rebind},
 		{"name": "chapters-select", "build": _shot_firefight, "dress": _dress_chapters},
+		{"name": "howto-war-chest", "build": _shot_firefight, "dress": _dress_howto_chest},
+		{"name": "offscreen-gunner-pips", "build": _shot_gunner_pips, "dress": _dress_gunner_pips},
 	]
 
 
@@ -304,7 +340,7 @@ func _shot_firefight() -> SimWorld:
 	var sim := SimWorld.new(7, 1)
 	var p := sim.players[0]
 	p["x"] = 300 * F
-	p["y"] = _cam(sim, 270)
+	p["y"] = _cam(sim, 300)
 	p["aim_x"] = 0
 	p["aim_y"] = -F
 	p["mg_ammo"] = 64
@@ -413,6 +449,71 @@ func _shot_river() -> SimWorld:
 	return sim
 
 
+func _shot_gunship_act(hp: int, t_from: int, t_to: int) -> SimWorld:
+	## Stage the REAL attack: step the boss through [t_from, t_to] so the strikes on
+	## screen are exactly the ones the sim called, then age them mid-telegraph.
+	var sim := SimWorld.new(7, 1)
+	var gy := _cam(sim, 90)
+	var boss := {"alive": true, "hp": hp, "max_hp": 40, "x": 360 * F, "dir": 1, "phase_t": t_from - 1, "gate_y": gy}
+	sim.gates.append({"y": gy, "open": false, "b1": {}, "b2": {}, "final": false, "boss": boss})
+	var p := sim.players[0]
+	p["x"] = 200 * F
+	p["y"] = gy + 118 * F   # crouched behind the first cover bag
+	p["aim_x"] = 0
+	p["aim_y"] = -F
+	for t in range(t_from, t_to + 1):
+		sim._step_one_boss(boss)
+	for st in sim.strikes:
+		st["ticks"] = 20
+	return sim
+
+
+func _siege_staged(hp: int, until_state: int, extra_ticks: int) -> SimWorld:
+	## Stage the REAL Siege Tank state: drive SiegeBoss.step until it reaches `until_state`,
+	## then `extra_ticks` more, so the lane / fan / plate on screen are the sim's own.
+	var sim := SimWorld.new(7, 1)
+	var gy := _cam(sim, 60)
+	sim.rocks.clear()
+	sim.sandbags.clear()
+	var boss := SiegeBoss.make(gy, 80)
+	boss["hp"] = hp
+	sim.gates.append({"y": gy, "open": false, "b1": {}, "b2": {}, "final": false, "boss": boss})
+	sim._stamp_siege_cover(gy)
+	var p := sim.players[0]
+	p["x"] = 250 * F
+	p["y"] = _cam(sim, 300)
+	p["aim_x"] = 0
+	p["aim_y"] = -F
+	var guard := 0
+	while boss["st"] != until_state and guard < 4000:
+		SiegeBoss.step(sim, boss)
+		guard += 1
+	for i in extra_ticks:
+		SiegeBoss.step(sim, boss)
+	sim.events.clear()
+	return sim
+
+
+func _shot_siege_charge() -> SimWorld:
+	return _siege_staged(50, SiegeBoss.St.REV, 14)
+
+
+func _shot_siege_window() -> SimWorld:
+	return _siege_staged(50, SiegeBoss.St.STUN, 20)
+
+
+func _shot_siege_sweep() -> SimWorld:
+	return _siege_staged(20, SiegeBoss.St.SWEEP, 24)
+
+
+func _shot_gunship_act2() -> SimWorld:
+	return _shot_gunship_act(26, 1, GunshipPhases.SALVO_TICKS[1])
+
+
+func _shot_gunship_act3() -> SimWorld:
+	return _shot_gunship_act(12, GunshipPhases.CARPET_START, GunshipPhases.carpet_ticks()[4])
+
+
 func _shot_gunship() -> SimWorld:
 	var sim := SimWorld.new(7, 2)
 	var gy := _cam(sim, 90)
@@ -492,6 +593,53 @@ func _shot_victoly() -> SimWorld:
 	return sim
 
 
+func _shot_defeat() -> SimWorld:
+	var sim := SimWorld.new(7, 1, "campaign")
+	sim.score = 48250
+	for i in 4:   # four gates down = died in sector 5
+		sim.gates.append({"y": _cam(sim, 60 + i * 20), "open": true, "b1": {}, "b2": {}, "boss": {}})
+	var p := sim.players[0]
+	p["x"] = 320 * F
+	p["y"] = _cam(sim, 260)
+	return sim
+
+
+func _dress_defeat(m: Node2D) -> void:
+	m._run_kills = 121
+	m._run_best_streak = 14
+	m._result_t = 1.0
+	m._debrief = true
+	m.vet_points = 61
+	m._run_vp_gain = 10
+
+
+func _fill_record(m: Node2D) -> void:
+	m.svc.medals.assign([7, 7, 5, 3, 0, 0])
+	m.svc.best_grade = {"campaign": "A", "endless": "B", "boss_rush": "C", "arcade": "B", "daily": "S"}
+	m.svc.best_reach = {"campaign": 5, "endless": 12, "boss_rush": 3, "arcade": 4, "daily": 6}
+
+
+func _dress_service_record(m: Node2D) -> void:
+	_fill_record(m)
+	m.vet_points = 61
+	m._menu.open(GameMenu.Mode.HALL)
+	m._menu._open_t = 1.0
+	m._menu._record_view = true
+	m._hud_icons.visible = false
+
+
+func _dress_new_medal(m: Node2D) -> void:
+	_dress_defeat(m)
+	# Earned through the real tracker + bank path, not a hand-set call-out.
+	m.svc.begin_run(m.sim)
+	for t in [420, 910, 2300]:
+		m.sim.tick_count = t
+		m.sim.events.clear()
+		m.sim.events.append({"t": "gate_open"})
+		m.svc.observe(m.sim)
+	m.svc.commit_run(true, "campaign", "A", 4, false)
+
+
 func _shot_shop() -> SimWorld:
 	var sim := SimWorld.new(7, 2, "endless")
 	sim.wave = 6
@@ -552,6 +700,31 @@ func _dress_howto(m: Node2D) -> void:
 	m._menu.open(GameMenu.Mode.HOWTO)
 	m._menu._open_t = 1.0
 	m._hud_icons.visible = false
+
+
+func _dress_howto_chest(m: Node2D) -> void:
+	m._menu.open(GameMenu.Mode.HOWTO)
+	m._menu._open_t = 1.0
+	m._menu._howto_page = 1
+	m._hud_icons.visible = false
+
+
+func _dress_gunner_pips(m: Node2D) -> void:
+	m._menu.mode = GameMenu.Mode.HIDDEN   # the previous shot left HOW TO PLAY open
+	m._hud_icons.visible = true
+
+
+func _shot_gunner_pips() -> SimWorld:
+	## Flank squad winding up past the side edges: the sim gates fire on Y only.
+	var sim := _shot_firefight()
+	sim.enemies.clear()
+	sim.players[0]["x"] = 90 * F
+	for e in [[-30, 200, "rusher"], [-34, 214, "rusher"], [-28, 226, "rusher"], [680, 120, "elite"]]:
+		sim._spawn_enemy(e[0] * F, _cam(sim, e[1]), e[2] == "elite")
+		var en: Dictionary = sim.enemies[sim.enemies.size() - 1]
+		en["x"] = e[0] * F
+		en["windup"] = 12
+	return sim
 
 
 func _dress_options(m: Node2D) -> void:

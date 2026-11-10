@@ -9,22 +9,45 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_sim_rng.gd",
 	"res://tests/test_gameplay.gd",
 	"res://tests/test_archetypes.gd",
+	"res://tests/test_weapons.gd",
+	"res://tests/test_review_fixes.gd",
 	"res://tests/test_combat.gd",
+	"res://tests/test_time_fx.gd",
 	"res://tests/test_controls.gd",
+	"res://tests/test_camera_locator.gd",
+	"res://tests/test_accessibility_input.gd",
+	"res://tests/test_accessibility_policy.gd",
+	"res://tests/test_accessibility_menu.gd",
+	"res://tests/test_accessibility_main.gd",
+	"res://tests/test_accessibility_replay.gd",
 	"res://tests/test_hitbox_fairness.gd",
+	"res://tests/test_prop_bake.gd",
+	"res://tests/test_sprite_bake.gd",
+	"res://tests/test_infantry_design.gd",
 	"res://tests/test_ground_anchors.gd",
+	"res://tests/test_ground_structure.gd",
+	"res://tests/test_ground_polish.gd",
+	"res://tests/test_review2_view.gd",
 	"res://tests/test_war_chest.gd",
+	"res://tests/test_economy_pacing.gd",
 	"res://tests/test_shop.gd",
 	"res://tests/test_tank.gd",
 	"res://tests/test_observer.gd",
 	"res://tests/test_economy_gate.gd",
 	"res://tests/test_gates.gd",
 	"res://tests/test_mechanics.gd",
+	"res://tests/test_fairness.gd",
 	"res://tests/test_water.gd",
+	"res://tests/test_atmosphere.gd",
 	"res://tests/test_biomes.gd",
+	"res://tests/test_sector_look.gd",
 	"res://tests/test_boss.gd",
+	"res://tests/test_gunship_phases.gd",
+	"res://tests/test_siege_boss.gd",
+	"res://tests/test_review2_sim.gd",
 	"res://tests/test_lockstep.gd",
 	"res://tests/test_endless.gd",
+	"res://tests/test_endless_variety.gd",
 	"res://tests/test_spawn_cover.gd",
 	"res://tests/test_mutators.gd",
 	"res://tests/test_colossus.gd",
@@ -34,15 +57,26 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_replay.gd",
 	"res://tests/test_leaderboard.gd",
 	"res://tests/test_endless_meta.gd",
+	"res://tests/test_campaign_meta.gd",
+	"res://tests/test_service_record.gd",
+	"res://tests/test_review2_meta.gd",
 	"res://tests/test_robustness.gd",
 	"res://tests/test_assets.gd",
 	"res://tests/test_capture_guard.gd",
+	"res://tests/test_audio_director.gd",
+	"res://tests/test_soundtrack_wiring.gd",
 	"res://tests/test_main.gd",
 	"res://tests/test_view_honesty.gd",
+	"res://tests/test_teach_truth.gd",
 	"res://tests/test_steam_bridge.gd",
 	"res://tests/test_menu_layout.gd",
+	"res://tests/test_front_door.gd",
+	"res://tests/test_review_fixes_meta.gd",
 	"res://tests/test_localization.gd",
+	"res://tests/test_cues.gd",
+	"res://tests/test_a11y_fixes.gd",
 	"res://tests/test_hud.gd",
+	"res://tests/test_hud_diet.gd",
 	"res://tests/test_stub_parity.gd",
 	"res://tests/test_capture_probe.gd",
 	"res://tests/test_role_rim.gd",
@@ -187,7 +221,9 @@ func _init() -> void:
 		quit(1)
 
 
-## Fail the run for every un-allowlisted engine `ERROR:` line this process logged. Fails CLOSED:
+## Fail the run for every engine script error and un-allowlisted `ERROR:` line.
+## Script errors abort a method without becoming assertions, so skipping them can
+## produce a misleading PASS after half a test. Fails CLOSED:
 ## if the log can't be found the gate itself is the failure, so it can never silently stop running.
 func _gate_engine_errors(marker: String) -> void:
 	var dir := DirAccess.open(LOG_DIR)
@@ -199,6 +235,9 @@ func _gate_engine_errors(marker: String) -> void:
 		if not text.contains(marker):
 			continue   # another process's log (rotation renames ours out from under the path)
 		for line in text.split("\n"):
+			if line.begins_with("SCRIPT ERROR:"):
+				T.ok(false, "script error aborted test execution: " + line)
+				continue
 			if not line.begins_with("ERROR:"):
 				continue
 			if line.begins_with("ERROR: FAIL: "):

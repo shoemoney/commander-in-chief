@@ -20,7 +20,7 @@ const KNOWN := {
 		"roll_prev", "grenade_buf", "fire_prev",
 		"roll_iframe", "roll_dx", "roll_dy", "boost_ticks", "in_tank", "interact_prev", "buy_prev",
 		"grenade_prev", "vest", "hurt_iframes", "pierce_ticks", "spread_ticks", "triple",
-		"rend_ticks", "smoke_ticks", "claymores", "flush_cd",
+		"rend_ticks", "smoke_ticks", "claymores", "flush_cd", "weapon", "wpn_ammo",   # special weapons: HASHED, conditionally (only while one is held)
 		# lead_x/lead_y/lead_t are the colossus mortar's velocity sample of this
 		# player (_colossus_strike, the gunship stx/sty/st_at idiom). EXCLUDED:
 		# pure derived history of already-hashed x/y/tick_count, never read back
@@ -34,7 +34,8 @@ const KNOWN := {
 	# torture-unreachable, so it never enters either golden window.
 	"enemy": ["x", "y", "alive", "elite", "kind", "submerged", "lunge_ticks",
 		"surface_ticks", "fire_cd", "windup", "aim_lx", "aim_ly", "marked", "skin", "hp",
-		"hold_y", "flank_x", "face_x", "face_y"],
+		"hold_y", "flank_x", "face_x", "face_y",
+		"escort"],   # Siege Tank escort tag: HASHED, conditionally (only when true; SiegeBoss._dismount counts it)
 	"bunker": ["x", "y", "alive", "spawn_cd"],
 	"pickup": ["x", "y", "kind", "cost", "drop"],
 	"tank": ["x", "y", "alive", "burning", "fuel", "burn_ticks", "crew_ring_ticks",
@@ -48,8 +49,11 @@ const KNOWN := {
 		"breach_cd", "breach_first_left"],
 	# max_hp: spawn-time constant (same rationale as the colossus's, below) — it
 	# only sizes _damage_boss's arena-crack thirds, so it is NOT in checksum().
-	"boss": ["alive", "hp", "max_hp", "x", "dir", "phase_t", "gate_y", "stx", "sty", "st_at"],
-	"strike": ["x", "y", "ticks", "obs"],
+	"boss": ["alive", "hp", "max_hp", "x", "dir", "phase_t", "gate_y", "stx", "sty", "st_at",
+		"kind", "y", "fx", "fy", "st", "st_t", "wp", "wpm", "rv", "sx", "sy", "ex", "ey", "cn", "sc"],   # Siege Tank (SiegeBoss.HASHED_KEYS fed conditionally; kind is the tag)
+	# crater: Siege Tank shell flag, breaks bags in its ring. HASHED, conditionally (only when true;
+	# test_review2_sim pins that it moves the checksum and that false leaves the stream untouched).
+	"strike": ["x", "y", "ticks", "obs", "crater"],
 	"water": ["y", "ford_x"],
 	"enemy_bullet": ["x", "y", "vx", "vy", "ttl"],
 	# `grace` = planter-immunity countdown on a player-planted claymore. HASHED: it decides

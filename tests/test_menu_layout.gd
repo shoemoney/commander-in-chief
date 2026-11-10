@@ -46,6 +46,10 @@ class _StubMain extends Node2D:
 	# under test measures as ABSENT with all assertions still green (the c4-18 trap, below).
 	var best_wave := 0
 	var best_dist := 0
+	var front := FrontDoor.new()   # front-door: title reads the streak/score/sector/intro state off main.front
+	var svc := ServiceRecord.new()   # service-record: the SERVICE RECORD page reads medals/bests off main.svc
+	var _replays := 0
+	func replay_intro() -> void: _replays += 1
 	var _life_wins := 0
 	var _life_kills := 0
 	var _current_seed := 0
@@ -67,15 +71,35 @@ class _StubMain extends Node2D:
 	var _life_runs := 0
 	var _two_players := false
 	var _hard := false
+	var _vet_perks_on := true   # review-fixes: SETUP VET PERKS row reads it (stub parity)
+	func set_vet_perks(on: bool) -> void: _vet_perks_on = on
 	var _motion := 1.0
 	var colorblind := false
 	var _rumble_on := true
 	var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad toggle the SWAP STICKS row reads
 	var _assist := false
-	var _captions := true   # audio-identity: mirrors main._captions the CAPTIONS row reads
+	var _caption_mode := 0   # CuePolicy.CAP_ALL: mirrors main._caption_mode the CAPTIONS row reads
+	var _captions := true
 	var _fullscreen := false
 	var _win_scale := 2   # c1-19: windowed integer scale the WINDOW SCALE row reads/steps
 	var _text_scale := MainScript.TEXT_SCALE_MIN   # accessibility: percent the TEXT SIZE row reads/steps
+	var _accessibility_settings: Dictionary = {}
+	var _accessibility_resets := 0
+	func accessibility_setting(key: String) -> Variant:
+		return _accessibility_settings.get(key, MainScript.SETTINGS_DEFAULTS.get(key, false))
+	func set_accessibility_setting(key: String, value: Variant) -> void:
+		if key in MainScript.ACCESSIBILITY_KEYS:
+			_accessibility_settings[key] = value
+	func accessibility_summary() -> String:
+		var aids: Array[String] = []
+		if accessibility_setting("single_stick_p1") or accessibility_setting("single_stick_p2"):
+			aids.append("SINGLE STICK")
+		if int(accessibility_setting("aim_assist")) > 0:
+			aids.append("AIM ASSIST")
+		if accessibility_setting("slow_mode"):
+			aids.append("75% SPEED")
+		return " / ".join(aids) if not aids.is_empty() else "STANDARD INPUT"
+	func reset_accessibility_input() -> void: _accessibility_resets += 1
 	var _saved := 0
 	var _set_calls: Array = []       # records every _set_bus_vol(name, v) the menu makes
 	var _levels := {"SFX": 8, "Music": 8}   # STATEFUL: a step reads back what the last one wrote
@@ -119,11 +143,14 @@ class _StubMain extends Node2D:
 	# DISCARD, re-applies it to the live fields. Neither bumps _saved, so a stage+discard stays
 	# a zero-write round-trip. Shapes mirror the real main so a snapshot round-trips.
 	func _settings_snapshot() -> Dictionary:
-		return {"colorblind": colorblind, "assist": _assist, "reduce_motion": _motion < 0.5,
+		var snapshot := {"colorblind": colorblind, "assist": _assist, "reduce_motion": _motion < 0.5,
 			"rumble": _rumble_on, "swap_sticks": _swap_sticks[0], "swap_sticks_p2": _swap_sticks[1],
 			"sfx_vol": _bus_vol("SFX"), "music_vol": _bus_vol("Music"),
-			"fullscreen": _fullscreen, "window_scale": _win_scale, "captions": _captions,
+			"fullscreen": _fullscreen, "window_scale": _win_scale, "captions": _caption_mode,
 			"text_scale": _text_scale}
+		for key in MainScript.ACCESSIBILITY_KEYS:
+			snapshot[key] = accessibility_setting(key)
+		return snapshot
 	# c4-11: mirror real main so the RESET DEFAULTS row can decide enabled/disabled. Compares the
 	# live snapshot against the authoritative SETTINGS_DEFAULTS (stub SFX/Music start at 8, not the
 	# default 10, so this reads false by default and the row stays an armable destructive row).
@@ -139,6 +166,8 @@ class _StubMain extends Node2D:
 		_apply_settings(MainScript.SETTINGS_DEFAULTS)
 		_save_settings()
 	func _apply_settings(d: Dictionary) -> void:
+		for key in MainScript.ACCESSIBILITY_KEYS:
+			_accessibility_settings[key] = d.get(key, MainScript.SETTINGS_DEFAULTS[key])
 		colorblind = d["colorblind"]
 		_assist = d["assist"]
 		_motion = 0.0 if d["reduce_motion"] else 1.0
@@ -149,7 +178,7 @@ class _StubMain extends Node2D:
 		_set_bus_vol("Music", d["music_vol"])
 		_fullscreen = d["fullscreen"]
 		_win_scale = int(d.get("window_scale", 2))
-		_captions = bool(d.get("captions", true))
+		_caption_mode = CuePolicy.migrate_caption_mode(d.get("captions", CuePolicy.CAP_ALL))
 		_set_text_scale(int(d.get("text_scale", MainScript.TEXT_SCALE_MIN)))
 	# c1-19: WINDOW SCALE stub — headless has no display, so cap the ladder at 3x and
 	# apply the clamped absolute scale the menu's ◄/►/Enter drive (records a save).
@@ -166,14 +195,15 @@ class _StubMain extends Node2D:
 			return false
 		_set_text_scale(nxt)
 		return true
-	func _win_scale_norm() -> int: return clampi(_win_scale, 1, _max_win_scale())
+	func display_forced_fullscreen() -> bool: return false
+	func _win_scale_norm() -> int: return clampi(_win_scale, Art.MIN_WINDOW_SCALE, _max_win_scale())
 	# c3-18: `persist` mirrors the real main — the OPTIONS dirty-state flips these LIVE but defers
 	# the write, so a deferred call must NOT bump _saved (the disk touch waits for SAVE).
 	func _toggle_fullscreen(persist := true) -> void:
 		_fullscreen = not _fullscreen
 		if persist: _saved += 1
 	func _set_win_scale(s: int, persist := true) -> bool:
-		var ns := clampi(s, 1, _max_win_scale())
+		var ns := clampi(s, Art.MIN_WINDOW_SCALE, _max_win_scale())
 		if ns == _win_scale and not _fullscreen: return false
 		_win_scale = ns
 		_fullscreen = false
@@ -182,7 +212,7 @@ class _StubMain extends Node2D:
 	# c1-19: change the preference WITHOUT leaving fullscreen — the WINDOW SCALE row stays live
 	# while fullscreen (edits the value applied on return to windowed), never a dead/ignored row.
 	func _set_win_scale_pref(s: int, persist := true) -> bool:
-		var ns := clampi(s, 1, _max_win_scale())
+		var ns := clampi(s, Art.MIN_WINDOW_SCALE, _max_win_scale())
 		if ns == _win_scale: return false
 		_win_scale = ns
 		if persist: _saved += 1
@@ -535,7 +565,8 @@ func test_c2_13_completed_daily_row_locks_and_denies() -> void:
 	var done: Dictionary = m._menu_items()[_row_index(m, "daily")]
 	Runner.T.ok(done.get("disabled", false), "a completed daily is flagged disabled")
 	Runner.T.eq(done["label"], "DAILY RUN", "the label stays plain (status is a separate badge, not appended)")
-	Runner.T.eq(String(done.get("badge", "")), "COMPLETED", "a completed daily shows the COMPLETED badge")
+	# front-door: the badge now also carries the next-board countdown ("COMPLETED  5H12M") when no score is banked today.
+	Runner.T.ok(String(done.get("badge", "")).begins_with("COMPLETED"), "a completed daily shows the COMPLETED badge")
 	# Pressing the locked row buzzes once and never starts a run.
 	m.sel = _row_index(m, "daily")
 	stub._sfx.plays.clear()
@@ -566,6 +597,12 @@ func test_c2_13_daily_lock_rule_is_seed_exact() -> void:
 # start path sets _current_seed to the EXACT daily seed (so midnight banking is well-defined),
 # _record_run persists that seed under daily/done_seed, and a fresh _load_bests reload makes
 # the TITLE menu flag the row disabled + COMPLETED for the rest of today.
+func _ends_with_countdown(badge: String) -> bool:
+	var re := RegEx.new()
+	re.compile("\\d+H\\d\\dM$")
+	return re.search(badge) != null
+
+
 func test_c2_13_daily_done_persists_and_locks_row() -> void:
 	# Stash the real save aside (recover a crashed prior stash first) so the test board is
 	# pristine and the dev's progress is never touched — mirrors the Hall integration test.
@@ -611,7 +648,14 @@ func test_c2_13_daily_done_persists_and_locks_row() -> void:
 	m.mode = Menu.Mode.TITLE
 	var row: Dictionary = m._menu_items()[_row_index(m, "daily")]
 	Runner.T.ok(row.get("disabled", false), "the reloaded completed daily locks the TITLE row")
-	Runner.T.eq(String(row.get("badge", "")), "COMPLETED", "...and shows the COMPLETED badge")
+	# front-door: today's banked score (or COMPLETED) leads the badge, followed by the next-board countdown.
+	# review-fixes: pinned to what the badge must SAY, not merely non-empty. The run was banked,
+	# so today's score leads (never COMPLETED) and the next-board countdown closes it.
+	var badge1 := String(row.get("badge", ""))
+	Runner.T.ok(badge1.begins_with(FrontDoor.score_text(main.sim.score)),
+		"...the badge leads with today's banked score (%s): '%s'" % [FrontDoor.score_text(main.sim.score), badge1])
+	Runner.T.ok(not badge1.contains("COMPLETED"), "...a banked score replaces the COMPLETED word")
+	Runner.T.ok(_ends_with_countdown(badge1), "...and ends with the next-board countdown: '%s'" % badge1)
 	m.free()
 	main.free()
 	main2.free()
@@ -700,7 +744,12 @@ func test_daily_attempt_spent_on_any_abandon_path() -> void:
 	m.mode = Menu.Mode.TITLE
 	var row: Dictionary = m._menu_items()[_row_index(m, "daily")]
 	Runner.T.ok(row.get("disabled", false), "the spent daily locks the TITLE row")
-	Runner.T.eq(String(row.get("badge", "")), "COMPLETED", "...and shows the COMPLETED badge")
+	# front-door: today's banked score (or COMPLETED) leads the badge, followed by the next-board countdown.
+	# review-fixes: the abandoned daily banked NO score today, so the badge must lead with
+	# COMPLETED and still close with the next-board countdown.
+	var badge2 := String(row.get("badge", ""))
+	Runner.T.ok(badge2.begins_with("COMPLETED"), "...an abandoned daily reads COMPLETED: '%s'" % badge2)
+	Runner.T.ok(_ends_with_countdown(badge2), "...and ends with the next-board countdown: '%s'" % badge2)
 	m.free()
 	main.free()
 	main2.free()
@@ -797,7 +846,8 @@ func test_setup_and_options_rows_stay_legible() -> void:
 	# OPTIONS is settings-only: the settings rows + RESET DEFAULTS + BACK.
 	var on := _row_count(Menu.Mode.OPTS, false)
 	var opts: Dictionary = Menu.compute_geometry(Menu.Mode.OPTS, on, -1.0)
-	Runner.T.ok(float(opts["bh"]) >= MIN_PLATE, "OPTIONS %d-row plate %d >= 20" % [on, int(opts["bh"])])
+	Runner.T.ok(float(opts["bh"]) >= Art.font().get_height(HudIcons.TYPE_BODY) + 4.0,
+		"OPTIONS %d-row plates enclose body text with vertical padding" % on)
 	# RUN SETUP is CO-OP + NG+ HARD + BACK.
 	var sn := _row_count(Menu.Mode.SETUP, false)
 	var setup: Dictionary = Menu.compute_geometry(Menu.Mode.SETUP, sn, -1.0)
@@ -891,9 +941,8 @@ func test_footer_prepends_hints_through_real_draw() -> void:
 	var stub := _StubMain.new()
 	var ocap := _CaptureMenu.new()
 	ocap.main = stub
-	ocap.mode = Menu.Mode.OPTS
+	ocap.mode = Menu.Mode.ACCESSIBILITY
 	var mi := _row_index(ocap, "motion")
-	var bi := _row_index(ocap, "back")
 	ocap.sel = mi
 	ocap._footer_legend()
 	var tl := _labels_of(ocap.ops)
@@ -909,7 +958,7 @@ func test_footer_prepends_hints_through_real_draw() -> void:
 	Runner.T.ok("ADJUST" in vl and not ("TOGGLE" in vl), "focused volume row prepends ADJUST (not TOGGLE)")
 	ocap.ops.clear()
 	ocap.mode = Menu.Mode.OPTS   # BACK lives on OPTS itself, not the AUDIO sub-screen
-	ocap.sel = bi
+	ocap.sel = _row_index(ocap, "back")
 	ocap._footer_legend()
 	var bl := _labels_of(ocap.ops)
 	Runner.T.ok(not ("ADJUST" in bl) and not ("TOGGLE" in bl), "focused non-cycling row (BACK) shows no cycle hint")
@@ -1023,18 +1072,28 @@ class _CaptureMenu extends GameMenu:
 		# chrome-signature test reads the ui_frame_lrg tint straight off the op).
 		ops.append({"k": "fit", "id": key, "box": r, "reg": _reg, "col": _c})
 	func _emit_glyph(act: String, center: Vector2, size: float, _c: Color) -> void:
-		ops.append({"k": "glyph", "id": act, "box": Rect2(center - Vector2(size, size) / 2.0, Vector2(size, size))})
-	func _emit_stamp(txt: String, pos: Vector2, _c: Color, size: int) -> void:
-		# c4-20: `size` is now a real argument (the seam serves the on-grid codename tab
-		# AND the off-grid keycap letters), so the capture records it — a stamp drawn at an
-		# unasserted size would otherwise be invisible to every test in this file.
-		ops.append({"k": "stamp", "id": txt, "size": size, "box": Rect2(pos, Vector2.ZERO)})
-	func _emit_label(txt: String, pos: Vector2, _c: Color) -> void:
-		# The capture measures at the DEFAULT _label_size (HudIcons.TYPE_MICRO), which is
-		# deliberately NOT _label_size — a transient bump (the group caption) is right-aligned,
-		# so its clearance asserts hold at any rendered size. See the _label_size docstring.
-		var s := Art.font().get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_MICRO)
-		ops.append({"k": "label", "id": txt, "box": Rect2(pos - Vector2(0.0, Art.font().get_ascent(HudIcons.TYPE_MICRO)), s)})
+		var kc: int = main.bind_for_glyph(act) if main != null else -1
+		var pb: int = main.pad_bind_for_glyph(act) if main != null else -1
+		var w := Art.glyph_cap_w(act, size, kc, pb)
+		ops.append({"k": "glyph", "id": act, "box": Rect2(center - Vector2(w, size) / 2.0, Vector2(w, size))})
+	func _emit_stamp(txt: String, pos: Vector2, col: Color, size: int) -> void:
+		var ink: Array = []
+		var prev = Art.text_capture
+		Art.text_capture = ink
+		super._emit_stamp(txt, pos, col, size)
+		Art.text_capture = prev
+		for op in ink:
+			op["k"] = "stamp"
+			ops.append(op)
+	func _emit_label(txt: String, pos: Vector2, col: Color) -> void:
+		var ink: Array = []
+		var prev = Art.text_capture
+		Art.text_capture = ink
+		super._emit_label(txt, pos, col)
+		Art.text_capture = prev
+		for op in ink:
+			op["k"] = "label"
+			ops.append(op)
 
 
 # c1-04 TRUE draw-command capture: invoke the REAL _footer_legend() on every non-TITLE
@@ -1047,9 +1106,6 @@ class _CaptureMenu extends GameMenu:
 # so capturing the emitted commands is the strongest render check available.
 func test_footer_draw_commands_captured_both_devices() -> void:
 	var was_pad: bool = Art.use_pad
-	var strip_top: float = Menu.FOOTER_Y
-	var strip_bottom: float = Menu.FOOTER_Y + 17.0
-	Runner.T.ok(strip_bottom <= 360.0, "footer strip bottom %d inside viewport" % int(strip_bottom))
 	for pad in [false, true]:
 		Art.use_pad = pad
 		var dev := "pad" if pad else "kb"
@@ -1057,6 +1113,9 @@ func test_footer_draw_commands_captured_both_devices() -> void:
 			var cap := _CaptureMenu.new()
 			cap.mode = mode_id
 			cap._footer_legend()   # the REAL draw method — records into ops via the seams
+			var strip_top: float = cap.ops[0]["box"].position.y
+			var strip_bottom: float = cap.ops[0]["box"].end.y
+			Runner.T.ok(strip_bottom <= 360.0, "footer strip bottom inside viewport")
 			Runner.T.ok(cap.ops.size() >= 1 and cap.ops[0]["k"] == "rect",
 				"%s mode %d footer emits the strip rect first" % [dev, mode_id])
 			var labels: Array = []
@@ -1121,11 +1180,8 @@ func test_two_line_footer_help_never_collides_with_the_legend() -> void:
 	var stub := _StubMain.new()
 	# Each entry: the mode and a focused row id that HOLDS a value, so setting_help is non-empty and
 	# _footer_legend takes its two-line branch.
-	var cases := [[Menu.Mode.OPTS, "motion"], [Menu.Mode.AUDIO, "sfx"], [Menu.Mode.DISP, "winscale"],
+	var cases := [[Menu.Mode.ACCESSIBILITY, "motion"], [Menu.Mode.AUDIO, "sfx"], [Menu.Mode.DISP, "winscale"],
 		[Menu.Mode.DISP, "fullscreen"], [Menu.Mode.SETUP, "coop"]]
-	# r4-menu #1: the description line now scales with Art.text_scale (capped at
-	# FOOTER_HELP_MAX_SIZE) instead of a hardcoded 8px — sweep the whole rung ladder so a future
-	# ceiling change can't quietly reopen the collision this test exists to prevent.
 	# r4-menu review fix: the bounds/no-overlap assertions below still pass even if the description
 	# never scaled at all (hs hardcoded back to 8), because 8px comfortably clears the strip on its
 	# own — so nothing in the original sweep pinned that scaling is actually happening. Record the
@@ -1154,8 +1210,8 @@ func test_two_line_footer_help_never_collides_with_the_legend() -> void:
 				# raised strip, nothing off the canvas floor. FOOTER_HELP_RISE is a fixed const (already
 				# sized to fit the capped description font at any scale), so strip_top/bottom don't move
 				# with text_scale — only the description's own size and offsets inside the strip do.
-				var strip_top: float = Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE
-				var strip_bottom: float = strip_top + Menu.FOOTER_H + Menu.FOOTER_HELP_RISE
+				var strip_top: float = cap.ops[0]["box"].position.y
+				var strip_bottom: float = cap.ops[0]["box"].end.y
 				Runner.T.ok(strip_bottom <= 360.0, "%s: the raised strip stays inside the viewport" % tag)
 				for op in cap.ops:
 					var box: Rect2 = op["box"]
@@ -1198,29 +1254,17 @@ func test_legend_row_compresses_to_keep_all_bindings_on_screen() -> void:
 	var wide: Array = []
 	while Menu.legend_extent(wide)[1] <= Menu.LEG_SAFE_W:
 		wide.append({"tex": "glyph_key_wide", "stamp": "L/R", "label": "SUPPLY WHEEL"})
-	var n: int = wide.size()
 	var natural: float = Menu.legend_extent(wide)[1]
 	Runner.T.ok(natural > Menu.LEG_SAFE_W, "the grown set really would overrun the safe band at the default gap")
-	# This set fits once compressed (its min-gap width is still within the band), so fit_gap
-	# lands it exactly on LEG_SAFE_W without hitting the LEG_MIN_GAP floor.
-	var content: float = natural - Menu.LEG_GAP * float(n - 1)
-	Runner.T.ok(content + Menu.LEG_MIN_GAP * float(n - 1) <= Menu.LEG_SAFE_W, "the set is compressible within the floor")
-	var fit: float = Menu.legend_fit_gap(wide)
-	Runner.T.ok(fit < Menu.LEG_GAP and fit >= Menu.LEG_MIN_GAP, "oversized set compresses the gap (>= the min-gap floor)")
-	# The compressed row's ACTUAL drawn command boxes must all land inside the safe band.
-	var y := Menu.FOOTER_Y + 8.0
-	var left := 640.0
-	var right := 0.0
-	for p in Menu.legend_primitives(wide, y, fit):
-		for k in ["glyph", "label"]:
-			var box: Rect2 = p[k]
-			if box.size.x <= 0.0:
-				continue
-			left = minf(left, box.position.x)
-			right = maxf(right, box.end.x)
-	Runner.T.ok(left >= 8.0 and right <= 632.0,
-		"compressed legend keeps every binding in the safe band [%d,%d]" % [int(left), int(right)])
-	Runner.T.ok(absf((left + right) / 2.0 - 320.0) < 2.0, "compressed legend stays centered on 320")
+	var wrapped := Menu.legend_lines(wide)
+	Runner.T.ok(wrapped.size() > 1, "an oversized set grows another readable legend row")
+	var count := 0
+	for row in wrapped:
+		count += row.size()
+		var ext := Menu.legend_extent(row)
+		Runner.T.ok(float(ext[0]) >= 8.0 and float(ext[0]) + float(ext[1]) <= 632.0,
+			"each wrapped legend row stays inside the safe band")
+	Runner.T.eq(count, wide.size(), "wrapping preserves every binding")
 
 
 # c4-05: the HARD ceiling behind the gap compression — when even the floored LEG_MIN_GAP spacing
@@ -1264,7 +1308,7 @@ func test_every_menu_renders_an_in_band_legend_both_devices() -> void:
 		var dev := "pad" if pad else "kb"
 		# Each menu, its context-hint label, and a settings row to focus (or "" for none) so the
 		# hint the item promises (FILTER/PAGE/SECTION/ADJUST-or-TOGGLE) is actually exercised.
-		for spec in [[Menu.Mode.PAUSE, "", ""], [Menu.Mode.OPTS, "TOGGLE", "motion"],
+		for spec in [[Menu.Mode.PAUSE, "", ""], [Menu.Mode.ACCESSIBILITY, "TOGGLE", "motion"],
 				[Menu.Mode.SETUP, "TOGGLE", "coop"], [Menu.Mode.DISP, "ADJUST", "winscale"],
 				[Menu.Mode.HALL, "FILTER", ""], [Menu.Mode.HOWTO, "PAGE", ""],
 				[Menu.Mode.INFO, "", ""], [Menu.Mode.REBIND, "SECTION", ""]]:
@@ -1712,6 +1756,7 @@ func test_options_discard_reverts_staged_changes_without_persisting() -> void:
 	stub.colorblind = false
 	m.open(Menu.Mode.OPTS)                 # captures the pristine baseline (assist OFF, colorblind OFF)
 	Runner.T.ok(not m._opts_dirty, "a freshly opened OPTIONS screen is clean")
+	m.open(Menu.Mode.ACCESSIBILITY)
 	m.sel = _row_index(m, "assist")
 	m._activate()                          # flip ASSIST ON, LIVE
 	m.sel = _row_index(m, "colorblind")
@@ -1869,12 +1914,16 @@ func test_options_toggle_roundtrip_clears_dirty() -> void:
 	m.main = stub
 	stub._assist = false
 	m.open(Menu.Mode.OPTS)                  # baseline: assist OFF
+	m.open(Menu.Mode.ACCESSIBILITY)
 	m.sel = _row_index(m, "assist")
 	m._activate()                          # assist -> ON, dirty
 	Runner.T.ok(m._opts_dirty and stub._assist, "flipping a value marks dirty")
-	Runner.T.ok(_row_index(m, "opts_save") >= 0, "dirty surfaces the SAVE row")
+	m.open(Menu.Mode.OPTS)
+	Runner.T.ok(_row_index(m, "opts_save") >= 0, "dirty surfaces the SAVE row on OPTIONS")
+	m.open(Menu.Mode.ACCESSIBILITY, "assist")
 	m._activate()                          # assist -> OFF again (back to baseline)
 	Runner.T.ok(not m._opts_dirty and not stub._assist, "flipping it back to baseline clears dirty")
+	m.open(Menu.Mode.OPTS)
 	Runner.T.eq(_row_index(m, "opts_save"), -1, "a clean screen drops back to a single BACK (no SAVE row)")
 	Runner.T.ok(_row_index(m, "back") >= 0, "the plain BACK row returns once nothing is staged")
 	m.free()
@@ -2643,53 +2692,53 @@ func test_hall_footer_layout_and_latest_visibility() -> void:
 # fails here instead of shipping.
 func test_hall_page_button_label_ink_sits_inside_its_button() -> void:
 	var f := Art.font()
-	# Read the baseline OUT OF THE DRAW, not off the constant. Asserting against
-	# HALL_PAGE_LABEL_Y passes on the broken HEAD — the constant was correct, the draw simply
-	# didn't use it — which is the whole shape of the bug and of the green-but-wrong trap.
-	var src := FileAccess.get_file_as_string("res://src/view/menu.gd")
-	var block := src.find("var plbl := [\"PREV\", \"NEXT\"]")
-	Runner.T.ok(block >= 0, "found the PREV/NEXT draw block")
-	if block < 0:
-		return
-	var astart := src.find("var ay := ", block)
-	var aend := src.find("\n", astart)
-	Runner.T.ok(astart > block and aend > astart, "the label block still names its baseline `var ay`")
-	if astart < 0 or aend <= astart:
-		return
-	var aexpr := src.substr(astart + 10, aend - astart - 10).split("#")[0].strip_edges()
-	# Constants the baseline is derived from are handed in as named inputs (Expression has no
-	# instance to resolve them against).
-	var consts: Dictionary = load("res://src/view/menu.gd").get_script_constant_map()
-	var inames: Array = []
-	var ivals: Array = []
-	var idre := RegEx.new()
-	idre.compile("\\b(_?[A-Z][A-Z0-9_]+)\\b")
-	for mm in idre.search_all(aexpr):
-		var id: String = mm.get_string(1)
-		if consts.has(id) and not inames.has(id):
-			inames.append(id)
-			ivals.append(consts[id])
-	var ex := Expression.new()
-	Runner.T.eq(ex.parse(aexpr, inames), OK, "the drawn baseline parses standalone: %s" % aexpr)
-	var ay := float(ex.execute(ivals, null, false))
-	Runner.T.ok(not ex.has_execute_failed(), "the drawn baseline evaluates: %s" % aexpr)
-	var rects: Array[Rect2] = Menu.hall_page_rects()
-	Runner.T.eq(rects.size(), 2, "PREV and NEXT are the two paging buttons")
-	var labels := ["PREV", "NEXT"]
-	for i in rects.size():
-		var r: Rect2 = rects[i]
-		# The word: Art.text takes a BASELINE, and its own capture box is pos - (0, ascent)
-		# by get_string_size().y — measure the ink the same way it does.
-		var ink_top := ay - f.get_ascent(9)
-		var ink_bottom := ink_top + f.get_string_size(labels[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 9).y
-		Runner.T.ok(ink_top >= r.position.y,
-			"%s ink top %.0f is inside its button (top %.0f)" % [labels[i], ink_top, r.position.y])
-		Runner.T.ok(ink_bottom <= r.end.y,
-			"%s ink bottom %.0f is inside its button (bottom %.0f)" % [labels[i], ink_bottom, r.end.y])
-		# ...and the triangle that shares the baseline — the primary axis cue.
-		Runner.T.ok(ay - 6.0 >= r.position.y and ay - 1.0 <= r.end.y,
-			"%s arrow glyph (%.0f..%.0f) is inside its button (%.0f..%.0f)"
-				% [labels[i], ay - 6.0, ay - 1.0, r.position.y, r.end.y])
+	var saved_scale := Art.text_scale
+	var saved_pad := Art.use_pad
+	var stub := _StubMain.new()
+	for i in 40:
+		stub.hall.append({"hid": i + 1, "score": 10000 - i, "mode": "campaign", "sector": 3, "ticks": 600, "grade": "A"})
+	var menu := _CaptureMenu.new()
+	menu.main = stub
+	menu.mode = Menu.Mode.HALL
+	menu._open_t = 1.0
+	for scale in [1.0, 2.0]:
+		Art.text_scale = scale
+		for pad in [false, true]:
+			Art.use_pad = pad
+			for latest in [{}, stub.hall[0], stub.hall[39]]:
+				stub.hall_latest = latest
+				menu.ops.clear()
+				var previous = Art.text_capture
+				Art.text_capture = menu.ops
+				menu._draw_hall()
+				Art.text_capture = previous
+				var targets: Array[Rect2] = menu._hall_page_rects()
+				Runner.T.eq(targets.size(), 2, "PREV and NEXT remain actual page targets")
+				var labels := 0
+				for op in menu.ops:
+					if op.get("id", "") not in ["PREV", "NEXT"]:
+						continue
+					labels += 1
+					var box: Rect2 = op["box"]
+					var natural := f.get_string_size(op["id"], HORIZONTAL_ALIGNMENT_LEFT, -1, Art.fs(HudIcons.TYPE_MICRO)).x
+					box.size.x = natural
+					var target: Rect2 = targets[0 if op["id"] == "PREV" else 1]
+					Runner.T.ok(target.encloses(box), "the complete drawn %s label stays inside its live target at %d%%" % [op["id"], int(scale * 100)])
+				Runner.T.eq(labels, 2, "the real Hall draw emits both complete page labels")
+				var back := menu._back_rect()
+				var content := menu._focused_footer()
+				var footer := Menu.footer_layout(content["help"], content["segs"])
+				Runner.T.ok(back.end.y + 3.0 < float(footer["top"]), "the Back button and glow clear every wrapped Hall footer row")
+				Runner.T.ok(targets[0].end.y + 3.0 <= back.position.y - 3.0, "paging targets clear the Back button's drawn plate")
+				Runner.T.eq(menu._row_at(back.get_center()), 0, "the visible Back button remains mouse reachable")
+				# Compose the real Hall and footer emissions. A clipped-box-only
+				# check omitted this relationship and missed the footer overpaint.
+				menu._footer_legend()
+				Runner.T.ok(_worst_text_overlap(menu.ops, f) == null, "Hall content and wrapped footer ink stay separate%s" % _overlap_msg(_worst_text_overlap(menu.ops, f)))
+	menu.free()
+	stub.free()
+	Art.text_scale = saved_scale
+	Art.use_pad = saved_pad
 
 
 # c1-13 (attempt 3): the paged-away marker direction — once the player pages off the
@@ -4093,6 +4142,10 @@ func test_settings_groups_and_inline_accessibility_state() -> void:
 	var by_id := {}
 	for row in m._settings_rows():
 		by_id[row["id"]] = row
+	Runner.T.ok(by_id["accessibility"].get("submenu", false), "OPTIONS fronts accessibility through a focused submenu")
+	m.mode = Menu.Mode.ACCESSIBILITY
+	for row in m._menu_items():
+		by_id[row["id"]] = row
 	Runner.T.eq(by_id["motion"]["label"], "REDUCE MOTION: ON", "REDUCE MOTION state reads in its row label")
 	Runner.T.ok(by_id["motion"]["on"], "REDUCE MOTION carries a state dot")
 	Runner.T.eq(by_id["colorblind"]["label"], "COLORBLIND: ON", "COLORBLIND state reads in its row label")
@@ -4161,17 +4214,13 @@ func test_reset_persists_every_key_and_survives_reload() -> void:
 	_restore_buses(saved)
 
 
-# c1-09/c1-18: the dedicated OPTIONS screen is settings + CONTROLS now — 7 settings
-# (AUDIO opener, RUMBLE, REDUCE MOTION, COLORBLIND, CAPTIONS, ASSIST, DISPLAY) + CONTROLS
-# (opens the rebind screen) + RESET DEFAULTS + BACK = 10 rows. audio-identity (judge follow-up):
-# SFX + MUSIC consolidated behind the AUDIO opener freed the slot CAPTIONS needed, so the total
-# stays 10. Pin that count and prove the screen still clears a >=20px plate and keeps its
-# selected-row glow off the footer.
+# The accessibility hub keeps OPTIONS short while preserving complete settings access.
 func test_options_settings_only_nine_row_screen_stays_legible() -> void:
 	var n := _row_count(Menu.Mode.OPTS, false)
-	Runner.T.eq(n, 10, "OPTIONS is the settings + CONTROLS 10-row screen (no HALL/HOWTO)")
+	Runner.T.eq(n, 7, "OPTIONS has seven settings, navigation and exit rows")
 	var g: Dictionary = Menu.compute_geometry(Menu.Mode.OPTS, n, -1.0)
-	Runner.T.ok(float(g["bh"]) >= MIN_PLATE, "OPTIONS plate %d stays >= 20" % int(g["bh"]))
+	Runner.T.ok(float(g["bh"]) >= Art.font().get_height(HudIcons.TYPE_BODY) + 4.0,
+		"OPTIONS plates enclose body text with vertical padding")
 	Runner.T.ok(float(g["gap"]) >= float(g["bh"]), "OPTIONS plates do not overlap")
 	Runner.T.ok(Menu.max_glow_bottom(g) < Menu.FOOTER_Y, "OPTIONS last-row glow clears the footer")
 
@@ -4312,27 +4361,28 @@ func test_opts_footer_describes_focused_setting() -> void:
 	var stub := _StubMain.new()
 	var m := _CaptureMenu.new()
 	m.main = stub
-	m.mode = Menu.Mode.OPTS
+	m.mode = Menu.Mode.ACCESSIBILITY
 
 	# The footer must sit wholly below the list — its top clears the last-row glow with real margin
 	# (>= 2px, not a fragile hairline), and the whole two-line strip stays inside the 360px canvas.
 	# r4-menu #1: was >= 3px at FOOTER_HELP_RISE 4.0; the rise grew to 5.0 so the description can
 	# scale (see the const's comment), which trades 1px of that budget away — 2.5px real margin
 	# remains, so the floor drops to 2.0 (same "real, not exact" slack the old threshold kept).
-	var g: Dictionary = Menu.compute_geometry(Menu.Mode.OPTS, _row_count(Menu.Mode.OPTS, false), -1.0)
-	var strip_top := Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE
-	Runner.T.ok(strip_top - Menu.max_glow_bottom(g) >= 2.0, "the two-line footer top clears the last-row glow by >=2px")
-	Runner.T.ok(Menu.FOOTER_Y + Menu.FOOTER_H <= 360.0, "the footer strip stays inside the canvas")
 
 	# ASSIST focus: the footer draws the description line AND still draws SELECT/BACK below it.
 	m.sel = _row_index(m, "assist")
+	m._open_t = 1.0
 	m._footer_legend()
+	var g: Dictionary = m._row_geometry()
+	var strip_top: float = m.ops[0]["box"].position.y
+	var strip_bottom: float = m.ops[0]["box"].end.y
+	Runner.T.ok(strip_top - Menu.max_glow_bottom(g) >= 2.0, "the footer reservation clears the last-row glow by >=2px")
 	var help := {}
 	for c in m.centered:
 		if String(c["txt"]).begins_with("ASSIST:"):
 			help = c
 	Runner.T.ok(not help.is_empty(), "ASSIST focus draws its description in the footer")
-	Runner.T.ok("TWO HITS" in String(help["txt"]) and "SAVED" in String(help["txt"]),
+	Runner.T.ok("TWO HITS" in String(help["txt"]) and "SAVE IN OPTIONS" in String(help["txt"]),
 		"the ASSIST footer states the effect and that it persists")
 	Runner.T.ok(float(help["y"]) < Menu.FOOTER_Y + 8.0, "the description sits ABOVE the legend line")
 	var labels: Array = m.ops.filter(func(o): return o["k"] == "label").map(func(o): return o["id"])
@@ -4341,9 +4391,8 @@ func test_opts_footer_describes_focused_setting() -> void:
 	# The whole TWO-LINE strip fits the canvas: the description's ascenders clear the strip top and
 	# the legend labels' descenders (real captured boxes at 8px) stay inside the strip bottom (358)
 	# and the 360px canvas — so rising for the extra line never pushes text off-screen or out of plate.
-	var strip_bottom := strip_top + Menu.FOOTER_H + Menu.FOOTER_HELP_RISE
 	Runner.T.ok(strip_bottom <= 360.0, "the two-line strip bottom (%d) stays inside the canvas" % int(strip_bottom))
-	var desc_top := float(help["y"]) - Art.font().get_ascent(8)
+	var desc_top := float(help["y"]) - Art.font().get_ascent(Art.fs(HudIcons.TYPE_MICRO))
 	Runner.T.ok(desc_top >= strip_top - 0.5, "the description text top stays within the strip")
 	var legend_bottom := 0.0
 	for op in m.ops:
@@ -4359,7 +4408,8 @@ func test_opts_footer_describes_focused_setting() -> void:
 
 	# The header a11y summary is untouched on a settings row (footer is additive, not a swap).
 	m.centered.clear()
-	m.sel = _row_index(m, "assist")
+	m.mode = Menu.Mode.OPTS
+	m.sel = _row_index(m, "accessibility")
 	m._draw_opts_header()
 	var has_summary := false
 	for c in m.centered:
@@ -4440,7 +4490,7 @@ func test_setting_help_mapping_and_persistence_contract() -> void:
 	var stub := _StubMain.new()
 	var m := _CaptureMenu.new()
 	m.main = stub
-	for mode_id in [Menu.Mode.OPTS, Menu.Mode.DISP, Menu.Mode.AUDIO, Menu.Mode.SETUP]:
+	for mode_id in [Menu.Mode.OPTS, Menu.Mode.DISP, Menu.Mode.AUDIO, Menu.Mode.SETUP, Menu.Mode.ACCESSIBILITY]:
 		m.mode = mode_id
 		for row in m._menu_items():
 			var id: String = row["id"]
@@ -4456,7 +4506,7 @@ func test_setting_help_mapping_and_persistence_contract() -> void:
 				Runner.T.ok("NEXT RUN" in help and not ("SAVED" in help),
 					"run-config row '%s' states it applies next run, not saved" % id)
 			elif persisted.has(id):
-				Runner.T.ok("SAVED" in help, "persisted row '%s' states it is saved" % id)
+				Runner.T.ok("SAVE IN OPTIONS" in help, "persisted row '%s' states it is saved" % id)
 	# The "step" schema flag is metadata for the help mapping only — cycling behavior is unchanged:
 	# WINDOW SCALE still cycles and its footer hint still reads ADJUST — both now keyed by the "step"
 	# schema flag, not an id special-case, so _row_cycles takes the ROW dict.
@@ -4623,16 +4673,16 @@ func test_options_display_row_toggles_fullscreen() -> void:
 	m._step_scale(-1)
 	Runner.T.ok(not mn._fullscreen and mn._win_scale == 2, "WINDOW SCALE < shrinks a clean step")
 	m._step_scale(-1)
-	Runner.T.ok(not mn._fullscreen and mn._win_scale == 1, "WINDOW SCALE < reaches the 1x floor")
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 2, "WINDOW SCALE < reaches the readable 2x floor")
 	m._step_scale(-1)
-	Runner.T.ok(not mn._fullscreen and mn._win_scale == 1, "WINDOW SCALE < at the 1x floor rails (no wrap)")
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == 2, "WINDOW SCALE < at the readable 2x floor rails (no wrap)")
 
 	# FULLSCREEN: a plain ON/OFF toggle — a SINGLE activation reaches fullscreen (no ladder), and
 	# the stored windowed scale is untouched by the mode flip.
 	m.sel = fi
 	m._activate()
 	Runner.T.ok(mn._fullscreen, "activating FULLSCREEN turns it ON in a single press")
-	Runner.T.eq(mn._win_scale, 1, "toggling fullscreen preserves the stored windowed scale")
+	Runner.T.eq(mn._win_scale, 2, "toggling fullscreen preserves the supported windowed scale")
 
 	# WINDOW SCALE stays a LIVE control while fullscreen — a fitting preference shows the bare honest
 	# scale (it will apply at that value), and it still shows the cycle arrows (no dead row).
@@ -4642,11 +4692,11 @@ func test_options_display_row_toggles_fullscreen() -> void:
 	Runner.T.eq(by2["fullscreen"]["label"], "FULLSCREEN: ON", "fullscreen row reflects ON at once")
 	Runner.T.ok(not by2["winscale"].get("inactive", false), "WINDOW SCALE is NOT inactive under fullscreen (still a live control)")
 	Runner.T.ok(m._row_cycles(by2["winscale"]), "WINDOW SCALE still shows the cycle arrows under fullscreen")
-	Runner.T.eq(by2["winscale"]["label"], "WINDOW SCALE: 1x", "under fullscreen a fitting preference shows the bare honest scale (subtitle carries the windowed-only note)")
+	Runner.T.eq(by2["winscale"]["label"], "WINDOW SCALE: 2x", "under fullscreen a fitting preference shows the bare honest scale (subtitle carries the windowed-only note)")
 	# Enter/◄/► under fullscreen EDIT the preference (applied on return to windowed) and stay fullscreen.
 	m.sel = wi
 	m._press()   # Enter -> _step_scale(1) -> _set_win_scale_pref
-	Runner.T.ok(mn._fullscreen and mn._win_scale == 2, "Enter on WINDOW SCALE under fullscreen edits the deferred preference, staying fullscreen")
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 3, "Enter on WINDOW SCALE under fullscreen edits the deferred preference, staying fullscreen")
 	m._step_scale(1)
 	Runner.T.ok(mn._fullscreen and mn._win_scale == 3, "the WINDOW SCALE stepper under fullscreen keeps editing the preference (never a silent no-op)")
 	m._step_scale(1)   # at the 3x ceiling: rails, preference held, still fullscreen
@@ -4727,9 +4777,9 @@ func test_options_display_fullscreen_over_ceiling_stepper_can_step_down() -> voi
 	Runner.T.ok(mn._fullscreen and mn._win_scale == 2, "WINDOW SCALE < continues a clean step down under fullscreen")
 	m._step_scale(-1)
 	m._step_scale(-1)
-	Runner.T.ok(mn._fullscreen and mn._win_scale == 1, "WINDOW SCALE < reaches the 1x floor under fullscreen")
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 2, "WINDOW SCALE < reaches the readable 2x floor under fullscreen")
 	m._step_scale(-1)
-	Runner.T.ok(mn._fullscreen and mn._win_scale == 1, "WINDOW SCALE < at the 1x floor rails under fullscreen (no wrap)")
+	Runner.T.ok(mn._fullscreen and mn._win_scale == 2, "WINDOW SCALE < at the readable 2x floor rails under fullscreen (no wrap)")
 	m.free()
 	mn.free()
 
@@ -4929,7 +4979,7 @@ func test_text_scale_persistence_migration_and_reset() -> void:
 	# anything (a bare `== Art.fs(...)` comparison would have passed vacuously at scale 1.0).
 	Runner.T.ok(Art.fs(Menu.SEED_TAG_SIZE) > Menu.SEED_TAG_SIZE,
 		"the seed-validity tag scales with TEXT SIZE (size %d at 150%%)" % Art.fs(Menu.SEED_TAG_SIZE))
-	Runner.T.eq(Art.fs(8), 12, "the 8px in-world callouts scale with TEXT SIZE")
+	Runner.T.eq(Art.fs(8), 14, "small callouts apply the readable floor before TEXT SIZE")
 
 	var offrung: Dictionary = MainScript.SETTINGS_DEFAULTS.duplicate()
 	offrung["text_scale"] = 137
@@ -5029,7 +5079,7 @@ func test_display_f11_restores_selected_scale() -> void:
 	# Stepping a scale while fullscreen drops back OUT of fullscreen to that clean multiple.
 	mn._fullscreen = true
 	Runner.T.ok(mn._set_win_scale(1), "_set_win_scale from fullscreen applies (returns moved)")
-	Runner.T.ok(not mn._fullscreen and mn._win_scale == 1, "picking a scale drops fullscreen into that windowed multiple")
+	Runner.T.ok(not mn._fullscreen and mn._win_scale == Art.MIN_WINDOW_SCALE, "picking a scale drops fullscreen into the supported windowed multiple")
 
 	# _max_win_scale must stay valid (>=1) even when queried WHILE fullscreen (live decoration
 	# delta reads 0 there — the cached/seed reserve keeps the ceiling sane, not zero-divide junk).
@@ -5086,9 +5136,9 @@ func test_display_fullscreen_transition_preserves_scale_across_resize_events() -
 	# clamped to the monitor ceiling — the label/cursor sync path _on_window_resized runs.
 	var work := Vector2i(1920, 1040)   # 1080p minus a ~40px taskbar
 	Runner.T.eq(MainScript.snap_scale(Vector2i(1280, 720), work, 8), 2, "a 1280x720 client snaps to 2x")
-	Runner.T.eq(MainScript.snap_scale(Vector2i(1000, 700), work, 8), 1, "an odd in-between client snaps DOWN to the largest whole scale that fits (letterboxed)")
+	Runner.T.eq(MainScript.snap_scale(Vector2i(1000, 700), work, 8), 2, "an odd in-between client snaps DOWN to the largest whole scale that fits (letterboxed)")
 	Runner.T.eq(MainScript.snap_scale(Vector2i(1900, 1040), work, 2), 2, "the fitted scale is clamped to the monitor ceiling")
-	Runner.T.eq(MainScript.snap_scale(Vector2i(200, 200), work, 8), 1, "a sub-1x client floors at 1x (min_size also enforces this)")
+	Runner.T.eq(MainScript.snap_scale(Vector2i(200, 200), work, 8), 2, "a small client floors at the readable 2x minimum")
 	# The fullscreen-SIZED client reported mid fullscreen->windowed transition OVERFLOWS the work
 	# area — snap_scale returns 0 (ignore), so _on_window_resized never rewrites the preference.
 	Runner.T.eq(MainScript.snap_scale(Vector2i(1920, 1080), work, 8), 0, "a fullscreen-sized client overflowing the work area is ignored (0), never snapped")
@@ -5487,9 +5537,9 @@ func test_arrow_clicks_route_left_right_actions_via_unhandled_input() -> void:
 
 	# PLAIN TOGGLE row: either arrow FLIPS it (no direction), via _activate. COLORBLIND stays a
 	# flat OPTIONS row (only SFX/MUSIC moved to AUDIO), so switch mode to find it.
-	m.mode = Menu.Mode.OPTS
+	m.mode = Menu.Mode.ACCESSIBILITY
 	var cb_i := _find_row(m._menu_items(), "colorblind")
-	Runner.T.ok(cb_i >= 0, "OPTS still exposes the colorblind row")
+	Runner.T.ok(cb_i >= 0, "ACCESSIBILITY exposes the colorblind row")
 	var before: bool = stub.colorblind
 	_click_arrow(m, cb_i, true)
 	Runner.T.eq(stub.colorblind, not before, "clicking a plain-toggle row's ◄ arrow flips it")
@@ -6090,7 +6140,10 @@ func test_seed_hint_draw_capture_all_states() -> void:
 				plate = op["box"]
 				have_plate = true
 		var tag: String = c["clip"]
-		Runner.T.eq(labels, c["lines"], "captured hint lines match for clip '%s'" % tag)
+		var expected: Array = []
+		for line in c["lines"]:
+			expected.append_array(Menu.wrap_translated(line, Art.fs(HudIcons.TYPE_MICRO), 616.0 - (r.end.x + 6.0)))
+		Runner.T.eq(labels, expected, "captured hint preserves every wrapped word for clip '%s'" % tag)
 		Runner.T.ok(have_plate, "a plate is drawn behind the hint for '%s'" % tag)
 		Runner.T.ok(plate.position.x >= r.end.x, "plate sits right of the button (no overlap) for '%s'" % tag)
 		Runner.T.ok(plate.position.x >= 20.0 and plate.end.x <= 620.0, "plate stays inside the 20..620 chrome frame for '%s'" % tag)
@@ -6531,7 +6584,8 @@ func test_rebind_screen_rows_stay_legible_every_tab() -> void:
 	for n in [Menu.REBIND_MOVE_AIM.size() + 2, Menu.REBIND_ACTIONS.size() + 2,
 			MainScript.PAD_DEFAULTS.size() + 2, Menu.REBIND_MENUNAV.size() + 2]:
 		var g: Dictionary = Menu.compute_geometry(Menu.Mode.REBIND, n, -1.0)
-		Runner.T.ok(float(g["bh"]) >= MIN_PLATE, "REBIND %d-row plate %d stays >= 20px" % [n, int(g["bh"])])
+		Runner.T.ok(float(g["bh"]) >= Art.font().get_height(HudIcons.TYPE_BODY) + 4.0,
+			"REBIND %d-row plates enclose body text with vertical padding" % n)
 		Runner.T.ok(float(g["gap"]) >= float(g["bh"]), "REBIND %d-row plates do not overlap" % n)
 		Runner.T.ok(Menu.max_glow_bottom(g) < Menu.FOOTER_Y, "REBIND %d-row glow clears the footer" % n)
 
@@ -7143,7 +7197,7 @@ func test_menu_chrome_is_pixel_grid_exact() -> void:
 		for n in range(4, 12):
 			var g := Menu.compute_geometry(m, n, Menu.title_head_bottom(true, true))
 			var bh: float = g["bh"]
-			var isz := 16.0 if bh >= 18.0 else 8.0
+			var isz := 16.0 if bh >= 16.0 else 8.0
 			for k in n:
 				var r := Menu.row_rect(g, k)
 				for v in [r.position.x, r.position.y, r.size.x, r.size.y,
@@ -7158,13 +7212,15 @@ func test_menu_chrome_is_pixel_grid_exact() -> void:
 	# that row must STILL resolve to 16px -- if the threshold drifts back to 19.0, this
 	# is the assertion that catches every row icon halving to 8px mid-session.
 	var g_clean := Menu.compute_geometry(Menu.Mode.OPTS, 10, Menu.title_head_bottom(true, true))
-	Runner.T.eq(float(g_clean["bh"]), 20.0, "clean OPTS (n=10) is bh 20")
+	Runner.T.ok(float(g_clean["bh"]) >= Art.font().get_height(HudIcons.TYPE_BODY) + 4.0,
+		"clean OPTIONS plates enclose body text with vertical padding")
 	var g_dirty := Menu.compute_geometry(Menu.Mode.OPTS, 11, Menu.title_head_bottom(true, true))
-	Runner.T.eq(float(g_dirty["bh"]), 18.0, "dirty OPTS (n=11, SAVE+DISCARD split) is bh 18")
-	Runner.T.eq(16.0 if float(g_clean["bh"]) >= 18.0 else 8.0, 16.0,
+	Runner.T.ok(float(g_dirty["bh"]) >= Art.font().get_height(HudIcons.TYPE_BODY) + 4.0,
+		"dirty OPTIONS plates enclose the default body font with vertical padding")
+	Runner.T.eq(16.0 if float(g_clean["bh"]) >= 16.0 else 8.0, 16.0,
 		"clean OPTS (n=10, bh 20) resolves to the 16px icon")
-	Runner.T.eq(16.0 if float(g_dirty["bh"]) >= 18.0 else 8.0, 16.0,
-		"dirty OPTS (n=11, bh 18) still resolves to the 16px icon -- not a 2x shrink")
+	Runner.T.eq(16.0 if float(g_dirty["bh"]) >= 16.0 else 8.0, 16.0,
+		"dirty OPTIONS retains the full16px action icon")
 
 
 # fork-gate-bunker: PAUSE/OPTS/SETUP/INFO/REBIND/DISP/MODES/CHAPTERS/AUDIO/PERKS drew
@@ -7197,7 +7253,7 @@ func test_every_overlay_screen_wears_the_box_chrome_without_crossing_its_ink() -
 			continue
 		framed += 1
 		Runner.T.ok(Menu._content_frame(m), "mode %d must wear the box chrome" % m)
-	Runner.T.eq(framed, 12, "12 of 14 modes are player-visible overlays that must be framed")
+	Runner.T.eq(framed, 16, "16 of 18 modes are player-visible overlays that must be framed")
 
 	# --- 1b. the box is actually PAINTED, not just declared framed. _content_frame()
 	# is a boolean the fix could satisfy while a mutant deletes the real draw calls (see
@@ -7422,68 +7478,68 @@ func test_content_well_ink_never_touches_the_frame_border() -> void:
 	var inner := Rect2(Menu.FRAME_INNER_L, Menu.FRAME_INNER_T,
 		Menu.FRAME_INNER_R - Menu.FRAME_INNER_L, Menu.FRAME_INNER_B - Menu.FRAME_INNER_T)
 	var back_plate: Rect2 = m._back_rect().grow(3.0)
-	var screens := _content_well_screens(m)
-	Runner.T.ok(screens.size() >= 7,
-		"the screen set is derived from HOWTO_TABS x _endless_pages() + HALL (%d screens)" % screens.size())
-	for scr in screens:
-		m.mode = scr["mode"]
-		m._howto_page = scr["tab"]
-		m._howto_endless_page = scr["ep"]
-		m.ops.clear()
-		m.centered.clear()
-		var prev = Art.text_capture
-		Art.text_capture = m.ops
-		if scr["mode"] == Menu.Mode.HALL:
-			m._draw_hall()
-		else:
-			m._draw_howto()
-		Art.text_capture = prev
-		Runner.T.ok(m.ops.size() > 4, "%s: the real draw emitted ink to inspect (%d ops)" % [scr["tag"], m.ops.size()])
-		var worst := 0.0
-		var worst_id := ""
-		var lowest := 0.0
-		var lowest_id := ""
-		for op in m.ops:
-			var box: Rect2 = op["box"]
-			# The footer legend strip is drawn on the scrim BELOW the frame by design.
-			if box.position.y > 340.0:
-				continue
-			# The BACK PLATE is chrome that seats on the bottom rail (its LABEL is not
-			# exempt and is checked like any other string).
-			if op["k"] in ["rect", "rect_outline"] and back_plate.encloses(box):
-				continue
-			if op.has("size"):
-				# An Art.text op: re-measure at NATURAL width so a hard-clipped string
-				# still reports the width it wanted.
-				var sz := int(op["size"])
-				box = Rect2(box.position,
-					Vector2(f.get_string_size(str(op["id"]), HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x, box.size.y))
-			var over: float = maxf(maxf(inner.position.x - box.position.x, box.end.x - inner.end.x),
-				maxf(inner.position.y - box.position.y, box.end.y - inner.end.y))
-			if over > worst:
-				worst = over
-				worst_id = "%s '%s' x%.0f..%.0f y%.0f..%.0f" % [op["k"], str(op["id"]).substr(0, 46),
-					box.position.x, box.end.x, box.position.y, box.end.y]
-			if box.end.y > lowest:
-				lowest = box.end.y
-				lowest_id = "%s '%s'" % [op["k"], str(op["id"]).substr(0, 46)]
-		# ...and the same ink must clear the BACK plate it shares the well with. Wrapping
-		# a clipped line into two REFLOWS the page downward, so "fits the frame" alone
-		# would let a grown block slide under BACK and stay green.
-		Runner.T.ok(lowest <= back_plate.position.y,
-			"%s: the lowest content ink (%.0f) clears the drawn BACK plate top (%.0f) — %s"
-				% [scr["tag"], lowest, back_plate.position.y, lowest_id])
-		Runner.T.ok(worst <= 0.5,
-			"%s: every drawn op fits the frame interior (worst overhang %.1f px%s)"
-				% [scr["tag"], worst, "" if worst <= 0.5 else " — " + worst_id])
-		# ...and no two strings on the screen may sit ON TOP OF EACH OTHER. Frame
-		# containment alone is blind to INTRA-content collisions: HALL_RECENCY_Y stayed
-		# at 82 when the tab row dropped 66 -> 76, so "BOARD KEEPS YOUR TOP 40 RUNS" drew
-		# straight through "CAMPAIGN ENDLESS RUSH" — inside the frame, and green through
-		# a 5822-assertion suite. Any future vertical shuffle of the content well is
-		# caught here instead of in a screenshot.
-		Runner.T.ok(_worst_text_overlap(m.ops, f) == null,
-			"%s: no two content strings overlap%s" % [scr["tag"], _overlap_msg(_worst_text_overlap(m.ops, f))])
+	var was_scale := Art.text_scale
+	for text_scale in [1.0, 2.0]:
+		Art.text_scale = text_scale
+		var screens := _content_well_screens(m)
+		screens.append({"mode": Menu.Mode.HALL, "tab": 0, "ep": 0, "tag": "HALL latest", "populated": true, "off_page": false})
+		screens.append({"mode": Menu.Mode.HALL, "tab": 0, "ep": 0, "tag": "HALL latest off page", "populated": true, "off_page": true})
+		Runner.T.ok(screens.size() >= 7,
+			"the screen set is derived from HOWTO_TABS x _endless_pages() + HALL (%d screens)" % screens.size())
+		for scr in screens:
+			m.mode = scr["mode"]
+			m._howto_page = scr["tab"]
+			m._howto_endless_page = scr["ep"]
+			m.ops.clear()
+			m.centered.clear()
+			var prev = Art.text_capture
+			Art.text_capture = m.ops
+			if scr["mode"] == Menu.Mode.HALL:
+				stub.hall.clear()
+				stub.hall_latest = {}
+				m._hall_page = 0
+				if scr.get("populated", false):
+					for i in 40:
+						stub.hall.append({"hid": i + 1, "score": 10000 - i, "mode": "campaign", "sector": 3, "ticks": 600, "grade": "A", "max_streak": 8})
+					stub.hall_latest = stub.hall[39] if scr.get("off_page", false) else stub.hall[0]
+				m._draw_hall()
+			else:
+				m._draw_howto()
+			Art.text_capture = prev
+			back_plate = m._back_rect().grow(3.0)
+			Runner.T.ok(m.ops.size() > 4, "%s: the real draw emitted ink to inspect (%d ops)" % [scr["tag"], m.ops.size()])
+			var worst := 0.0
+			var worst_id := ""
+			var lowest := 0.0
+			var lowest_id := ""
+			for op in m.ops:
+				var box: Rect2 = op["box"]
+				if box.position.y > 340.0:
+					continue
+				if op["k"] in ["rect", "rect_outline"] and back_plate.encloses(box):
+					continue
+				if op.has("size"):
+					var sz := int(op["size"])
+					box = Rect2(box.position,
+						Vector2(f.get_string_size(str(op["id"]), HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x, box.size.y))
+				var over: float = maxf(maxf(inner.position.x - box.position.x, box.end.x - inner.end.x),
+					maxf(inner.position.y - box.position.y, box.end.y - inner.end.y))
+				if over > worst:
+					worst = over
+					worst_id = "%s '%s' x%.0f..%.0f y%.0f..%.0f" % [op["k"], str(op["id"]).substr(0, 46),
+						box.position.x, box.end.x, box.position.y, box.end.y]
+				if box.end.y > lowest:
+					lowest = box.end.y
+					lowest_id = "%s '%s'" % [op["k"], str(op["id"]).substr(0, 46)]
+			Runner.T.ok(lowest <= back_plate.position.y,
+				"%s: the lowest content ink (%.0f) clears the drawn BACK plate top (%.0f) — %s"
+					% [scr["tag"], lowest, back_plate.position.y, lowest_id])
+			Runner.T.ok(worst <= 0.5,
+				"%s: every drawn op fits the frame interior (worst overhang %.1f px%s)"
+					% [scr["tag"], worst, "" if worst <= 0.5 else " — " + worst_id])
+			Runner.T.ok(_worst_text_overlap(m.ops, f) == null,
+				"%s: no two content strings overlap%s" % [scr["tag"], _overlap_msg(_worst_text_overlap(m.ops, f))])
+	Art.text_scale = was_scale
 	m.free()
 	stub.free()
 
@@ -7939,7 +7995,7 @@ func test_every_framed_screen_wears_a_bezel_not_a_stretched_box() -> void:
 			"mode %d 9-slices both frame layers (>=8 square corner tiles), got %d" % [m, corner_ops])
 		Runner.T.ok(ambient >= 1,
 			"mode %d paints a terminal-glass ambient layer inside its border" % m)
-	Runner.T.eq(covered, 12, "12 framed screens enumerated from UNFRAMED_MODES, not 4 reported")
+	Runner.T.eq(covered, 16, "all 16 framed screens are enumerated from UNFRAMED_MODES")
 	stub.free()
 
 
@@ -7980,7 +8036,7 @@ func test_every_framed_screen_has_its_own_chrome_signature() -> void:
 		Runner.T.ok(not sigs.has(sig),
 			"mode %d chrome signature is distinct — collides with mode %s" % [m, str(sigs.get(sig, "?"))])
 		sigs[sig] = m
-	Runner.T.eq(sigs.size(), 12, "12 framed screens, 12 distinct chrome signatures")
+	Runner.T.eq(sigs.size(), 16, "16 framed screens have 16 distinct chrome signatures")
 	stub.free()
 
 
@@ -8093,7 +8149,7 @@ func test_no_framed_screen_puts_its_content_under_the_frame_keyline() -> void:
 			Runner.T.ok(_rect_inside(clear, box),
 				"mode %d header ink %s clears the %.1fpx keyline band (clear rect %s)"
 					% [m, box, stroke, clear])
-	Runner.T.eq(checked, 12, "all 12 framed modes audited against the keyline, not the 5 screenshotted")
+	Runner.T.eq(checked, 16, "all 16 framed modes are audited against the keyline")
 	stub.free()
 
 
@@ -8245,15 +8301,17 @@ func test_muted_volume_row_footer_keeps_its_unmute_instruction() -> void:
 		# _draw_footer_help, captured at the _center_text seam — so this measures the
 		# string the player sees, at the real footer budget, not a paraphrase.
 		var composed := Menu.muted_row_help(Menu.setting_help(id))
-		Runner.T.ok(f.get_string_size(composed, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x > budget,
+		Runner.T.ok(f.get_string_size(composed, HORIZONTAL_ALIGNMENT_LEFT, -1, Art.fs(HudIcons.TYPE_MICRO)).x > budget,
 			"the muted '%s' footer line really does overrun the %.0fpx budget (%.1fpx) — this test has something to catch"
-				% [id, budget, f.get_string_size(composed, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x])
+				% [id, budget, f.get_string_size(composed, HORIZONTAL_ALIGNMENT_LEFT, -1, Art.fs(HudIcons.TYPE_MICRO)).x])
 		var cap := _CaptureMenu.new()
 		cap.mode = Menu.Mode.AUDIO
-		cap._draw_footer_help(composed, Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE)
-		var shown := ""
+		var layout := Menu.footer_layout(composed, Menu.footer_nav_segs())
+		cap._draw_footer_help(composed, layout["top"])
+		var shown_lines := PackedStringArray()
 		for c in cap.centered:
-			shown = String(c["txt"])
+			shown_lines.append(String(c["txt"]))
+		var shown := " ".join(shown_lines)
 		var boxes: Array = cap.ops.filter(func(op): return op["k"] == "text")
 		cap.free()
 		Runner.T.ok(shown.contains("UNMUTE"),
@@ -8262,10 +8320,12 @@ func test_muted_volume_row_footer_keeps_its_unmute_instruction() -> void:
 		# END, never spliced mid-string onto a tail that came from a different clause.
 		Runner.T.ok(not shown.contains(ell) or shown.ends_with(ell),
 			"muted '%s' footer never fuses a trimmed head onto a later clause (drew '%s')" % [id, shown])
-		Runner.T.ok(f.get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x <= budget,
-			"muted '%s' footer fits the %.0fpx footer budget" % [id, budget])
+		Runner.T.eq(shown, composed, "muted '%s' footer preserves its complete help" % id)
+		for line in shown_lines:
+			Runner.T.ok(Art.tw(line, Art.fs(HudIcons.TYPE_MICRO)) <= budget,
+				"muted '%s' footer line fits the readable width budget" % id)
 		# ...and the ink box the draw actually emitted stays on canvas.
-		Runner.T.ok(boxes.size() == 1, "muted '%s' footer emits exactly one description line" % id)
+		Runner.T.ok(boxes.size() > 1, "muted '%s' footer wraps its complete description" % id)
 		for b in boxes:
 			var box: Rect2 = b["box"]
 			Runner.T.ok(box.position.x >= 0.0 and box.end.x <= Menu.CANVAS_WIDTH,
@@ -8586,8 +8646,6 @@ func test_list_screen_ink_stays_clear_of_frame_and_rows() -> void:
 	## REBIND footer is one-line → (c) red. The fix moves the note into the footer's
 	## two-line help machinery (the strip below the frame, already proven on OPTS).
 	var was_pad: bool = Art.use_pad
-	var strip_top: float = Menu.FOOTER_Y - Menu.FOOTER_HELP_RISE
-	var strip_bottom: float = Menu.FOOTER_Y + Menu.FOOTER_H
 	# The screen set is DERIVED from the Mode enum (HIDDEN/TITLE have no list frame,
 	# HALL/HOWTO are owned by the content-well test): PAUSE, OPTS, SETUP, DISP, INFO,
 	# MODES, CHAPTERS, AUDIO, PERKS — plus REBIND x its 4 tabs. A new framed mode is
@@ -8599,98 +8657,82 @@ func test_list_screen_ink_stays_clear_of_frame_and_rows() -> void:
 		list_modes.append(mv)
 	Runner.T.ok(list_modes.size() >= 10,
 		"list screen set derived from Menu.Mode (%d screens)" % list_modes.size())
-	for mv in list_modes:
-		var tabs: int = Menu.REBIND_TABS.size() if mv == Menu.Mode.REBIND else 1
-		for tab in range(tabs):
-			for pad in [false, true]:
-				Art.use_pad = pad
-				var tag := "%s%s/%s" % [Menu.Mode.keys()[mv],
-					(" tab%d" % tab) if mv == Menu.Mode.REBIND else "", "pad" if pad else "kb"]
-				var stub := _StubMain.new()
-				var m := _CaptureMenu.new()
-				m.main = stub
-				m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
-				m._open_t = 1.0
-				m.mode = mv
-				m._rebind_tab = tab
-				m.ops.clear()
-				var prev = Art.text_capture
-				Art.text_capture = m.ops
-				m._draw_mode_header()
-				m._footer_legend()
-				Art.text_capture = prev
-				var interior := _measured_frame_interior(Menu.content_frame_rect(mv))
-				var border_bottom: float = Menu.content_frame_border(mv).end.y
-				var g: Dictionary = m._row_geometry()
-				var worst := 0.0
-				var worst_id := ""
-				var hit := ""
-				var footnote_y := -1.0
-				for op in m.ops:
-					if not op.has("size"):
-						continue   # plates/glyphs are chrome or shadow-less; text is the ink
-					var box: Rect2 = op["box"]
-					if mv == Menu.Mode.REBIND and "ALWAYS ON" in str(op["id"]) \
-							and box.position.y >= strip_top and box.end.y <= strip_bottom:
-						footnote_y = box.position.y
-					# The footer strip is drawn BELOW the frame by design (pinned by
-					# test_footer_draw_commands_captured_both_devices) — out of scope here.
-					if box.position.y >= border_bottom:
-						continue
-					# Grow 1px right/down for the Art.text drop shadow.
-					var grown := Rect2(box.position, box.size + Vector2(1.0, 1.0))
-					var over: float = maxf(maxf(interior.position.x - grown.position.x,
-							grown.end.x - interior.end.x),
-						maxf(interior.position.y - grown.position.y, grown.end.y - interior.end.y))
-					if over > worst:
-						worst = over
-						worst_id = "'%s' x%.0f..%.0f y%.0f..%.0f vs interior x%.0f..%.0f y%.0f..%.2f" % [
-							str(op["id"]).substr(0, 46), grown.position.x, grown.end.x,
-							grown.position.y, grown.end.y,
-							interior.position.x, interior.end.x, interior.position.y, interior.end.y]
-					for k in int(g["n"]):
-						var rr: Rect2 = Menu.row_rect(g, k)
-						if box.intersects(rr):
-							hit = "'%s' y%.0f..%.0f intersects row %d %s" % [
-								str(op["id"]).substr(0, 46), box.position.y, box.end.y, k, str(rr)]
-							break
-				Runner.T.ok(worst <= 0.0,
-					"%s: every in-dialog string clears the measured frame interior (worst overhang %.2fpx%s)"
-						% [tag, worst, "" if worst <= 0.0 else " — " + worst_id])
-				Runner.T.ok(hit == "",
-					"%s: no header/footer string intersects a row plate%s" % [tag, "" if hit == "" else " — " + hit])
-				if mv == Menu.Mode.REBIND:
-					Runner.T.ok(footnote_y >= 0.0,
-						"%s: the ALWAYS-ON footnote lives in the footer help strip (y %.0f..%.0f)"
-							% [tag, strip_top, strip_bottom])
-				m.free()
-				stub.free()
+	var was_scale := Art.text_scale
+	for text_scale in [1.0, 2.0]:
+		Art.text_scale = text_scale
+		for mv in list_modes:
+			var tabs: int = Menu.REBIND_TABS.size() if mv == Menu.Mode.REBIND else 1
+			for tab in range(tabs):
+				for pad in [false, true]:
+					Art.use_pad = pad
+					var tag := "%s%s/%s" % [Menu.Mode.keys()[mv],
+						(" tab%d" % tab) if mv == Menu.Mode.REBIND else "", "pad" if pad else "kb"]
+					var stub := _StubMain.new()
+					var m := _CaptureMenu.new()
+					m.main = stub
+					m.size = Vector2(Menu.CANVAS_WIDTH, 360.0)
+					m._open_t = 1.0
+					m.mode = mv
+					m._rebind_tab = tab
+					m.ops.clear()
+					var prev = Art.text_capture
+					Art.text_capture = m.ops
+					m._draw_mode_header()
+					var header_ops := m.ops.size()
+					m._footer_legend()
+					var strip_top: float = m.ops[header_ops]["box"].position.y
+					var strip_bottom: float = m.ops[header_ops]["box"].end.y
+					Art.text_capture = prev
+					var interior := _measured_frame_interior(Menu.content_frame_rect(mv))
+					var g: Dictionary = m._row_geometry()
+					var worst := 0.0
+					var worst_id := ""
+					var hit := ""
+					var footnote_y := -1.0
+					for op_i in m.ops.size():
+						var op: Dictionary = m.ops[op_i]
+						if not op.has("size"):
+							continue
+						var box: Rect2 = op["box"]
+						if mv == Menu.Mode.REBIND and "ALWAYS ON" in str(op["id"]) \
+								and box.position.y >= strip_top and box.end.y <= strip_bottom:
+							footnote_y = box.position.y
+						for k in int(g["n"]):
+							if box.intersects(Menu.row_rect(g, k)):
+								hit = "'%s' intersects row %d" % [str(op["id"]), k]
+						if op_i >= header_ops:
+							continue
+						var grown := Rect2(box.position, box.size + Vector2(1.0, 1.0))
+						var over: float = maxf(maxf(interior.position.x - grown.position.x,
+								grown.end.x - interior.end.x),
+							maxf(interior.position.y - grown.position.y, grown.end.y - interior.end.y))
+						if over > worst:
+							worst = over
+							worst_id = "'%s' x%.0f..%.0f y%.0f..%.0f vs interior x%.0f..%.0f y%.0f..%.2f" % [
+								str(op["id"]).substr(0, 46), grown.position.x, grown.end.x,
+								grown.position.y, grown.end.y,
+								interior.position.x, interior.end.x, interior.position.y, interior.end.y]
+						for k in int(g["n"]):
+							var rr: Rect2 = Menu.row_rect(g, k)
+							if box.intersects(rr):
+								hit = "'%s' y%.0f..%.0f intersects row %d %s" % [
+									str(op["id"]).substr(0, 46), box.position.y, box.end.y, k, str(rr)]
+								break
+					Runner.T.ok(worst <= 0.0,
+						"%s: every in-dialog string clears the measured frame interior (worst overhang %.2fpx%s)"
+							% [tag, worst, "" if worst <= 0.0 else " — " + worst_id])
+					Runner.T.ok(hit == "",
+						"%s: no header/footer string intersects a row plate%s" % [tag, "" if hit == "" else " — " + hit])
+					if mv == Menu.Mode.REBIND:
+						Runner.T.ok(footnote_y >= 0.0,
+							"%s: the ALWAYS-ON footnote lives in the footer help strip (y %.0f..%.0f)"
+								% [tag, strip_top, strip_bottom])
+					m.free()
+					stub.free()
+	Art.text_scale = was_scale
 	Art.use_pad = was_pad
 
 
-# ---------------------------------------------------------------------------
-# The FOCUSED-ROW HALO vs. HEADER INK class.
-#
-# Reported as "the CAREER line is cut off by the CAMPAIGN button's frame" on the
-# TITLE screen. It is not the frame and it is not clipping: the amber breathing
-# halo `Art.focus_ring` paints AROUND the focused row's plate, grown by
-# focus_ring_grow(mp) = roundf(3 + mp*1.5) — 3px at the breath's trough, 5px at its
-# peak. Every header-clearance constant in menu.gd (TITLE_HEAD_MARGIN,
-# HEADER_CLEAR, HEADER_CLEAR_COMPACT) was tuned against the row PLATE, so on TITLE
-# the halo's top edge reached y141/140 while the CAREER glyphs' own bottom ink row
-# is 141 — the halo ate the bottom row of chunky pixel caps, which reads exactly as
-# "cut off". Measured on a real 640x360 GL capture: canvas row 141 carried 226 of
-# 232 pixels above luminance 140 (a solid bright bar) where the genuine glyph rows
-# 135-140 carry 38-57.
-#
-# This pins the CLASS, not the instance: every Mode that draws a row column, every
-# reachable header state of that mode, every breath phase. The header ink boxes are
-# CAPTURED from the real header draw methods through the _center_text seam, never
-# re-typed — a lengthened subtitle or a new header line enters the sweep the day it
-# lands. Art.text_scale is deliberately NOT swept, and that is a measured claim, not
-# an omission: _center_text -> Art.text_center passes `size` straight through with no
-# Art.fs(), so menu header type is provably unscaled (the world-label ratchet in
-# test_view_honesty.gd DOES sweep it, because those sites really do call Art.fs(8)).
 func test_focused_row_halo_never_touches_header_ink() -> void:
 	var modes := [Menu.Mode.TITLE, Menu.Mode.PAUSE, Menu.Mode.OPTS, Menu.Mode.SETUP,
 		Menu.Mode.INFO, Menu.Mode.REBIND, Menu.Mode.DISP, Menu.Mode.MODES,
@@ -8700,62 +8742,67 @@ func test_focused_row_halo_never_touches_header_ink() -> void:
 	var worst_desc := ""
 	var phases := 0
 	var ink_boxes := 0
-	for mode_id in modes:
-		for st in _header_states(mode_id):
-			var stub := _StubMain.new()
-			for k in st.keys():
-				if k != "tag":
-					stub.set(k, st[k])
-			var m := _CaptureMenu.new()
-			m.main = stub
-			m.mode = mode_id
-			m._open_t = 1.0      # at rest: settle_offset only ever pushes rows DOWN, so this is
-			                     # the HIGHEST row 0 ever sits — the worst case for the header.
-			if mode_id == Menu.Mode.OPTS:
-				m._opts_dirty = bool(st.get("_opts_dirty", false))
-				m._reset_flash = float(st.get("_reset_flash", 0.0))
-				if bool(st.get("_reset_focus", false)):
-					m.sel = _row_index(m, "reset_defaults")
-					if bool(st.get("_reset_armed", false)):
-						m._confirm = m.sel
-			if mode_id == Menu.Mode.TITLE:
-				m._draw_title_header()
-			else:
-				m._draw_mode_header()
-			var ink: Array[Rect2] = []
-			for op in m.ops:
-				if op["k"] == "text" and String(op["id"]) != "":
-					ink.append(op["box"])
-			ink_boxes += ink.size()
-			Runner.T.ok(not ink.is_empty(),
-				"%s: the real header draw emitted measurable ink (%d boxes)" % [String(st["tag"]), ink.size()])
-			var g := m._row_geometry()
-			var r0: Rect2 = Menu.row_rect(g, 0)
-			for i in 21:
-				var mp := float(i) * 0.05
-				phases += 1
-				var decor: Array[Rect2] = [r0.grow(Menu.focus_ring_grow(mp))]
+	var was_scale := Art.text_scale
+	for text_scale in [1.0, 2.0]:
+		Art.text_scale = text_scale
+		for mode_id in modes:
+			for st in _header_states(mode_id):
+				var stub := _StubMain.new()
+				for k in st.keys():
+					if k != "tag":
+						stub.set(k, st[k])
+				var m := _CaptureMenu.new()
+				m.main = stub
+				m.mode = mode_id
+				m._open_t = 1.0
+				if mode_id == Menu.Mode.OPTS:
+					m._opts_dirty = bool(st.get("_opts_dirty", false))
+					m._reset_flash = float(st.get("_reset_flash", 0.0))
+					if bool(st.get("_reset_focus", false)):
+						m.sel = _row_index(m, "reset_defaults")
+						if bool(st.get("_reset_armed", false)):
+							m._confirm = m.sel
 				if mode_id == Menu.Mode.TITLE:
-					var plast := 0
-					var mi := m._menu_items()
-					for k in mi.size():
-						if int(mi[k].get("grp", 0)) == 0:
-							plast = k
-					decor.append(Menu.title_deploy_panel(g, plast,
-						Menu.title_head_bottom(stub.best_score > 0, stub._life_runs > 0)))
-				for d in decor:
-					for b in ink:
-						if b.end.y > r0.position.y:
-							continue   # not a header line above the column (footers, in-row text)
-						var gap: float = d.position.y - b.end.y
-						if gap < worst:
-							worst = gap
-							worst_desc = "%s mp %.2f: decoration top %.0f vs ink bottom %.0f (gap %.0f)" % [
-								String(st["tag"]), mp, d.position.y, b.end.y, gap]
-						if gap < Menu.HEADER_INK_CHANNEL:
-							bad += 1
-			m.free()
-			stub.free()
+					m._draw_title_header()
+				else:
+					m._draw_mode_header()
+				var ink: Array[Rect2] = []
+				for op in m.ops:
+					if op["k"] == "text" and String(op["id"]) != "":
+						ink.append(op["box"])
+						Runner.T.ok(op["box"].position.x >= 0.0 and op["box"].end.x <= Menu.CANVAS_WIDTH,
+							"scale%s %s header '%s' stays inside the canvas" % [text_scale, st["tag"], op["id"]])
+				ink_boxes += ink.size()
+				Runner.T.ok(not ink.is_empty(),
+					"%s: the real header draw emitted measurable ink (%d boxes)" % [String(st["tag"]), ink.size()])
+				var g := m._row_geometry()
+				var r0: Rect2 = Menu.row_rect(g, int(g.get("first_row", 0)))
+				for i in 21:
+					var mp := float(i) * 0.05
+					phases += 1
+					var decor: Array[Rect2] = [r0.grow(Menu.focus_ring_grow(mp))]
+					if mode_id == Menu.Mode.TITLE:
+						var plast := 0
+						var mi := m._menu_items()
+						for k in mi.size():
+							if int(mi[k].get("grp", 0)) == 0:
+								plast = k
+						decor.append(Menu.title_deploy_panel(g, plast,
+							Menu.title_head_bottom(stub.best_score > 0, stub._life_runs > 0)))
+					for d in decor:
+						for b in ink:
+							if b.end.y > r0.position.y:
+								continue
+							var gap: float = d.position.y - b.end.y
+							if gap < worst:
+								worst = gap
+								worst_desc = "%s mp %.2f: decoration top %.0f vs ink bottom %.0f (gap %.0f)" % [
+									String(st["tag"]), mp, d.position.y, b.end.y, gap]
+							if gap < Menu.HEADER_INK_CHANNEL:
+								bad += 1
+				m.free()
+				stub.free()
+	Art.text_scale = was_scale
 	Runner.T.ok(ink_boxes >= 20, "captured header ink across every mode/state (%d boxes)" % ink_boxes)
 	Runner.T.ok(phases >= 200, "swept the halo's whole breath range (%d mode x state x phase samples)" % phases)
 	Runner.T.eq(bad, 0,
@@ -9034,19 +9081,13 @@ func test_menu_names_no_bare_font_size() -> void:
 	Runner.T.eq(GameMenu.CONTENT_TITLE_SIZE, HudIcons.TYPE_LABEL, "the content-screen title draws at the label rung")
 	Runner.T.eq(GameMenu.ROW_LABEL_SIZE, HudIcons.TYPE_BODY, "the row label draws at the readout rung")
 	Runner.T.eq(GameMenu.SEED_TAG_SIZE, HudIcons.TYPE_MICRO, "the seed sub-label draws at the em floor")
-	Runner.T.eq(GameMenu.FOOTER_HELP_MAX_SIZE, 9,
-		"the footer description cap keeps its measured value (9) — it is a MULTIPLIER ceiling, not a font size; see the const's strip arithmetic")
-
-	# --- the ONE sanctioned off-grid size, pinned as an exception with its reason attached. ---
-	# KEYCAP_STAMP_SIZE (6) is the letters stamped INSIDE an 11px keycap sprite. It is allowed to
-	# be off-grid ONLY because it is a NAMED constant carrying a measurement; if someone inlines a
-	# bare 6 anywhere else the scan above catches it, and if someone renames the constant away the
-	# next assertion here fails. Assert it is still the value the two call sites were tuned at,
-	# so "retune the keycap" is a deliberate edit to this line and nothing else.
-	Runner.T.eq(GameMenu.KEYCAP_STAMP_SIZE, 6,
-		"the keycap letter-stamp keeps its one measured off-grid exception (6px)")
-	Runner.T.ok(src.contains("const KEYCAP_STAMP_SIZE := 6"),
-		"the keycap exception is a named constant, not an inline literal at either call site")
+	Runner.T.eq(GameMenu.KEYCAP_STAMP_SIZE * Art.MIN_WINDOW_SCALE, 18,
+		"readable keycap letters meet the displayed minimum")
+	var was_scale := Art.text_scale
+	Art.text_scale = 2.0
+	var enlarged := GameMenu.footer_layout("THE FULL HELP MESSAGE MUST REMAIN READABLE WITHOUT A FONT CAP.", GameMenu.footer_nav_segs())
+	Runner.T.eq(enlarged["size"], 18, "footer help preserves the maximum requested text size")
+	Art.text_scale = was_scale
 
 	# --- the accessible pager's three off-grid DESIGN sizes, pinned with their measurement. ---
 	# These are the packer's input, not the shipped typography (they only ever draw above 100%
@@ -9192,3 +9233,69 @@ func test_glyph_hint_rows_are_all_reachable() -> void:
 			Runner.T.ok(Art.TEX.has(Art.glyph_key(k)),
 				"hint '%s' resolves to a real TEX key on %s" % [k, "pad" if dev else "kb"])
 	Art.use_pad = was_pad   # restore global so device state can't leak to other suites
+
+
+func test_menu_action_icons_are_official_assets_without_arrow_cues() -> void:
+	for key in ["mi_play", "mi_settings", "mi_back", "mi_book", "mi_controller", "mi_trophy", "fa_minus", "fa_plus", "fa_filter", "fa_file", "fa_captions"]:
+		var path: String = Art.TEX[key].resource_path
+		Runner.T.ok(path.begins_with("res://assets/fontawesome/solid/"), "%s resolves to the official Font Awesome assets" % key)
+		Runner.T.ok(path.ends_with(".svg"), "%s keeps the actual authored SVG" % key)
+	Runner.T.ok(not Art.TEX.has("mi_arrow"), "the generic menu arrow is retired")
+	Runner.T.ok(not FileAccess.file_exists("res://assets/art/ui/menuicons/mi_arrow.png"), "retired arrow pixels cannot enter the release pack")
+	Runner.T.ok(FileAccess.file_exists("res://assets/fontawesome/LICENSE.txt"), "the icon license and attribution ship with their source")
+
+
+func test_footer_enlargement_wraps_all_help_without_shrinking() -> void:
+	var was_scale := Art.text_scale
+	Art.text_scale = 2.0
+	var source := "STEP THE SLIDER RIGHT TO UNMUTE. MUSIC LOUDNESS IS SAVED AUTOMATICALLY. THE COMPLETE HELP MUST FIT AT YOUR CHOSEN TEXT SIZE."
+	var g := Menu.footer_layout(source, Menu.footer_nav_segs() + Menu.footer_verb_segs())
+	Runner.T.eq(g["size"], 18, "footer uses the requested enlarged small-text size")
+	Runner.T.ok(g["help"].size() > 1, "long help wraps at its requested font size")
+	Runner.T.eq(" ".join(g["help"]), source, "wrapping preserves every help word")
+	for line in g["help"]:
+		Runner.T.ok(Art.tw(line, g["size"]) <= Menu.CANVAS_WIDTH - 24.0, "each help line stays inside its horizontal budget")
+	for row in g["legends"]:
+		Runner.T.ok(float(Menu.legend_extent(row)[1]) <= Menu.LEG_SAFE_W, "bindings wrap into readable rows")
+	Runner.T.ok(float(g["top"]) >= 0.0 and float(g["top"]) + float(g["height"]) <= Menu.CANVAS_HEIGHT, "the complete footer reservation fits the canvas")
+	var stub := _StubMain.new()
+	var menu := _CaptureMenu.new()
+	menu.main = stub
+	menu._open_t = 1.0
+	for mv in [Menu.Mode.OPTS, Menu.Mode.REBIND, Menu.Mode.SETUP]:
+		menu.mode = mv
+		for tab in range(Menu.REBIND_TABS.size() if mv == Menu.Mode.REBIND else 1):
+			menu._rebind_tab = tab
+			if mv == Menu.Mode.REBIND:
+				menu.ops.clear()
+				menu._draw_rebind_header()
+				for index in Menu.REBIND_TABS.size():
+					var label: String = Menu.REBIND_TABS[index]
+					var plate := menu._rebind_tab_rect(index)
+					var natural := Art.font().get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+					Runner.T.ok(natural + 12.0 <= plate.size.x, "the complete enlarged %s tab label fits before any draw-width clamp" % label)
+					var inner := Menu.content_frame_border(Menu.Mode.REBIND).grow(-12.0)
+					Runner.T.ok(plate.position.x >= inner.position.x and plate.end.x <= inner.end.x, "the measured rebind tab strip clears its actual list-frame stroke")
+					var drawn := false
+					for op in menu.ops:
+						if op.get("id", "") == label:
+							drawn = true
+							Runner.T.ok(absf(op["box"].size.x - natural) < 0.5, "the actual %s label draw retains its complete natural width" % label)
+					Runner.T.ok(drawn, "the production header emits the complete %s tab label" % label)
+			for row in menu._menu_items().size():
+				menu.sel = row
+				var geometry := menu._row_geometry()
+				var plate := Menu.row_rect(geometry, row)
+				var footer := menu._focused_footer()
+				var reservation := Menu.footer_layout(footer["help"], footer["segs"])
+				Runner.T.ok(plate.size.y >= Art.font().get_height(HudIcons.TYPE_BODY) + 4.0,
+					"large-text focus reveals a complete body-text plate on every row")
+				Runner.T.ok(plate.position.y >= float(menu._header_caption_layout(menu._list_caption())["bottom"]) + Menu.HEADER_INK_CHANNEL,
+					"focused row clears the complete wrapped caption")
+				Runner.T.ok(plate.end.y + 5.0 <= float(reservation["top"]),
+					"focused row and its decoration clear the full footer")
+				Runner.T.eq(menu._row_at(plate.get_center()), row,
+					"mouse targeting reaches every focus page's visible row")
+	menu.free()
+	stub.free()
+	Art.text_scale = was_scale

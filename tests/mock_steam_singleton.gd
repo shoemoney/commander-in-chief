@@ -36,6 +36,7 @@ var controllers: Array = [1001, 1002]   # fake controller handles: [0]=P1, [1]=P
 var activated_sets: Array = []          # [[controller_handle, action_set_handle], ...]
 var find_calls: Array = []              # [[leaderboard_name, sort, display], ...]
 var uploaded_scores: Dictionary = {}    # leaderboard handle -> last uploaded score
+var leaderboard_names: Dictionary = {}
 var requested_user := 0
 var user_id := 1
 var input_initialized := false
@@ -63,6 +64,10 @@ func steamInitEx(_app_id: int = 0, _embed_callbacks: bool = false) -> Dictionary
 ## -- exactly what steam_bridge.gd's _init()/upload_score() wired up -- fires
 ## the same way it would against the real GodotSteam singleton.
 func fire_signal(signal_name: String, args: Array = []) -> void:
+	if signal_name == "leaderboard_find_result" and args.size() >= 2 \
+			and int(args[0]) > 0 and int(args[1]) != 0 \
+			and not leaderboard_names.has(int(args[0])) and not find_calls.is_empty():
+		leaderboard_names[int(args[0])] = find_calls[-1][0]
 	callv("emit_signal", [signal_name] + args)
 
 
@@ -149,6 +154,10 @@ func setRichPresence(_key: String, _value: String) -> bool:
 
 func findOrCreateLeaderboard(name: String, sort: int, display: int) -> void:
 	find_calls.append([name, sort, display])
+
+
+func getLeaderboardName(this_leaderboard: int = 0) -> String:
+	return String(leaderboard_names.get(this_leaderboard, ""))
 
 
 func uploadLeaderboardScore(score: int, _keep_best: bool = true, _details: PackedInt32Array = PackedInt32Array(), handle: int = 0) -> void:

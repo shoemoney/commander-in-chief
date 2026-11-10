@@ -24,6 +24,15 @@ const VALIDATION_OK := 0
 const VALIDATION_MALFORMED := 1
 const VALIDATION_SCORE_MISMATCH := 2
 const VALIDATION_UNSUPPORTED_VERSION := 3
+const ACCESSIBILITY_BOOL_KEYS: Array[String] = [
+	"single_stick_p1", "single_stick_p2", "classic_aim_p1", "classic_aim_p2",
+	"toggle_grenade", "toggle_roll", "toggle_interact", "toggle_revive", "toggle_buy", "slow_mode",
+]
+const ACCESSIBILITY_INTEGER_MAX := {"aim_assist": 2, "shake_level": 10, "flash_level": 10}
+const ASSIST_SETTING_KEYS: Array[String] = [
+	"single_stick_p1", "single_stick_p2", "classic_aim_p1", "classic_aim_p2", "aim_assist",
+	"toggle_grenade", "toggle_roll", "toggle_interact", "toggle_revive", "toggle_buy", "slow_mode",
+]
 
 var seed_value: int = 0
 var mode: String = "campaign"
@@ -48,6 +57,10 @@ var last_score: int = 0   # set by play() -- the score the re-simulated frames a
 # Whether the score above already cleared main.gd's synchronous pre-bank gate
 # (Replay.verify_score) at the moment this replay was saved. save_and_verify
 # corrects this in place if it ever disagrees with a fresh disk-read-back check.
+var slow_mode: bool = false
+var accessibility: Dictionary = {}
+var accessibility_changes: Array = []
+var assist_tags: Array[String] = []
 var verified: bool = false
 
 
@@ -63,7 +76,109 @@ func to_dict() -> Dictionary:
 		"seed": seed_value, "mode": mode,
 		"players": player_count, "assist": assist, "hard": hard, "chapter": chapter,
 		"start_vest": start_vest, "start_chest": start_chest, "start_tokens": start_tokens,
-		"frames": frames, "score": claimed_score, "verified": verified}
+		"frames": frames, "score": claimed_score, "verified": verified,
+		"slow_mode": slow_mode, "accessibility": accessibility.duplicate(true),
+		"accessibility_changes": accessibility_changes.duplicate(true), "assist_tags": assist_tags.duplicate()}
+
+
+func record_accessibility(config: Dictionary, tags: Array[String]) -> void:
+	if frames.is_empty():
+		accessibility = config.duplicate(true)
+		slow_mode = bool(config.get("slow_mode", false))
+	if accessibility_changes.is_empty() or accessibility_changes[-1]["settings"] != config:
+		var change := {"frame": frames.size(), "settings": config.duplicate(true)}
+		if not accessibility_changes.is_empty() and int(accessibility_changes[-1]["frame"]) == frames.size():
+			accessibility_changes[-1] = change
+		else:
+			accessibility_changes.append(change)
+	_merge_assist_tags(tags)
+	_merge_assist_tags(assist_tags_for_config(config, player_count, assist))
+
+
+static func assist_tags_for_config(config: Dictionary, players: int, vest: bool = false) -> Array[String]:
+	var tags: Array[String] = []
+	if vest:
+		tags.append("vest")
+	for key in ASSIST_SETTING_KEYS:
+		if key.ends_with("p2") and players < 2:
+			continue
+		if key == "aim_assist":
+			var tier: int = int(config.get(key, 0))
+			if tier == 1:
+				tags.append("aim_low")
+			elif tier == 2:
+				tags.append("aim_high")
+		elif bool(config.get(key, false)):
+			tags.append(key)
+	return tags
+
+
+func _merge_assist_tags(tags: Array[String]) -> void:
+	for tag in tags:
+		if tag not in assist_tags:
+			assist_tags.append(tag)
+
+
+func slow_at(frame: int) -> bool:
+	var result := slow_mode
+	for change in accessibility_changes:
+		if int(change["frame"]) > frame:
+			break
+		result = bool(change["settings"].get("slow_mode", false))
+	return result
+
+
+static func _valid_accessibility_metadata(data: Dictionary, frame_count: int) -> bool:
+	if typeof(data.get("slow_mode", false)) != TYPE_BOOL \
+			or typeof(data.get("accessibility", {})) != TYPE_DICTIONARY \
+			or typeof(data.get("accessibility_changes", [])) != TYPE_ARRAY \
+			or typeof(data.get("assist_tags", [])) != TYPE_ARRAY:
+		return false
+	var initial: Dictionary = data.get("accessibility", {})
+	if not _valid_accessibility_config(initial):
+		return false
+	if initial.has("slow_mode") and initial["slow_mode"] != data.get("slow_mode", false):
+		return false
+	var changes: Array = data.get("accessibility_changes", [])
+	if changes.size() > frame_count + 1:
+		return false
+	var previous := -1
+	for change in changes:
+		if typeof(change) != TYPE_DICTIONARY or typeof(change.get("frame")) not in [TYPE_INT, TYPE_FLOAT] \
+				or typeof(change.get("settings")) != TYPE_DICTIONARY:
+			return false
+		var at := float(change["frame"])
+		if not is_finite(at) or at != floor(at) or at < 0 or at > frame_count or int(at) <= previous:
+			return false
+		if not _valid_accessibility_config(change["settings"]):
+			return false
+		if int(at) == 0 and data.has("accessibility") and change["settings"] != initial:
+			return false
+		previous = int(at)
+	var tags: Array = data.get("assist_tags", [])
+	if tags.size() > 64:
+		return false
+	var seen := {}
+	for tag in tags:
+		if typeof(tag) != TYPE_STRING or tag.is_empty() or tag.length() > 64 or seen.has(tag):
+			return false
+		seen[tag] = true
+	return true
+
+
+static func _valid_accessibility_config(config: Dictionary) -> bool:
+	for key in ACCESSIBILITY_BOOL_KEYS:
+		if config.has(key) and typeof(config[key]) != TYPE_BOOL:
+			return false
+	for key in ACCESSIBILITY_INTEGER_MAX:
+		if not config.has(key):
+			continue
+		if typeof(config[key]) not in [TYPE_INT, TYPE_FLOAT]:
+			return false
+		var value := float(config[key])
+		if not is_finite(value) or value != floor(value) or value < 0 or value > ACCESSIBILITY_INTEGER_MAX[key]:
+			return false
+	return true
 
 
 func save(path: String) -> Error:
@@ -154,7 +269,14 @@ static func _from_data(data: Dictionary) -> Replay:
 		for enc in frame:
 			if typeof(enc) != TYPE_ARRAY or (enc as Array).size() < 5:
 				return null
+	if not _valid_accessibility_metadata(data, data["frames"].size()):
+		return null
 	var r := Replay.new()
+	r.slow_mode = data.get("slow_mode", false)
+	r.accessibility = data.get("accessibility", {}).duplicate(true)
+	r.accessibility_changes = data.get("accessibility_changes", []).duplicate(true)
+	for tag in data.get("assist_tags", []):
+		r.assist_tags.append(tag)
 	r.seed_value = int(data["seed"])
 	r.mode = str(data["mode"])
 	r.player_count = int(data["players"])
@@ -171,6 +293,13 @@ static func _from_data(data: Dictionary) -> Replay:
 	# replay-validated leaderboards.
 	r.claimed_score = int(data.get("score", 0))
 	r.verified = bool(data.get("verified", false))
+	r._merge_assist_tags(assist_tags_for_config(r.accessibility, r.player_count, r.assist))
+	if r.slow_mode:
+		r._merge_assist_tags(["slow_mode"])
+	for change in r.accessibility_changes:
+		r._merge_assist_tags(assist_tags_for_config(change["settings"], r.player_count, r.assist))
+	if r.assist_tags.size() > 64:
+		return null
 	return r
 
 

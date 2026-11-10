@@ -121,6 +121,7 @@ func test_endless_miniboss_spawns_holds_wave_and_pays() -> void:
 	Runner.T.ok(not sim.endless_boss.is_empty() and sim.endless_boss["alive"], "wave 5 spawns the miniboss")
 	sim.wave_pending = 0
 	sim.enemies.clear()
+	sim.endless_boss["phase_t"] = 0   # landed: the approach is unkillable (test_endless_variety)
 	sim.step([SimInput.new()])
 	Runner.T.eq(sim.intermission_ticks, 0, "a live miniboss holds the wave open (shop stays shut)")
 	var chest0 := sim.war_chest
@@ -671,9 +672,9 @@ func test_rooted_wave_spawns_land_where_the_player_can_reach_them() -> void:
 	for s in [7, 23]:
 		var sim := SimWorld.new(s, 1, "endless")
 		sim.step([idle])
-		# Wave 12: past the broadcast debut (7), off the wave%5 miniboss/mast
-		# beats, elite_every == 2 so the special roll comes up often.
-		sim.wave = 12
+		# Wave 16: past every archetype debut (broadcast debuts at 14), off the wave%5
+		# miniboss/mast beats, elite_every == 2 so the special roll comes up often.
+		sim.wave = 16
 		sim.wave_mod = 0     # no themed remap, and not Blitz (which skips specials)
 		sim.wave_pending = 400
 		sim.wave_spawn_cd = 1

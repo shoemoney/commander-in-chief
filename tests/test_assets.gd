@@ -238,7 +238,7 @@ func test_attract_mode_captions_cannot_leak_into_a_real_run() -> void:
 	# the draw path, which returns early while a menu is up — so the backlog emptied into the
 	# player's real run as warnings for threats that happened to a demo bot.
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
-	var at := src.find("_sfx.caption_sfx(kind)")
+	var at := src.find("_caption_cue(kind)")   # cues-not-words: the policy-syncing wrapper around _sfx.caption_sfx
 	Runner.T.ok(at > 0, "the caption choke point still exists")
 	# Pin the PROPERTY, not the exact line. v1 of this required the literal
 	# "if _menu.mode == GameMenu.Mode.HIDDEN:" including the colon, and went red the moment
@@ -257,11 +257,17 @@ func test_attract_mode_captions_cannot_leak_into_a_real_run() -> void:
 	sfx._cap_text = "STALE WARNING"
 	sfx._cap_until = 999999
 	sfx._cap_queue.append({"text": "ALSO STALE", "is_vo": false})
-	sfx.clear_captions()
-	Runner.T.eq(sfx._cap_text, "", "clear_captions drops the live caption")
+	sfx._vo_pending = {"key": "stale"}
+	sfx._sfx_cap_next["armor_block"] = 999999
+	sfx.reset_run_speech()
+	Runner.T.eq(sfx._cap_text, "", "run reset drops the live combat caption")
 	Runner.T.eq(sfx._cap_queue.size(), 0, "...and the whole pending queue")
+	Runner.T.ok(sfx._vo_pending.is_empty(), "run reset drops deferred old speech")
+	Runner.T.ok(sfx._sfx_cap_next.is_empty(), "run reset releases old caption cooldowns")
 	sfx.free()
-	Runner.T.ok(src.contains("_sfx.clear_captions()"), "main._reset() actually calls it")
+	var reset_body := src.substr(src.find("func _reset("))
+	reset_body = reset_body.substr(0, reset_body.find("\nfunc "))
+	Runner.T.ok(reset_body.contains("_sfx.reset_run_speech()"), "main._reset() owns the speech lifecycle reset")
 
 
 func test_a_radio_line_never_starts_on_top_of_a_commander_bark() -> void:
@@ -1282,15 +1288,16 @@ func test_sol_hero_swap_scale_tint_outline() -> void:
 	var tint: Dictionary = c["TINT"]
 	var outline: Dictionary = c["OUTLINE"]
 	for k in ["player1", "player2"]:
-		Runner.T.ok(tex[k].resource_path.contains("troops/soldier_assault_rifle"),
+		Runner.T.ok(tex[k].resource_path.contains("baked/hero/base"),   # baked from troops/soldier_assault_rifle (tools/bake_sprites.py)
 			"%s is the infantry set authored hero (sol-03)" % k)
-		Runner.T.ok(scale[k] >= 0.12 and scale[k] <= 0.30,
-			"%s SCALE folds the 256px canvas to the ~18px footprint (sol-04)" % k)
+		# Baked: the PNG is pre-shrunk to screen size, so 0.52 (call) x SCALE must be exactly 1.0.
+		Runner.T.ok(absf(0.52 * float(scale[k]) - 1.0) < 1e-6,
+			"%s SCALE is the baked 1/0.52 so the sprite draws at net scale 1.0 (sol-04, baked)" % k)
 		# Live footprint check: the hero draws at call-scale 0.52 (main.gd _draw_players) × SCALE on the
 		# imported 256px canvas → the on-screen canvas lands ~33px (a ~18-21px figure inside its margin).
-		var footprint: float = tex[k].get_size().x * 0.52 * float(scale[k])
-		Runner.T.ok(footprint >= 26.0 and footprint <= 44.0,
-			"%s draws at the intended footprint (~33px canvas, sol-04): %.1f" % [k, footprint])
+		var footprint: float = tex[k].get_size().y * 0.52 * float(scale[k])
+		Runner.T.ok(footprint >= 28.0 and footprint <= 44.0,
+			"%s draws at the intended footprint (baked ~36px canvas, sol-04): %.1f" % [k, footprint])
 	var t1: Color = tint["player1"]
 	var t2: Color = tint["player2"]
 	# sol-05: value-lifted (anti-camo), and pulled OFF green — P1 cool (b>=g so it can't camo on grass),
@@ -1358,7 +1365,7 @@ func test_sol_enemy_red_team() -> void:
 	var corpse: Dictionary = ms["_CORPSE_TEX"]
 	var keys := ["enemy_assault", "enemy_smg", "enemy_shotgun", "enemy_lmg", "enemy_sniper"]
 	for k in keys:
-		Runner.T.ok(tex.has(k) and tex[k].resource_path.contains("troops/enemy/"),
+		Runner.T.ok(tex.has(k) and tex[k].resource_path.contains("baked/%s/" % k),   # baked from troops/enemy/*
 			"%s is a pack red-team sprite (sol-08)" % k)
 		Runner.T.ok(scale.has(k), "%s has a SCALE row — no dead config (sol-08)" % k)
 		var t: Color = tint[k]
@@ -1384,9 +1391,9 @@ func test_sol_frogman_variant() -> void:
 	var tex: Dictionary = art["TEX"]
 	var outline: Dictionary = art["OUTLINE"]
 	var ms = load("res://src/main.gd")
-	Runner.T.ok(tex["frogman"].resource_path.contains("troops/frogman_rifle"),
+	Runner.T.ok(tex["frogman"].resource_path.contains("baked/frogman/"),
 		"frogman surfaced pose = pack rifle diver (sol-12)")
-	Runner.T.ok(tex.has("frogman_speargun") and tex["frogman_speargun"].resource_path.contains("troops/frogman_speargun"),
+	Runner.T.ok(tex.has("frogman_speargun") and tex["frogman_speargun"].resource_path.contains("baked/frogman_speargun/"),
 		"frogman submerged pose = pack speargun diver (sol-12)")
 	Runner.T.ok(not outline.has("frogman") and not outline.has("frogman_speargun"),
 		"the diver keeps its baked keyline — out of OUTLINE, no double rim (sol-12)")
@@ -1397,6 +1404,11 @@ func test_sol_frogman_variant() -> void:
 		"neither diver pose takes the hostile light-rim separator (sol-12)")
 	Runner.T.eq(ms._frogman_tex(true), "frogman_speargun", "submerged diver shows the SPEARGUN (sol-12)")
 	Runner.T.eq(ms._frogman_tex(false), "frogman", "surfaced diver shows the RIFLE (sol-12)")
+
+
+## On-screen figure height: opaque-pixel bbox of the served texture times its draw scale.
+func _figure_px(t: Texture2D, draw_scale: float) -> float:
+	return float(t.get_image().get_used_rect().size.y) * draw_scale
 
 
 func test_sie_endless_infantry_family() -> void:
@@ -1423,14 +1435,17 @@ func test_sie_endless_infantry_family() -> void:
 		else:
 			Runner.T.ok(not outline.has(k), "%s keeps its baked keyline — out of OUTLINE, no double rim (sie-01)" % k)
 	Runner.T.ok(outline.has("courier"), "courier is untouched — still the native entity bake, still needs its runtime rim (sie-01)")
-	# footprint cross-check (data, not just the constant): the 4 re-baked keys must land on the exact
-	# same imported-canvas x SCALE footprint as an established red-team sibling, not merely "some" 0.5.
-	var sib_tex: Texture2D = tex["enemy_assault"]
-	var sib_footprint: float = sib_tex.get_size().x * float(scale["enemy_assault"])
+	# footprint cross-check, LIVE (review-fixes): the sibling's on-screen figure height is MEASURED off
+	# the served enemy_assault texture (alpha bbox x its draw SCALE) and every re-baked key must land
+	# within +-30% of it. A pinned constant (the old 128*0.5) outlived the sibling's own re-bake to a
+	# screen-sized 22x28 canvas at SCALE 1/0.52, so the two families could drift apart unnoticed.
+	# Measured at this base: sibling 44.2px; bombsuit 32, soldier2 39, ghillie 53, sapper 34.
+	var sib_h := _figure_px(tex["enemy_assault"], float(scale["enemy_assault"]))
+	Runner.T.ok(sib_h > 20.0, "the enemy_assault sibling measures a real figure (%.1f px)" % sib_h)
 	for k in key_path:
-		var footprint: float = tex[k].get_size().x * float(scale[k])
-		Runner.T.ok(absf(footprint - sib_footprint) < 0.5,
-			"%s footprint (%.1f) matches the enemy_assault sibling's (%.1f) — same family, not a one-off (sie-01)" % [k, footprint, sib_footprint])
+		var fig_h := _figure_px(tex[k], float(scale[k]))
+		Runner.T.ok(absf(fig_h - sib_h) <= sib_h * 0.30,
+			"%s figure (%.1f px on screen) is within 30%% of the enemy_assault sibling's (%.1f) -- same family, not a one-off (sie-01)" % [k, fig_h, sib_h])
 	var files := {
 		"res://assets/art/mil2/soldier2.png": 128,
 		"res://assets/art/mil2/bombsuit.png": 128,
@@ -1528,12 +1543,12 @@ func test_character_animation_registry_is_complete_and_godot_ready() -> void:
 		if not player.has(state):
 			continue
 		var tex: Texture2D = player[state]
-		Runner.T.eq(tex.get_size(), Vector2(256, 256), "player/%s is a native 256px Godot texture" % state)
+		Runner.T.ok(tex.get_size().x <= 48 and tex.get_size().y <= 48, "player/%s is a baked screen-sized texture (%s)" % [state, str(tex.get_size())])
 		paths[tex.resource_path] = true
 		var img := tex.get_image()
 		if img.is_compressed():
 			img.decompress()
-		for corner in [Vector2i(0, 0), Vector2i(255, 0), Vector2i(0, 255), Vector2i(255, 255)]:
+		for corner in [Vector2i(0, 0), Vector2i(img.get_width() - 1, 0), Vector2i(0, img.get_height() - 1), Vector2i(img.get_width() - 1, img.get_height() - 1)]:
 			Runner.T.ok(img.get_pixelv(corner).a < 0.05,
 				"player/%s corner %s is transparent" % [state, str(corner)])
 	Runner.T.eq(paths.size(), player_states.size(), "every player pose uses its own frame")
@@ -1541,7 +1556,7 @@ func test_character_animation_registry_is_complete_and_godot_ready() -> void:
 	var enemies: Dictionary = art["ENEMY_ANIM"]
 	var enemy_states := ["idle", "move_0", "move_1", "crouch", "windup", "shoot", "stunned", "downed"]
 	var enemy_keys := ["enemy_assault", "enemy_smg", "enemy_shotgun", "enemy_lmg", "enemy_sniper"]
-	Runner.T.eq(enemies.size(), enemy_keys.size(), "all five weapon classes have animation sets")
+	Runner.T.eq(enemies.size(), enemy_keys.size() + 1, "all five weapon classes have animation sets (+ the baked elite set)")
 	for key in enemy_keys:
 		Runner.T.ok(enemies.has(key), "%s animation set is registered" % key)
 		if not enemies.has(key):
@@ -1553,11 +1568,11 @@ func test_character_animation_registry_is_complete_and_godot_ready() -> void:
 			if not poses.has(enemy_state):
 				continue
 			var enemy_tex: Texture2D = poses[enemy_state]
-			Runner.T.eq(enemy_tex.get_size(), Vector2(128, 128), "%s/%s is a native 128px Godot texture" % [key, enemy_state])
+			Runner.T.ok(enemy_tex.get_size().x <= 48 and enemy_tex.get_size().y <= 48, "%s/%s is a baked screen-sized texture (%s)" % [key, enemy_state, str(enemy_tex.get_size())])
 			var enemy_img := enemy_tex.get_image()
 			if enemy_img.is_compressed():
 				enemy_img.decompress()
-			Runner.T.ok(enemy_img.get_pixel(0, 0).a < 0.05 and enemy_img.get_pixel(127, 127).a < 0.05,
+			Runner.T.ok(enemy_img.get_pixel(0, 0).a < 0.05 and enemy_img.get_pixel(enemy_img.get_width() - 1, enemy_img.get_height() - 1).a < 0.05,
 				"%s/%s has a clean transparent canvas" % [key, enemy_state])
 
 	var main_src := FileAccess.get_file_as_string("res://src/main.gd")
@@ -1633,7 +1648,13 @@ func test_sol_guards() -> void:
 		# sol-15/16 reject: the watermarked/hollow large muzzle flash is never registered.
 		Runner.T.ok(not path.contains("muzzleflash_large"), "the rejected muzzleflash_large is unregistered (sol-15)")
 		# sol-18: every registered infantry set key resolves to a live, imported asset (no dead SOL row).
-		if path.contains("/troops/"):
+		# baked/ = the same sprites, pre-shrunk by tools/bake_sprites.py. The props-style families
+		# (vehicle/gunship/colossus/bunker/crate/cover/rock) are NOT soldiers: they share the folder, not the pin.
+		var is_prop_bake := false
+		for fam in ["vehicle", "gunship", "colossus", "bunker", "crate", "cover", "rock"]:
+			if path.contains("/baked/%s/" % fam):
+				is_prop_bake = true
+		if path.contains("/troops/") or (path.contains("/baked/") and not is_prop_bake):
 			soldier_keys += 1
 			Runner.T.ok(ResourceLoader.exists(path), "soldier key '%s' resolves to a live asset (sol-18)" % k)
 	# sol-18: the ship-set is EXACTLY the intended subset — player1+player2 (2) + 5 enemy + 2 frogman +
@@ -1642,8 +1663,8 @@ func test_sol_guards() -> void:
 		"the shipped soldier subset is exactly 10 keys (2 hero + 5 enemy + 2 frogman + mz_pop), not the 88-sprite pack (sol-18)")
 	# sol-14: the downed body reuses the LIVE hero sprite (greyed prone, main.gd:6063-6069) — so with no
 	# death_* pose registered, a downed teammate is the authored soldier dimmed, never a watermarked back-sprawl.
-	Runner.T.ok(tex["player1"].resource_path.contains("soldier_assault_rifle")
-			and tex["player2"].resource_path.contains("soldier_assault_rifle"),
+	Runner.T.ok(tex["player1"].resource_path.contains("baked/hero/base")
+			and tex["player2"].resource_path.contains("baked/hero/base"),
 		"the downed-body reuse keys (player1/player2) are the live authored hero, so downed = greyed hero (sol-14)")
 
 
@@ -3393,12 +3414,12 @@ const _LITTER_FAMILIES := {
 }
 const _LITTER_PATHS := {
 	"wreck_halftrack": "res://assets/art/decor/wreck_halftrack.png",
-	"wreck": "res://assets/art/decor/wreck.png",
+	"wreck": "res://assets/baked/cover/wreck.png",
 	"wreck_apc": "res://assets/art/mil2/apc.png",
 	"wreck_light_tank": "res://assets/art/mil2/light_tank.png",
-	"tank_hulk": "res://assets/art/p2/tank_hulk.png",
-	"rock1": "res://assets/art/decor/rock1.png",
-	"rock2": "res://assets/art/decor/rock2.png",
+	"tank_hulk": "res://assets/baked/vehicle/tank_hulk.png",
+	"rock1": "res://assets/baked/rock/rock1.png",
+	"rock2": "res://assets/baked/rock/rock2.png",
 	"corpse_soldier1": "res://assets/art/p2/corpse_soldier1.png",
 	"corpse_soldier2": "res://assets/art/p2/corpse_soldier2.png",
 	"fallen_merc": "res://assets/art/decor/fallen_merc.png",

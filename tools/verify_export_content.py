@@ -7,21 +7,91 @@ The ZIP/PCK exporters use the same preset resource selection. No archive is
 extracted, and development files on disk are never removed.
 """
 import argparse
-from pathlib import Path
+import hashlib
+import json
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import tempfile
 import zipfile
 
+from package_attribution import DESTINATION, source_records
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "assets/input/actions.vdf"
+MUSIC_MANIFEST = "assets/music/manifest.json"
 DEV_PREFIXES = ("tests/", "docs/", "tools/", "addons/godot_mcp/", "tmp/",
                 "tmp_", "assets_src/", "art_candidates/", "build/", "reviews/", "skills/")
 ERRORS = re.compile(r"SCRIPT ERROR|Parse Error|Compile Error|^ERROR:", re.MULTILINE)
 
 
-def check_archive(path: Path, manifest: bytes) -> list[str]:
+def fontawesome_icons() -> dict[str, str]:
+    records = source_records(ROOT)
+    attribution = json.loads(records[f"{DESTINATION}/manifest.json"])
+    return {f"assets/fontawesome/solid/{icon['icon']}.svg": icon["local_sha256"]
+            for icon in attribution["icons"]}
+
+
+def check_fontawesome(archive, expected_icons) -> list[str]:
+    if not expected_icons:
+        return ["Font Awesome resource contract is empty"]
+    problems = []
+    names = archive.namelist()
+    for resource, digest in expected_icons.items():
+        imported = resource + ".import"
+        if names.count(imported) != 1:
+            problems.append("Font Awesome SVG import is missing or duplicated: " + imported)
+            continue
+        targets = re.findall(r'^path="res://([^"\n]+)"$', archive.read(imported).decode("utf-8", errors="replace"), re.MULTILINE)
+        if len(targets) != 1:
+            problems.append("Font Awesome SVG has no unique texture remap: " + imported)
+            continue
+        texture = targets[0]
+        relative = PurePosixPath(texture)
+        if "\\" in texture or relative.is_absolute() or ".." in relative.parts or not texture.startswith(".godot/imported/") or not texture.endswith(".ctex"):
+            problems.append("Font Awesome SVG has an unsafe texture remap: " + imported)
+        elif names.count(texture) != 1 or not archive.read(texture):
+            problems.append("Font Awesome imported texture is missing, duplicated or empty: " + texture)
+        if resource in names and (names.count(resource) != 1 or hashlib.sha256(archive.read(resource)).hexdigest() != digest):
+            problems.append("Font Awesome raw SVG differs from its source receipt: " + resource)
+    return problems
+
+
+def music_contract() -> tuple[bytes, list[str]]:
+    """The shipped manifest's bytes plus every .ogg it promises the runtime."""
+    data = (ROOT / MUSIC_MANIFEST).read_bytes()
+    listing = json.loads(data)
+    stems = [f"assets/music/{track}_{kind}.ogg" for track in listing["tracks"] for kind in ("combat", "lull")]
+    stems += [f"assets/music/sting_{name}.ogg" for name in listing["stingers"]]
+    return data, stems
+
+
+def check_music(archive, contract) -> list[str]:
+    # Godot 4 treats .json as a resource, so manifest.json rides into the pack on its own --
+    # measured: it ships under the unmodified presets, no include_filter needed (an earlier
+    # draft of this check assumed the opposite and its own fail-first run refuted it).
+    # What this pins is the day that stops being true: an exclude_filter gaining *.json, a
+    # stem renamed without its manifest entry, the folder moving. Without the manifest the
+    # game still boots and still plays the stems, but MusicDirector reads no tempo and
+    # quantises every track change to a fallback 110 BPM bar that belongs to none of them.
+    # Nothing errors and the editor always has the file, so the pack is the place to look.
+    data, stems = contract
+    if not stems:
+        return ["music contract is empty"]
+    names = archive.namelist()
+    problems = []
+    if MUSIC_MANIFEST not in names:
+        problems.append("music manifest is missing from the pack")
+    elif archive.read(MUSIC_MANIFEST) != data:
+        problems.append("music manifest differs from the source bytes")
+    for stem in stems:
+        if names.count(stem + ".import") != 1:
+            problems.append("music stem import is missing or duplicated: " + stem)
+    return problems
+
+
+def check_archive(path: Path, manifest: bytes, expected_icons=None, music=None) -> list[str]:
     problems = []
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
@@ -33,6 +103,8 @@ def check_archive(path: Path, manifest: bytes) -> list[str]:
             problems.append("exported project settings are missing")
         if not {"src/main.tscn", "src/main.tscn.remap"} & names:
             problems.append("main scene is missing")
+        problems.extend(check_fontawesome(archive, fontawesome_icons() if expected_icons is None else expected_icons))
+        problems.extend(check_music(archive, music_contract() if music is None else music))
         leaked = sorted(n for n in names if n.startswith(DEV_PREFIXES))
         if leaked:
             problems.append("development files bundled: " + ", ".join(leaked))
