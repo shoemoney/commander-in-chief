@@ -668,6 +668,9 @@ var _splash_icon: Texture2D        # the shield emblem (res://icon.png), stamped
 var _splash_bigit: Texture2D       # Big IT studio medallion spritesheet (6×6 grid, 31 frames @200px)
 var _splash_keyart: Texture2D      # the hero key-art poster, revealed on beat 4
 var _splash_vo_fired := false      # latch: fire the crawl narration once as the crawl beat begins
+var _splash_len := SPLASH_DUR      # this boot's splash length: SPLASH_DUR first boot / replay, FrontDoor.SPLASH_SHORT after
+var front := FrontDoor.new()       # front-door: intro-seen flag, furthest sector, daily streak/score (view-only, persisted under [front])
+var _front_dirty := false
 
 
 var _quitting := false
@@ -765,9 +768,35 @@ func _setup_splash() -> void:
 	if OS.has_feature("movie"):
 		_splash_layer.visible = false   # trailer capture: no studio splash, straight to combat
 		return
-	_splash_t = SPLASH_DUR
+	# front-door: the full 16 s cinematic plays once; every later boot gets the 3 s studio card
+	# (still skippable). WATCH INTRO on the INFO screen replays the full thing on demand.
+	_splash_len = FrontDoor.splash_length(front.intro_seen, SPLASH_DUR)
+	_splash_t = _splash_len
+	if not front.intro_seen:
+		front.intro_seen = true
+		_front_dirty = true
+		_flush_front()
 	_menu.mode = GameMenu.Mode.HIDDEN   # suspend the title/attract under the opaque splash
 	_splash_root.queue_redraw()
+
+
+## front-door: replay the full intro from the INFO screen's WATCH INTRO row.
+func replay_intro() -> void:
+	if _splash_layer == null:
+		return
+	_splash_len = SPLASH_DUR
+	_splash_t = SPLASH_DUR
+	_splash_vo_fired = false
+	if _splash_keyart == null and ResourceLoader.exists("res://assets/ui/intro/keyart.png"):
+		_splash_keyart = load("res://assets/ui/intro/keyart.png")   # _end_splash releases it
+	_splash_layer.visible = true
+	_menu.mode = GameMenu.Mode.HIDDEN
+	_splash_root.queue_redraw()
+
+
+func _flush_front() -> void:
+	if _front_dirty and _persist({"front": front.to_section()}) == OK:
+		_front_dirty = false
 
 
 func _end_splash() -> void:
@@ -813,7 +842,7 @@ static func splash_skip_alpha(el: float) -> float:
 func _splash_is_skip(event: InputEvent) -> bool:
 	# c-title-sting: the studio medallion always gets its first second on screen —
 	# a stray keypress at frame 0 no longer flashes straight past the parade.
-	if not splash_skip_armed(SPLASH_DUR - _splash_t):
+	if not splash_skip_armed(_splash_len - _splash_t):
 		return false
 	if event is InputEventKey and event.pressed and not event.echo:
 		return true
@@ -849,11 +878,13 @@ func _splash_back(t: float) -> float:
 
 
 func _draw_splash() -> void:
-	var el := SPLASH_DUR - _splash_t   # elapsed seconds
+	var el := _splash_len - _splash_t   # elapsed seconds
 	# The whole overlay dissolves over the final stretch, revealing the live title beneath.
+	# front-door: the short splash dissolves over its own last half second (studio card only).
 	var veil := 1.0
-	if el > SPLASH_FADE_OUT:
-		veil = clampf(1.0 - (el - SPLASH_FADE_OUT) / (SPLASH_DUR - SPLASH_FADE_OUT), 0.0, 1.0)
+	var fade_at := SPLASH_FADE_OUT - (SPLASH_DUR - _splash_len)
+	if el > fade_at:
+		veil = clampf(1.0 - (el - fade_at) / (_splash_len - fade_at), 0.0, 1.0)
 	_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(0.04, 0.045, 0.06, veil))
 	if el < SPLASH_STUDIO_END:
 		_draw_splash_studio(el, veil)
@@ -1807,7 +1838,7 @@ func _process(_delta: float) -> void:
 	if _splash_t > 0.0:
 		_splash_t -= _delta
 		# Fire the Commander narration once as the crawl beat begins (dry cinematic VO).
-		if not _splash_vo_fired and (SPLASH_DUR - _splash_t) >= SPLASH_STUDIO_END:
+		if not _splash_vo_fired and _splash_len >= SPLASH_DUR and (_splash_len - _splash_t) >= SPLASH_STUDIO_END:
 			_splash_vo_fired = true
 			_sfx.play_startup_line("intro_crawl")
 		_splash_root.queue_redraw()
@@ -2171,7 +2202,8 @@ func _reset() -> void:
 	# stamp stays — it re-writes the same value and owns the midnight comment.
 	if _daily and seed_v == _daily_seed() and _daily_done_seed != seed_v:
 		_daily_done_seed = seed_v
-		_persist({"daily": {"done_seed": _daily_done_seed}})
+		front.note_daily_dealt(FrontDoor.today())   # front-door: the streak advances when the attempt is spent
+		_persist({"daily": {"done_seed": _daily_done_seed}, "front": front.to_section()})
 	var _mode_str := "endless" if _endless else ("boss_rush" if _boss_rush \
 		else ("arcade" if _arcade_chapter >= 1 else "campaign"))
 	sim = SimWorld.new(seed_v, 2 if _two_players else 1, _mode_str)
@@ -2658,6 +2690,15 @@ func _flush_bests() -> void:
 	# outside _record_run. Called from _reset (covers restart/new game/attract
 	# rollover) and _exit_tree (covers app quit).
 	var sections := {}
+	if sim != null:
+		var opened := 0
+		for g in sim.gates:
+			if g["open"]:
+				opened += 1
+		if front.note_sector(mini(opened + 1, SimWorld.FINAL_GATE_INDEX)):   # front-door: banks CHAPTER SELECT's unlock even for a run quit mid-way
+			_front_dirty = true
+	if _front_dirty:
+		sections["front"] = front.to_section()
 	if _best_dirty:
 		sections["best"] = {"score": best_score, "wave": best_wave, "dist": best_dist}
 	if _seen_dirty:
@@ -2670,6 +2711,7 @@ func _flush_bests() -> void:
 	if _persist(sections) == OK:
 		_best_dirty = false
 		_seen_dirty = false
+		_front_dirty = false
 
 
 func request_quit() -> void:
@@ -5437,6 +5479,13 @@ func _load_bests() -> void:
 		_life_runs = _cfg_int(cf, "life", "runs", 0)
 		_life_kills = _cfg_int(cf, "life", "kills", 0)
 		_life_wins = _cfg_int(cf, "life", "wins", 0)
+		front = FrontDoor.new()
+		front.load_from(cf)
+		if not cf.has_section("front"):
+			# Saves that predate [front]: a veteran has seen the intro and the hall proves how far they got.
+			front.intro_seen = _life_runs > 0 or best_score > 0
+			for r in hall:
+				front.note_sector(int(r.get("sector", 1)))
 		_daily_done_seed = _cfg_int(cf, "daily", "done_seed", -1)   # c2-13: locks the DAILY RUN row when it equals today's seed
 		vet_points = _cfg_int(cf, "meta", "vp", 0)   # endless-meta-retention: persistent perk currency
 		_perk_levels = _cfg_dict(cf, "meta", "levels")   # perk id -> owned tier
@@ -6447,6 +6496,13 @@ func _record_run(score: int) -> void:
 		# DAILY RUN row locks while _daily_done_seed == today's _daily_seed().
 		_daily_done_seed = _current_seed
 		cf.set_value("daily", "done_seed", _daily_done_seed)
+	if _daily:
+		front.note_daily_score(FrontDoor.today(), score, rr.grade)
+	front.note_sector(int(entry["sector"]))
+	cf.set_value("front", "max_sector", front.max_sector)
+	cf.set_value("front", "daily_day", front.daily_day)
+	cf.set_value("front", "daily_score", front.daily_score)
+	cf.set_value("front", "daily_grade", front.daily_grade)
 	cf.set_value("life", "runs", _life_runs)
 	cf.set_value("life", "kills", _life_kills)
 	cf.set_value("life", "wins", _life_wins)

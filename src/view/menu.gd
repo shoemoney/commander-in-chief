@@ -732,6 +732,10 @@ func _process(delta: float) -> void:
 	# every frame anyway — and under REDUCE MOTION _draw_menu_ambience emits no sweep at
 	# all, so a frozen menu stays frozen (and idle) no matter what this clock says.
 	_amb_t += delta
+	if _p2_banner_t > 0.0:
+		_p2_banner_t -= delta
+		if _p2_banner_t <= 0.0:
+			_mark_dirty()   # the settled/reduce-motion menu must repaint once to clear the banner
 	if mode != Mode.HIDDEN:   # redundant after the early return above; kept to hold the diff to 2 lines
 		# Armed RESTART/TITLE/QUIT rows disarm after 2.5 s — a stale confirm
 		# must not end a run on a press that lands minutes later.
@@ -1068,15 +1072,15 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		# to ~11px with 8px speck icons and seating NG+/CO-OP right where a mis-nav
 		# off CAMPAIGN landed.
 		var titems: Array[Dictionary] = [
-			{"id": "campaign", "label": "CAMPAIGN", "destructive": false, "grp": 0},
-			{"id": "endless", "label": "ENDLESS WAR", "destructive": false, "grp": 0},
+			{"id": "campaign", "label": "CAMPAIGN", "destructive": false, "grp": 0, "badge": "2P" if main._two_players else ""},
+			{"id": "endless", "label": "ENDLESS WAR", "destructive": false, "grp": 0, "badge": "2P" if main._two_players else ""},
 			# c2-13: once today's seed-of-the-day has been played the row locks — dim, a
 			# right-aligned COMPLETED badge, and a deny buzz on press — instead of staying
 			# fully active in appearance while silently re-running the same finished attempt.
 			# The status is a separate right-aligned "badge" (not appended to the label) so
 			# it never clips the label and stays scannable, mirroring the toggle-dot slot.
-			{"id": "daily", "label": "DAILY RUN", "destructive": false, "grp": 0,
-				"disabled": main.daily_done(), "badge": "COMPLETED" if main.daily_done() else ""},
+			{"id": "daily", "label": _daily_row_label(), "destructive": false, "grp": 0,
+				"disabled": main.daily_done(), "badge": main.front.daily_badge(main.daily_done(), FrontDoor.local_unix())},
 			# grp 1: run-config gets its own block (a divider splits it from the start
 			# verbs above and the meta screens below). The row carries its own live
 			# config tail — players and an EXPLICIT NORMAL/HARD difficulty — so a stale
@@ -1099,6 +1103,11 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		# run. One brightened divider (grp 0 -> grp 1) plus a DEPLOY/MORE caption pair mark the
 		# split, and the DEPLOY block gets a backing panel in _draw so the start verbs read as
 		# one dominant cluster, not the top of an undifferentiated phone list.
+		# front-door: once the player has EVER reached sector 2+, CHAPTER SELECT surfaces as a
+		# DEPLOY row instead of living three screens deep (SETUP > MODES). Inserted before the
+		# grp-1 rows so the grp order stays non-decreasing.
+		if FrontDoor.chapters_unlocked(main.front.max_sector):
+			titems.insert(3, {"id": "chapter_select", "label": "CHAPTER SELECT", "destructive": false, "grp": 0, "submenu": true})
 		titems.append({"id": "quit", "label": "QUIT", "destructive": true, "grp": 1})
 		return titems
 	if mode == Mode.SETUP:
@@ -1186,6 +1195,7 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		var iitems: Array[Dictionary] = [
 			{"id": "hall", "label": "HALL OF FAME", "destructive": false, "grp": 0, "submenu": true},
 			{"id": "howto", "label": "HOW TO PLAY", "destructive": false, "grp": 0, "submenu": true},
+			{"id": "intro", "label": "WATCH INTRO", "destructive": false, "grp": 0},   # front-door: the full intro, replayable after the first boot
 		]
 		# c3-16: gate WATCH LAST RUN on the CACHED bool sampled once in open() — never a fresh
 		# FileAccess.file_exists here, so rebuilding this list (even the pre-cache per-frame case)
@@ -1863,6 +1873,12 @@ func _commit_capture(swapped: String, reserved: String) -> void:
 		_notice("%s SET" % verb)
 
 
+const P2_BANNER_SECS := 2.2
+var _p2_banner := ""
+var _p2_banner_t := 0.0
+static var _chapters_from_title := false   # CHAPTERS was opened from the TITLE row -> BACK returns there
+
+
 func _notice(msg: String) -> void:
 	_rebind_msg = msg
 	_rebind_msg_t = 2.5
@@ -1953,6 +1969,14 @@ func _unhandled_input(ev: InputEvent) -> void:
 		var vpf1 := get_viewport()
 		if vpf1 != null:
 			vpf1.set_input_as_handled()
+		return
+	# front-door: a SECOND pad's START on the title joins/leaves co-op instead of confirming
+	# the focused row (P2 is hardwired to pad device 1). Title only: no mid-run drop-in.
+	if mode == Mode.TITLE and main != null and is_p2_join_event(ev):
+		title_p2_toggle()
+		var vp2 := get_viewport()
+		if vp2 != null:
+			vp2.set_input_as_handled()
 		return
 	# c4-18: dedicated NON-MOUSE activation for the TITLE BEST-chip watch-replay shortcut, so the
 	# click-to-replay affordance isn't mouse-only. Gated on the SAME _best_is_replayable() the chip
@@ -2867,7 +2891,10 @@ static func back_dest(mode_id: int) -> Dictionary:
 		Mode.DISP: return {"mode": Mode.OPTS, "sel": "display"}   # c1-19: DISPLAY sub-screen hangs off the OPTIONS DISPLAY row — BACK restores focus to it
 		Mode.AUDIO: return {"mode": Mode.OPTS, "sel": "audio"}   # audio-identity: AUDIO sub-screen hangs off the OPTIONS AUDIO row — BACK restores focus to it
 		Mode.MODES: return {"mode": Mode.SETUP, "sel": "modes"}   # authored-campaign-and-modes: MODES hangs off the SETUP hub
-		Mode.CHAPTERS: return {"mode": Mode.MODES, "sel": "chapter_select"}   # CHAPTER SELECT hangs off the MODES screen
+		Mode.CHAPTERS:
+			if _chapters_from_title:
+				return {"mode": Mode.TITLE, "sel": "chapter_select"}   # front-door: opened from the TITLE row, BACK returns there
+			return {"mode": Mode.MODES, "sel": "chapter_select"}   # CHAPTER SELECT hangs off the MODES screen
 		Mode.PERKS: return {"mode": Mode.SETUP, "sel": "perks"}   # endless-meta-retention: PERKS hangs off the SETUP hub
 		Mode.ACCESSIBILITY: return {"mode": Mode.OPTS, "sel": "accessibility"}
 		Mode.ACCESS_AIM: return {"mode": Mode.ACCESSIBILITY, "sel": "access_aim"}
@@ -3348,6 +3375,9 @@ func _activate() -> void:
 			"campaign": main.start_game(false)
 			"endless": main.start_game(true)
 			"daily": main.start_daily()
+			"chapter_select":
+				_chapters_from_title = true
+				open(Mode.CHAPTERS)
 			"watch": _watch_last_run()
 			"setup": open(Mode.SETUP)   # c2-04: SETUP hub (run config + OPTIONS + INFO)
 			"quit": main.request_quit()
@@ -3361,7 +3391,9 @@ func _activate() -> void:
 				_opts_parent = mode
 				open(Mode.OPTS)
 			"info": open(Mode.INFO)   # c2-04: reached from the SETUP hub; BACK returns there
-			"modes": open(Mode.MODES)   # authored-campaign-and-modes: reached from the SETUP hub; BACK returns there
+			"modes":
+				_chapters_from_title = false
+				open(Mode.MODES)   # authored-campaign-and-modes: reached from the SETUP hub; BACK returns there
 			"perks": open(Mode.PERKS)   # endless-meta-retention: reached from the SETUP hub; BACK returns there
 			"boss_rush": main.start_boss_rush()   # authored-campaign-and-modes: real menu entry (was F4-only)
 			"arcade": main.start_arcade(1)        # quick-play chapter 1; CHAPTER SELECT below picks any of the 6
@@ -3395,6 +3427,8 @@ func _activate() -> void:
 			"hard":
 				main._hard = not main._hard
 				_flash_setting()
+			"intro":
+				main.replay_intro()
 			"howto":
 				_howto_parent = mode   # INFO or PAUSE — BACK returns to the row the player came through
 				open(Mode.HOWTO)
@@ -4701,7 +4735,9 @@ func _draw() -> void:
 			segs.append({"tex": Art.glyph_key("confirm"), "label": "SELECT"})
 		if not Art.use_pad:
 			segs.append(_keycap_seg(_help_keycap(), "HOW TO"))
+		segs.append(title_p2_seg())
 		_legend_row(segs, 330.0, 0.9)
+		_draw_title_p2_banner()
 	else:
 		# c1-04 / c4-05: every non-TITLE menu that reaches here (PAUSE / OPTS / SETUP / DISP /
 		# INFO / REBIND) draws the same device-aware bindings strip through the ONE canonical
@@ -7087,6 +7123,42 @@ func _help_keycap() -> String:
 # SINGLE place and stays consistent across the gameplay legend row AND the menu footer. A label of
 # 4+ chars (e.g. "ESCAPE") rides the wide keycap so the stamp never clips; up to 3 ("ESC"/"F1")
 # sits on the compact blank.
+# front-door: the second-pad join gesture. P2 is hardwired to pad device 1, so START from
+# THAT device on the title is the join key (START from pad 0 still confirms, unchanged).
+static func is_p2_join_event(ev: InputEvent) -> bool:
+	return ev is InputEventJoypadButton and ev.pressed and ev.device == 1 \
+		and ev.button_index == JOY_BUTTON_START
+
+
+func title_p2_toggle() -> void:
+	main._two_players = not main._two_players
+	_p2_banner = "TWO PLAYERS - P2 JOINED" if main._two_players else "ONE PLAYER - P2 LEFT"
+	_p2_banner_t = P2_BANNER_SECS
+	main._sfx.play("buy", -6.0)
+	_mark_dirty()
+
+
+# Glyph-aware hint segment: the START cap is stamped from the live pad brand label.
+func title_p2_seg() -> Dictionary:
+	return _keycap_seg(Art.pad_button_label(JOY_BUTTON_START),
+		"P2 LEAVE" if main._two_players else "P2 JOIN")
+
+
+func _draw_title_p2_banner() -> void:
+	if _p2_banner_t <= 0.0 or _p2_banner == "":
+		return
+	var sz := Art.fs(HudIcons.TYPE_MICRO)
+	var tw := Art.font().get_string_size(_p2_banner, HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x
+	var top := LEGEND_Y + LEGEND_H + 2.0
+	_emit_rect(Rect2(CENTER_X - tw / 2.0 - PLATE_PAD_SM, top, tw + PLATE_PAD_SM * 2.0, 14.0), _legend_plate_col(mode, main._motion))
+	_center_text(_p2_banner, top + Art.font().get_ascent(sz) + 2.0, sz, Color(1.0, 0.9, 0.4))
+
+
+func _daily_row_label() -> String:
+	var chip: String = main.front.streak_chip(FrontDoor.local_unix())
+	return "DAILY RUN %s" % chip if chip != "" else "DAILY RUN"
+
+
 func _keycap_seg(cap: String, label: String) -> Dictionary:
 	return {"tex": "glyph_key_wide" if cap.length() > 3 else "ui_key_blank", "stamp": cap, "label": label}
 

@@ -46,6 +46,9 @@ class _StubMain extends Node2D:
 	# under test measures as ABSENT with all assertions still green (the c4-18 trap, below).
 	var best_wave := 0
 	var best_dist := 0
+	var front := FrontDoor.new()   # front-door: title reads the streak/score/sector/intro state off main.front
+	var _replays := 0
+	func replay_intro() -> void: _replays += 1
 	var _life_wins := 0
 	var _life_kills := 0
 	var _current_seed := 0
@@ -559,7 +562,8 @@ func test_c2_13_completed_daily_row_locks_and_denies() -> void:
 	var done: Dictionary = m._menu_items()[_row_index(m, "daily")]
 	Runner.T.ok(done.get("disabled", false), "a completed daily is flagged disabled")
 	Runner.T.eq(done["label"], "DAILY RUN", "the label stays plain (status is a separate badge, not appended)")
-	Runner.T.eq(String(done.get("badge", "")), "COMPLETED", "a completed daily shows the COMPLETED badge")
+	# front-door: the badge now also carries the next-board countdown ("COMPLETED  5H12M") when no score is banked today.
+	Runner.T.ok(String(done.get("badge", "")).begins_with("COMPLETED"), "a completed daily shows the COMPLETED badge")
 	# Pressing the locked row buzzes once and never starts a run.
 	m.sel = _row_index(m, "daily")
 	stub._sfx.plays.clear()
@@ -635,7 +639,8 @@ func test_c2_13_daily_done_persists_and_locks_row() -> void:
 	m.mode = Menu.Mode.TITLE
 	var row: Dictionary = m._menu_items()[_row_index(m, "daily")]
 	Runner.T.ok(row.get("disabled", false), "the reloaded completed daily locks the TITLE row")
-	Runner.T.eq(String(row.get("badge", "")), "COMPLETED", "...and shows the COMPLETED badge")
+	# front-door: today's banked score (or COMPLETED) leads the badge, followed by the next-board countdown.
+	Runner.T.ok(String(row.get("badge", "")) != "", "...and shows a status badge (score/COMPLETED + countdown)")
 	m.free()
 	main.free()
 	main2.free()
@@ -724,7 +729,8 @@ func test_daily_attempt_spent_on_any_abandon_path() -> void:
 	m.mode = Menu.Mode.TITLE
 	var row: Dictionary = m._menu_items()[_row_index(m, "daily")]
 	Runner.T.ok(row.get("disabled", false), "the spent daily locks the TITLE row")
-	Runner.T.eq(String(row.get("badge", "")), "COMPLETED", "...and shows the COMPLETED badge")
+	# front-door: today's banked score (or COMPLETED) leads the badge, followed by the next-board countdown.
+	Runner.T.ok(String(row.get("badge", "")) != "", "...and shows a status badge (score/COMPLETED + countdown)")
 	m.free()
 	main.free()
 	main2.free()
