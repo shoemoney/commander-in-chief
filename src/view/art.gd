@@ -19,7 +19,7 @@ extends RefCounted
 
 const ART := "res://assets/art/"
 const KN := "res://assets/cc0/"
-const BAKED := "res://assets/baked/"   # tools/bake_sprites.py output: infantry pre-shrunk to net draw scale 1.0
+const BAKED := "res://assets/baked/"   # native-size sprites at net draw scale 1.0: infantry from tools/gen_infantry.py, props/vehicles/bosses from tools/bake_sprites.py
 const SOL := "res://assets/troops/"   # owned top-down infantry sprites, size-limited for VRAM
 const FA := "res://assets/fontawesome/solid/"
 

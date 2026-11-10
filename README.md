@@ -32,19 +32,20 @@ a shared coin economy where every kill mints and every revive spends.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/gifs/staging.gif" alt="Sector 1/6 Staging Ground — opening firefight, rounds bouncing off armor"/></td>
-<td width="50%"><img src="docs/media/gifs/bridge.gif" alt="Sector 3/6 Bridge Gunship — boss strafing run under a sniper lock"/></td>
+<td width="50%"><img src="docs/media/gifs/staging.gif" alt="Sector 1/6 Staging Ground — the dawn bunker line, infantry closing on a commandeered tank"/></td>
+<td width="50%"><img src="docs/media/gifs/bridge.gif" alt="Sector 3/6 Bridge Gunship — the gunship's strafing run over a grenade blast and a sniper's laser"/></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/media/gifs/convoy.gif" alt="Sector 5/6 Crashed Convoy — ten-kill streak, elite winding up"/></td>
-<td width="50%"><img src="docs/media/gifs/foundry.gif" alt="Sector 6/6 The Foundry Core — minefield telegraphs on the run to the Colossus"/></td>
+<td width="50%"><img src="docs/media/gifs/convoy.gif" alt="Sector 5/6 Crashed Convoy — the Siege Tank shelling its gate at dusk, an eighteen-kill streak running"/></td>
+<td width="50%"><img src="docs/media/gifs/foundry.gif" alt="Sector 6/6 The Foundry Core — the Last Stand against the Foundry Colossus"/></td>
 </tr>
 </table>
 
-<sub>☝️ **Four sectors, four real runs.** Clockwise: **1/6 Staging Ground** — the opening push,
-rounds bouncing off armor · **3/6 Bridge Gunship** — a boss strafing run while a sniper paints you
-· **5/6 Crashed Convoy** — a ×10 streak with an elite winding up · **6/6 The Foundry Core** — the
-minefield on the way to the Colossus.<br/>
+<sub>☝️ **Four sectors, four real runs.** Reading across, then down: **1/6 Staging Ground** — the
+dawn bunker line, infantry closing on a commandeered tank · **3/6 Bridge Gunship** — its strafing
+run, over a grenade blast and a sniper's laser · **5/6 Crashed Convoy** — the Siege Tank shelling
+its gate at dusk with an ×18 streak running · **6/6 The Foundry Core** — the Last Stand against
+the Foundry Colossus.<br/>
 Captured by <code>tools/gif_capture.gd</code> straight off the scripted bot playing the real game
 (<code>start_arcade()</code> jumps to each zone), so every number on those HUDs was earned — no
 posed sim states, no mockups, no concept art.</sub>
@@ -473,7 +474,7 @@ src/view/            art.gd (bake registry/tint/glyphs) · hud.gd · menu.gd · 
                      campaign_meta.gd (VP, retry, VET) · service_record.gd · time_fx.gd · camera_lead.gd ·
                      player_locator.gd · hud_diet.gd · cue_policy.gd (captions) · teach_truth.gd
 src/net/             replay.gd (run recorder, live) · lockstep.gd (design sketch, no callers)
-tests/               Headless runner + 74 suite files (`test_*.gd`; SUITE=<name> filter, golden checksums)
+tests/               Headless runner + one `test_*.gd` file per suite (SUITE=<name> filter, golden checksums)
 tools/               gen_*.py (sprite, ground and infantry generators) · bake_sprites.py (props) ·
                      blender_vehicles.py · compose_music.py · lint_sim.gd/lint_assets.gd · i18n_check.py (CI gates) ·
                      ci_local.sh (the blocking CI jobs, locally) · screenshots.gd · smoke.gd · validate_replay.gd
@@ -507,11 +508,11 @@ Design viewport is **640x360** (`project.godot:31` `window/size/viewport_width|h
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/gameplay_firefight.png" alt="Desert firefight" width="100%"/></td>
+<td width="50%"><img src="docs/media/gameplay_firefight.png" alt="Jungle firefight" width="100%"/></td>
 <td width="50%"><img src="docs/media/gameplay_colossus.png" alt="Foundry Colossus boss" width="100%"/></td>
 </tr>
 <tr>
-<td align="center"><sub>Desert firefight — one-hit twin-stick</sub></td>
+<td align="center"><sub>Jungle firefight — one-hit twin-stick</sub></td>
 <td align="center"><sub>The Foundry Colossus 🏭 — campaign finale</sub></td>
 </tr>
 </table>

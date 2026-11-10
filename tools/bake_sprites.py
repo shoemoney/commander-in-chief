@@ -8,13 +8,17 @@ bake does that shrink once, offline, with an area (BOX) filter, then makes
 the result crisp: hard alpha, a small shared palette, a 1px dark keyline.
 The result is drawn at NET scale 1.0 (Art.SCALE = 1 / call scale).
 
-SUPERSEDED for the infantry art (infantry-redesign): assets/baked/** is now the
-output of tools/gen_infantry.py (sprites DESIGNED at native size, top-down).
-This script bakes the detailed masters down and would OVERWRITE the designed
-sprites, so it refuses to run unless you pass --legacy-masters (kept as the
-fallback / comparison path). Regenerate the shipped set with gen_infantry.py.
+TWO KINDS OF OUTPUT, and only one of them is still this tool's job:
+- Props, vehicles and bosses (PROP_FAMILIES: vehicle, gunship, colossus, bunker, crate,
+  cover, rock) are baked here on every run.
+- The INFANTRY sets are not. They are designed at native size, top-down, by
+  tools/gen_infantry.py; baking the old shrunk masters over them would silently undo
+  that, so the infantry sets are SKIPPED unless you pass --legacy-masters (kept as the
+  fallback / comparison path).
 
-Usage:  python3 tools/bake_sprites.py --legacy-masters   (writes assets/baked/**)
+Usage:  python3 tools/bake_sprites.py                    (props, vehicles, bosses)
+        BAKE_ONLY=<family> python3 tools/bake_sprites.py (one prop family)
+        python3 tools/bake_sprites.py --legacy-masters   (also overwrites the infantry sets)
 Layout: assets/baked/<set>/<pose>.png, plus base.png (from the 1024 master).
 
 The sizes below are the single source of truth for the on-screen footprint;
