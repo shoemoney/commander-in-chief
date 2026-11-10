@@ -317,6 +317,9 @@ const MAG_ADV := 8.0 * 3.6 + 4.0  # _mag_bar's x-advance (8 segments * 3.6 + tra
                                # the same width from the same source.
 
 var main: Node2D
+# HUD DIET: change-triggered reveal + single-objective lifetime (see hud_diet.gd). main reaches it
+# through _hud_icons.diet, so no new field is read off `main` here.
+var diet := HudDiet.new()
 var _prev_chest := 0
 var _chest_pulse := 0.0   # gold flash on the counter when coin comes in
 var _prev_score := 0
@@ -1803,6 +1806,12 @@ func _telegraph_spec(sim: SimWorld) -> Dictionary:
 			# `cw` is the COMPACT presentation width — a short "GATE!" the planner falls back
 			# to when the full label won't fit, so this critical readout is abbreviated, not
 			# dropped, before it ever becomes a +N tally.
+			# HUD DIET: once the objective sentence for this gate has been stated and retired,
+			# the telegraph is the one remaining statement and drops its economy clause.
+			diet.sync(sim.get_instance_id())
+			if diet.objective_seen(int(g["y"]), sim.tick_count):
+				return {"kind": "gate", "w": _tw(GATE_LABEL_MID) + 4.0, "mid": true,
+					"mw": _tw(GATE_LABEL_MID) + 4.0, "cw": _tw(GATE_LABEL_COMPACT) + 4.0}
 			return {"kind": "gate", "w": _tw(GATE_LABEL_FULL) + 4.0,
 				"mw": _tw(GATE_LABEL_MID) + 4.0, "cw": _tw(GATE_LABEL_COMPACT) + 4.0}
 	if sim.stall_ticks <= PRESSURE_WARN_TICKS:
@@ -1821,6 +1830,12 @@ func _telegraph_spec(sim: SimWorld) -> Dictionary:
 	# TranslationServer.translate, so the .po files are untouched.
 	var cw := ICON + 3.0 + COMPACT_BAR + 4.0
 	return {"kind": "pressure", "w": cw, "cw": cw, "compact": true}
+
+
+## HUD DIET alpha for a static top-bar chip: full while new/changing, eased down once idle.
+func _diet_alpha(id: String, value: Variant, sim: SimWorld) -> float:
+	diet.sync(sim.get_instance_id())
+	return diet.chip_alpha(id, value, sim.tick_count)
 
 
 # c1-06: scrim seam for the telegraph's dark backing rect — default draws; a capture
@@ -2145,6 +2160,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			if _fits2("record", _tw("RECORD") + ICON + 9.0):
 				var rp: float = 1.0 if main._motion < 0.5 else Art.pulse(0.2)
 				var rcol := Color(1.0, 0.85, 0.3).lerp(Color(1.0, 0.96, 0.62), rp)
+				rcol.a *= _diet_alpha("record", 1, sim)
 				if not _measure:
 					# Through the _emit_icon seam, not a raw draw_texture_rect: an uncaptured
 					# primitive is one a headless frame test cannot see (it measures as ABSENT
@@ -2322,6 +2338,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 				# Red at two or fewer: the same "this is the run now" cast _dead_chips gives
 				# LAST BREATH, reached before the last body rather than on it.
 				var rcol := Color(0.95, 0.82, 0.5) if rleft > 2 else Art.safe(Color(1.0, 0.42, 0.36))
+				rcol.a *= _diet_alpha("reinforcements", rleft, sim)
 				x = _text(rtxt, x, y + ICON - 3.0, rcol) + 8.0
 	# Discoverability: the supply wheel exists (hold to open).
 	# c2-16: suppressed for the WHOLE run whenever the endless shop strip is eligible (shop_row) — the
@@ -2334,11 +2351,12 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 	# the wheel advertised permanently 20px away on the corner plate. One persisted predicate.
 	if not shop_row and not _verb_taught.get("wheel", false) \
 			and _fits2("supplies", _tw("SUPPLIES") + wheel_adv + 12.0):
+		var sup_a := _diet_alpha("supplies", 1, sim)
 		if not _measure:
-			_emit_act_glyph_at("wheel", x + GLYPH_GAP, y + ICON / 2.0, 11.0, Color.WHITE, false)
+			_emit_act_glyph_at("wheel", x + GLYPH_GAP, y + ICON / 2.0, 11.0, Color(1, 1, 1, sup_a), false)
 		# Text starts past the REAL cap, not a frozen +13.0 that assumed a square: a "Q"
 		# rebound to Backspace made the cap 66.8px and buried the word it labels.
-		x = _text("SUPPLIES", x + wheel_adv, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8)) + 12.0
+		x = _text("SUPPLIES", x + wheel_adv, y + ICON - 3.0, Color(0.75, 0.78, 0.7, 0.8 * sup_a)) + 12.0
 	# Flashbang stun: a field-wide effect (every enemy skips its step) that had
 	# zero HUD read — the countdown says how long the free-fire window lasts.
 	if sim.flash_ticks > 0:

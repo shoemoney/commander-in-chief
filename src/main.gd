@@ -15390,6 +15390,19 @@ func _gate_objective_active() -> bool:
 	return false
 
 
+## HUD DIET: the gate/boss objective sentence is stated for HudDiet.OBJECTIVE_TICKS per gate, then
+## retires; the top-bar gate telegraph (shortened to its MID label) is the one statement left.
+func _gate_objective_live() -> bool:
+	_hud_icons.diet.sync(sim.get_instance_id())
+	for g in sim.gates:
+		if g["open"] or g.get("final", false):
+			continue
+		if g["y"] < sim.camera_top or g["y"] > sim.camera_top + SimWorld.VIEW_H:
+			continue
+		return _hud_icons.diet.objective_live(int(g["y"]), sim.tick_count)
+	return true
+
+
 func _arena_hold_active() -> bool:
 	if sim.mode != "endless" or sim.intermission_ticks != 0 or sim.victory or sim.wiped:
 		return false
@@ -15423,7 +15436,7 @@ func _top_center_priority() -> String:
 		candidates.append("mortar")
 	if _hint_t > 0.02 and not _visible_hint_text().is_empty():
 		candidates.append("hint")
-	if _gate_objective_active():
+	if _gate_objective_active() and _gate_objective_live():
 		candidates.append("boss")
 	if _arena_hold_active():
 		candidates.append("hold")
