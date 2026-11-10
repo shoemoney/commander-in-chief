@@ -13146,6 +13146,9 @@ func _world_label_centered(txt: String, cx: float, baseline_y: float, col: Color
 
 
 const GUNSHIP_PHASE_NAMES := ["STRAFING RUN", "MORTAR VOLLEY"]
+# HP-third acts 2 and 3 (GunshipPhases): [strafe-act name, mortar-act name]. Act 1 is the list above.
+const GUNSHIP_PHASE_NAMES_BY_HP := [["STRAFING RUN", "MORTAR VOLLEY"], ["COVER DENIAL", "MORTAR VOLLEY"],
+	["DESPERATE STRAFE", "CARPET BOMBING"]]
 # Not a phase — the 420-tick approach, which has no act at all: _step_one_boss
 # returns before any firing while phase_t < 0 ("the gunship holds its fire during
 # the approach"). The bar is now drawn for that whole window, so it needs a name
@@ -13308,13 +13311,14 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	_boss_chrome.append({"kind": "gunship", "boss": boss, "label": label, "slot": slot, "pt": pt})
 
 
-static func gunship_phase_label(label: String, pt: int) -> String:
+static func gunship_phase_label(label: String, pt: int, hp_phase := 1) -> String:
 	## The plate under the top-center boss bar. Same act boundary the sim uses to
 	## pick behavior in _step_one_boss (t < BOSS_STRAFE_TICKS).
 	if pt < 0:
 		return "%s — %s" % [label, GUNSHIP_INBOUND_NAME]
 	var gphase := 1 if pt < SimWorld.BOSS_STRAFE_TICKS else 2
-	return "%s — %s" % [label, GUNSHIP_PHASE_NAMES[gphase - 1]]
+	var names: Array = GUNSHIP_PHASE_NAMES_BY_HP[clampi(hp_phase, 1, 3) - 1]
+	return "%s — %s" % [label, names[gphase - 1]]
 
 
 func _boss_bar(boss: Dictionary, label: String, slot: int, pt: int) -> void:
@@ -13331,7 +13335,8 @@ func _boss_bar(boss: Dictionary, label: String, slot: int, pt: int) -> void:
 	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * HudIcons.BOSS_BAR_STRIDE
 	# a2-17 HUD#6: name the phase (actionable) instead of "PHASE 1/2"; HUD#1: plate it
 	# so the highest-stakes read has the plate language the rest of the top band has.
-	var gplabel := gunship_phase_label(label, pt)
+	var gplabel := gunship_phase_label(label, pt, GunshipPhases.phase_of(boss["hp"],
+		boss.get("max_hp", int(_boss_hpmax[bkey]))))
 	var gpw := Art.tw(gplabel, 10)
 	draw_rect(_label_plate_rect(bar_x, bar_y, gpw), LABEL_PLATE_FILL)
 	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)

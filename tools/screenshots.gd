@@ -284,6 +284,8 @@ func _build_shots() -> void:
 		{"name": "tank-assault", "build": _shot_tank},
 		{"name": "river-crossing", "build": _shot_river, "dress": _dress_river},
 		{"name": "bridge-gunship", "build": _shot_gunship},
+		{"name": "gunship-act2-cover-denial", "build": _shot_gunship_act2},
+		{"name": "gunship-act3-carpet", "build": _shot_gunship_act3},
 		{"name": "foundry-colossus-last-stand", "build": _shot_colossus, "dress": _dress_colossus},
 		{"name": "victoly", "build": _shot_victoly, "dress": _dress_victoly},
 		# retry-meta: the Campaign K.I.A. card with its VP line and RETRY SECTOR row.
@@ -416,6 +418,33 @@ func _shot_river() -> SimWorld:
 	sim._spawn_enemy(520 * F, _cam(sim, 60), false)
 	sim._spawn_enemy(560 * F, _cam(sim, 90), false)
 	return sim
+
+
+func _shot_gunship_act(hp: int, t_from: int, t_to: int) -> SimWorld:
+	## Stage the REAL attack: step the boss through [t_from, t_to] so the strikes on
+	## screen are exactly the ones the sim called, then age them mid-telegraph.
+	var sim := SimWorld.new(7, 1)
+	var gy := _cam(sim, 90)
+	var boss := {"alive": true, "hp": hp, "max_hp": 40, "x": 360 * F, "dir": 1, "phase_t": t_from - 1, "gate_y": gy}
+	sim.gates.append({"y": gy, "open": false, "b1": {}, "b2": {}, "final": false, "boss": boss})
+	var p := sim.players[0]
+	p["x"] = 200 * F
+	p["y"] = gy + 118 * F   # crouched behind the first cover bag
+	p["aim_x"] = 0
+	p["aim_y"] = -F
+	for t in range(t_from, t_to + 1):
+		sim._step_one_boss(boss)
+	for st in sim.strikes:
+		st["ticks"] = 20
+	return sim
+
+
+func _shot_gunship_act2() -> SimWorld:
+	return _shot_gunship_act(26, 1, GunshipPhases.SALVO_TICKS[1])
+
+
+func _shot_gunship_act3() -> SimWorld:
+	return _shot_gunship_act(12, GunshipPhases.CARPET_START, GunshipPhases.carpet_ticks()[4])
 
 
 func _shot_gunship() -> SimWorld:

@@ -3778,8 +3778,10 @@ func test_every_boss_plate_owns_its_reserved_band() -> void:
 		"scraped every _draw_one_gunship label from source (got %s)" % str(gun_names))
 	var gun_labels: Array[String] = []
 	for n in gun_names:
-		for ph in MainScript.GUNSHIP_PHASE_NAMES:
-			gun_labels.append("%s — %s" % [n, ph])
+		# HP-third acts: every name a plate can show owns its reserved band too.
+		for names in MainScript.GUNSHIP_PHASE_NAMES_BY_HP:
+			for ph in names:
+				gun_labels.append("%s — %s" % [n, ph])
 	var col_labels: Array[String] = []
 	for ph in MainScript.COLOSSUS_PHASE_NAMES:
 		col_labels.append("FOUNDRY COLOSSUS — %s" % ph)

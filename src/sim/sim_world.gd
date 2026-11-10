@@ -7243,16 +7243,26 @@ func _step_one_boss(boss: Dictionary) -> void:
 	# Endless tier escalation (9v: waves 5/10/15/20 differed only by HP).
 	# wave is 0 in campaign, so tier 0/1 reproduce today's numbers exactly.
 	var tier: int = wave / 5
+	# HP-third act (GunshipPhases): pure function of hp / the spawn-time pool, no new state.
+	var bphase: int = GunshipPhases.phase_of(boss["hp"], boss.get("max_hp", _scaled_boss_hp(BOSS_HP)))
 	# The boss drifts through BOTH halves now (8v: parking during the mortar
 	# volley made the whole phase a stand-still pinata).
-	boss["x"] = boss["x"] + BOSS_SPEED * boss["dir"]
+	boss["x"] = boss["x"] + GunshipPhases.speed(bphase, BOSS_SPEED) * boss["dir"]
 	if boss["x"] < 60 * F_ONE or boss["x"] > 580 * F_ONE:
 		boss["dir"] = -boss["dir"]
 		boss["x"] = clampi(boss["x"], 60 * F_ONE, 580 * F_ONE)
 	if t < BOSS_STRAFE_TICKS:
 		# Strafe run: spray tightens with depth (jitter 40px -> 16px by w20,
 		# cadence 12t -> 6t; starting values, staged-tier test asserts both).
-		var spray_iv: int = boss_spray_interval(tier)
+		var spray_iv: int = GunshipPhases.spray_interval(bphase, boss_spray_interval(tier))
+		if bphase >= 2 and t in GunshipPhases.SALVO_TICKS:
+			# COVER DENIAL: shell the spot the nearest player is hiding at (telegraphed
+			# like every strike: STRIKE_TELEGRAPH_TICKS, ring = GRENADE_RADIUS).
+			var vic := _nearest_alive_player(boss["x"], boss["gate_y"] - BOSS_Y_OFFSET)
+			if not vic.is_empty():
+				var bags: Array = GUNSHIP_COVER_BAGS if is_campaign_world() else []
+				var dn := GunshipPhases.denial_point(vic["x"], vic["y"], bags, boss["gate_y"])
+				_add_strike(dn[0], dn[1])
 		if t % spray_iv == 0:
 			var jit: int = maxi(16, 40 - 8 * maxi(0, tier - 1))
 			var by: int = boss["gate_y"] - BOSS_Y_OFFSET
@@ -7277,6 +7287,12 @@ func _step_one_boss(boss: Dictionary) -> void:
 		# never catch a walker without aiming ahead). Poor-man's velocity:
 		# delta since the last sample, projected one telegraph forward.
 		# Deeper waves add a 4th (w10+) and 5th (w15+) strike.
+		if bphase >= 3 and t in GunshipPhases.carpet_ticks():
+			# DESPERATION CARPET: five columns across the arena, one every
+			# CARPET_STEP ticks, on the row the nearest player is standing on.
+			var cv := _nearest_alive_player(boss["x"], boss["gate_y"] - BOSS_Y_OFFSET)
+			if not cv.is_empty():
+				_add_strike(GunshipPhases.carpet_x((t - GunshipPhases.CARPET_START) / GunshipPhases.CARPET_STEP, boss["dir"]), cv["y"])
 		if t in boss_mortar_ticks(tier):
 			var by2: int = boss["gate_y"] - BOSS_Y_OFFSET
 			var target2 := _nearest_alive_player(boss["x"], by2)
