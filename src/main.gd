@@ -8206,7 +8206,7 @@ const PRIMARY_MARKER_RADIUS := 8.0
 # the one-hit enemy bullet is a 14px-wide lethal circle. Widen only the rendered
 # player poses so that circle stays visibly inside every standing silhouette;
 # movement/collision remain unchanged. Pinned by test_hitbox_fairness.gd.
-const PLAYER_POSE_X_STRETCH := 1.58
+const PLAYER_POSE_X_STRETCH := 1.0   # the 1.58 widening is now baked into assets/baked/hero (tools/bake_sprites.py)
 
 # a4-05 (AD#10, LEG#4): the reticle's dark backing rings the aim point on ALL 8 sides — a
 # CENTERED halo, not the old single down-right drop-shadow, so no edge camouflages into an
@@ -12167,8 +12167,8 @@ func _draw_enemies() -> void:
 					Color(1.0, 0.3, 0.2, 0.12 + wfrac * 0.55), 1.0 + wfrac)
 			var esw := (1.0 + (1.0 - float(wu) / float(SimWorld.ELITE_WINDUP_TICKS)) * 0.14) if wu > 0 else 1.0
 			var elite_pose := enemy_anim_state(e, e_moved, enemy_phase, sim.flash_ticks > 0)
-			_spr_texture(Art.enemy_anim("enemy_assault", elite_pose), "enemy_assault",
-				epos, face, 0.62 * esw)
+			_spr_texture(Art.enemy_anim("enemy_elite", elite_pose), "enemy_assault",
+				epos, face, LIVE_RIFLEMAN_SCALE * esw)   # elite size (1.19x) is baked into enemy_elite
 		else:
 			var rusher_key: String = _RUSHER_SKINS[e.get("skin", 0)]
 			# The ordinary gunman's short aim tell is quieter/smaller than the elite

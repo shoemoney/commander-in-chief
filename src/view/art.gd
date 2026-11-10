@@ -19,6 +19,7 @@ extends RefCounted
 
 const ART := "res://assets/art/"
 const KN := "res://assets/cc0/"
+const BAKED := "res://assets/baked/"   # tools/bake_sprites.py output: infantry pre-shrunk to net draw scale 1.0
 const SOL := "res://assets/troops/"   # owned top-down infantry sprites, size-limited for VRAM
 const FA := "res://assets/fontawesome/solid/"
 
@@ -29,22 +30,22 @@ const TEX := {
 	# sol-03: the pale the earlier art hero read as a blob at gameplay zoom — swapped for the authored
 	# infantry set top-down infantry. No sim weapon field exists, so ONE canonical class (assault)
 	# for both slots; P1/P2 stay distinct via the ident ring + _body_ident_lean + the TINT split below.
-	"player1": preload(SOL + "soldier_assault_rifle.png"),
-	"player2": preload(SOL + "soldier_assault_rifle.png"),
+	"player1": preload(BAKED + "hero/base.png"),
+	"player2": preload(BAKED + "hero/base.png"),
 	"rusher": preload(ART + "cast2/insurgent1.png"),
 	"elite": preload(ART + "cast2/insurgent2.png"),
 	# sol-08: authored RED-team pack sprites for the shooting infantry (rusher skins / elite / sniper).
 	# Team-color is baked in (crimson vs the olive hero) — friend/foe read for free, colorblind-safer
 	# than the old warm-tinted insurgents. Single-authorship rotation (all cel) so no cel/the earlier art strobe.
-	"enemy_assault": preload(SOL + "enemy/enemy_assault_rifle.png"),
-	"enemy_smg": preload(SOL + "enemy/enemy_smg.png"),
-	"enemy_shotgun": preload(SOL + "enemy/enemy_shotgun.png"),
-	"enemy_lmg": preload(SOL + "enemy/enemy_lmg.png"),
-	"enemy_sniper": preload(SOL + "enemy/enemy_sniper.png"),
+	"enemy_assault": preload(BAKED + "enemy_assault/base.png"),
+	"enemy_smg": preload(BAKED + "enemy_smg/base.png"),
+	"enemy_shotgun": preload(BAKED + "enemy_shotgun/base.png"),
+	"enemy_lmg": preload(BAKED + "enemy_lmg/base.png"),
+	"enemy_sniper": preload(BAKED + "enemy_sniper/base.png"),
 	# sol-12: authored pack diver replaces the earlier frogman bake. "frogman" is the SURFACED (rifle) pose
 	# — the canonical key so corpse/bestiary/markers follow for free; the submerged variant is its own key.
-	"frogman": preload(SOL + "frogman_rifle.png"),
-	"frogman_speargun": preload(SOL + "frogman_speargun.png"),
+	"frogman": preload(BAKED + "frogman/base.png"),
+	"frogman_speargun": preload(BAKED + "frogman_speargun/base.png"),
 	"observer": preload(ART + "cast2/observer2.png"),
 	"bunker": preload(ART + "cast2/bunker.png"),
 	"trophy": preload(ART + "cast2/trophy.png"),
@@ -406,72 +407,90 @@ const TEX := {
 # The registry is explicit to make missing action art fail at import/test time
 # instead of hitching on a dynamic load during combat.
 const PLAYER_ANIM := {
-	"idle": preload(SOL + "anim/player/idle.png"),
-	"move_forward_0": preload(SOL + "anim/player/move_forward_0.png"),
-	"move_forward_1": preload(SOL + "anim/player/move_forward_1.png"),
-	"move_backward_0": preload(SOL + "anim/player/move_backward_0.png"),
-	"move_backward_1": preload(SOL + "anim/player/move_backward_1.png"),
-	"crouch": preload(SOL + "anim/player/crouch.png"),
-	"shoot": preload(SOL + "anim/player/shoot.png"),
-	"throw": preload(SOL + "anim/player/throw.png"),
-	"roll": preload(SOL + "anim/player/roll.png"),
-	"downed": preload(SOL + "anim/player/downed.png"),
-	"interact": preload(SOL + "anim/player/interact.png"),
-	"bash": preload(SOL + "anim/player/bash.png"),
+	"idle": preload(BAKED + "hero/idle.png"),
+	"move_forward_0": preload(BAKED + "hero/move_forward_0.png"),
+	"move_forward_1": preload(BAKED + "hero/move_forward_1.png"),
+	"move_backward_0": preload(BAKED + "hero/move_backward_0.png"),
+	"move_backward_1": preload(BAKED + "hero/move_backward_1.png"),
+	"crouch": preload(BAKED + "hero/crouch.png"),
+	"shoot": preload(BAKED + "hero/shoot.png"),
+	"throw": preload(BAKED + "hero/throw.png"),
+	"roll": preload(BAKED + "hero/roll.png"),
+	"downed": preload(BAKED + "hero/downed.png"),
+	"interact": preload(BAKED + "hero/interact.png"),
+	"bash": preload(BAKED + "hero/bash.png"),
 }
 
 const ENEMY_ANIM := {
 	"enemy_assault": {
-		"idle": preload(SOL + "anim/enemy_assault/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_assault/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_assault/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_assault/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_assault/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_assault/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_assault/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_assault/downed.png"),
+		"idle": preload(BAKED + "enemy_assault/idle.png"),
+		"move_0": preload(BAKED + "enemy_assault/move_0.png"),
+		"move_1": preload(BAKED + "enemy_assault/move_1.png"),
+		"crouch": preload(BAKED + "enemy_assault/crouch.png"),
+		"windup": preload(BAKED + "enemy_assault/windup.png"),
+		"shoot": preload(BAKED + "enemy_assault/shoot.png"),
+		"stunned": preload(BAKED + "enemy_assault/stunned.png"),
+		"downed": preload(BAKED + "enemy_assault/downed.png"),
 	},
 	"enemy_smg": {
-		"idle": preload(SOL + "anim/enemy_smg/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_smg/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_smg/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_smg/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_smg/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_smg/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_smg/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_smg/downed.png"),
+		"idle": preload(BAKED + "enemy_smg/idle.png"),
+		"move_0": preload(BAKED + "enemy_smg/move_0.png"),
+		"move_1": preload(BAKED + "enemy_smg/move_1.png"),
+		"crouch": preload(BAKED + "enemy_smg/crouch.png"),
+		"windup": preload(BAKED + "enemy_smg/windup.png"),
+		"shoot": preload(BAKED + "enemy_smg/shoot.png"),
+		"stunned": preload(BAKED + "enemy_smg/stunned.png"),
+		"downed": preload(BAKED + "enemy_smg/downed.png"),
 	},
 	"enemy_shotgun": {
-		"idle": preload(SOL + "anim/enemy_shotgun/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_shotgun/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_shotgun/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_shotgun/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_shotgun/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_shotgun/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_shotgun/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_shotgun/downed.png"),
+		"idle": preload(BAKED + "enemy_shotgun/idle.png"),
+		"move_0": preload(BAKED + "enemy_shotgun/move_0.png"),
+		"move_1": preload(BAKED + "enemy_shotgun/move_1.png"),
+		"crouch": preload(BAKED + "enemy_shotgun/crouch.png"),
+		"windup": preload(BAKED + "enemy_shotgun/windup.png"),
+		"shoot": preload(BAKED + "enemy_shotgun/shoot.png"),
+		"stunned": preload(BAKED + "enemy_shotgun/stunned.png"),
+		"downed": preload(BAKED + "enemy_shotgun/downed.png"),
 	},
 	"enemy_lmg": {
-		"idle": preload(SOL + "anim/enemy_lmg/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_lmg/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_lmg/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_lmg/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_lmg/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_lmg/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_lmg/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_lmg/downed.png"),
+		"idle": preload(BAKED + "enemy_lmg/idle.png"),
+		"move_0": preload(BAKED + "enemy_lmg/move_0.png"),
+		"move_1": preload(BAKED + "enemy_lmg/move_1.png"),
+		"crouch": preload(BAKED + "enemy_lmg/crouch.png"),
+		"windup": preload(BAKED + "enemy_lmg/windup.png"),
+		"shoot": preload(BAKED + "enemy_lmg/shoot.png"),
+		"stunned": preload(BAKED + "enemy_lmg/stunned.png"),
+		"downed": preload(BAKED + "enemy_lmg/downed.png"),
 	},
 	"enemy_sniper": {
-		"idle": preload(SOL + "anim/enemy_sniper/idle.png"),
-		"move_0": preload(SOL + "anim/enemy_sniper/move_0.png"),
-		"move_1": preload(SOL + "anim/enemy_sniper/move_1.png"),
-		"crouch": preload(SOL + "anim/enemy_sniper/crouch.png"),
-		"windup": preload(SOL + "anim/enemy_sniper/windup.png"),
-		"shoot": preload(SOL + "anim/enemy_sniper/shoot.png"),
-		"stunned": preload(SOL + "anim/enemy_sniper/stunned.png"),
-		"downed": preload(SOL + "anim/enemy_sniper/downed.png"),
+		"idle": preload(BAKED + "enemy_sniper/idle.png"),
+		"move_0": preload(BAKED + "enemy_sniper/move_0.png"),
+		"move_1": preload(BAKED + "enemy_sniper/move_1.png"),
+		"crouch": preload(BAKED + "enemy_sniper/crouch.png"),
+		"windup": preload(BAKED + "enemy_sniper/windup.png"),
+		"shoot": preload(BAKED + "enemy_sniper/shoot.png"),
+		"stunned": preload(BAKED + "enemy_sniper/stunned.png"),
+		"downed": preload(BAKED + "enemy_sniper/downed.png"),
+	},
+	"enemy_elite": {
+		"idle": preload(BAKED + "enemy_elite/idle.png"),
+		"move_0": preload(BAKED + "enemy_elite/move_0.png"),
+		"move_1": preload(BAKED + "enemy_elite/move_1.png"),
+		"crouch": preload(BAKED + "enemy_elite/crouch.png"),
+		"windup": preload(BAKED + "enemy_elite/windup.png"),
+		"shoot": preload(BAKED + "enemy_elite/shoot.png"),
+		"stunned": preload(BAKED + "enemy_elite/stunned.png"),
+		"downed": preload(BAKED + "enemy_elite/downed.png"),
 	},
 }
+
+## BAKED infantry (tools/bake_sprites.py): the PNGs are pre-shrunk to their exact
+## on-screen size, so SCALE x the canonical call scale must be exactly 1.0 (no
+## draw-time resample, no nearest-neighbour noise). Hero: main.gd _draw_players
+## 0.52; rifleman skins + elite: LIVE_RIFLEMAN_SCALE 0.52; sniper/frogman: 0.5.
+const BAKED_HERO_SCALE := 1.0 / 0.52
+const BAKED_RIFLEMAN_SCALE := 1.0 / 0.52
+const BAKED_SNIPER_SCALE := 1.0 / 0.5
 
 ## Per-sprite draw multiplier so a entity bake lands at the Kenney footprint the
 ## main.gd scale numbers were tuned for. Absent = 1.0.
@@ -494,10 +513,11 @@ const SCALE := {
 	# or is that a bullet?" — straight from playtest.
 	# Sizes per the 1986-anchor readability pass: heroes ~18px on screen,
 	# elites largest infantry (they shoot), sprites ≥3× bullet size.
-	"player1": 0.26, "player2": 0.26, "rusher": 0.53, "elite": 0.58,   # Asset-redesign: the slimmer authored hero needs 0.26 so enemy rounds stay visibly inside the body; hitbox-fairness pins the margin.
+	"player1": BAKED_HERO_SCALE, "player2": BAKED_HERO_SCALE, "rusher": 0.53, "elite": 0.58,   # Asset-redesign: the slimmer authored hero needs 0.26 so enemy rounds stay visibly inside the body; hitbox-fairness pins the margin.
 	# sol-08: enemy pack sprites fold the 128px canvas to the ~18-20px infantry footprint (call-scale 0.5 × 0.5 × 128 ≈ 32px canvas).
-	"enemy_assault": 0.5, "enemy_smg": 0.5, "enemy_shotgun": 0.5, "enemy_lmg": 0.5, "enemy_sniper": 0.5,
-	"frogman": 0.5, "frogman_speargun": 0.5, "observer": 0.24,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the entity bake)
+	"enemy_assault": BAKED_RIFLEMAN_SCALE, "enemy_smg": BAKED_RIFLEMAN_SCALE, "enemy_shotgun": BAKED_RIFLEMAN_SCALE,
+	"enemy_lmg": BAKED_RIFLEMAN_SCALE, "enemy_sniper": BAKED_SNIPER_SCALE,
+	"frogman": BAKED_SNIPER_SCALE, "frogman_speargun": BAKED_SNIPER_SCALE, "observer": 0.24,   # sol-12: frogman folds the 128px pack canvas (was 1.05 for the entity bake)
 	# HITBOX FAIRNESS (2026-07-25): 0.17 was tuned against a 440px canvas, then an
 	# import sweep added `process/size_limit=128` to bunker/bunker2 without
 	# re-tuning SCALE — and _spr sizes off the IMPORTED texture. The strongpoint
