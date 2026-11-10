@@ -286,6 +286,8 @@ func _build_shots() -> void:
 		{"name": "bridge-gunship", "build": _shot_gunship},
 		{"name": "foundry-colossus-last-stand", "build": _shot_colossus, "dress": _dress_colossus},
 		{"name": "victoly", "build": _shot_victoly, "dress": _dress_victoly},
+		# retry-meta: the Campaign K.I.A. card with its VP line and RETRY SECTOR row.
+		{"name": "defeat-retry-sector", "build": _shot_defeat, "dress": _dress_defeat},
 		{"name": "endless-war-shop", "build": _shot_shop, "dress": _dress_shop},
 		{"name": "title-screen", "build": _shot_firefight, "dress": _dress_title},
 		{"name": "pause-menu", "build": _shot_firefight, "dress": _dress_pause},
@@ -493,6 +495,26 @@ func _shot_victoly() -> SimWorld:
 	p2["y"] = _cam(sim, 265)
 	sim.gates.append({"y": _cam(sim, 60), "open": true, "b1": {}, "b2": {}, "boss": {}, "final": true})
 	return sim
+
+
+func _shot_defeat() -> SimWorld:
+	var sim := SimWorld.new(7, 1, "campaign")
+	sim.score = 48250
+	for i in 4:   # four gates down = died in sector 5
+		sim.gates.append({"y": _cam(sim, 60 + i * 20), "open": true, "b1": {}, "b2": {}, "boss": {}})
+	var p := sim.players[0]
+	p["x"] = 320 * F
+	p["y"] = _cam(sim, 260)
+	return sim
+
+
+func _dress_defeat(m: Node2D) -> void:
+	m._run_kills = 121
+	m._run_best_streak = 14
+	m._result_t = 1.0
+	m._debrief = true
+	m.vet_points = 61
+	m._run_vp_gain = 10
 
 
 func _shot_shop() -> SimWorld:

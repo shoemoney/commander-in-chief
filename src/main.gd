@@ -364,6 +364,7 @@ var _run_rescues := 0            # pilot ransoms this run — the signature mech
 var _run_knockdowns := 0         # times a player went down this run — the continue ledger's count
 var _run_revive_coin := 0        # coin the chest paid to stand them back up (0 for a free broke rally)
 var _run_best_streak := 0
+var _run_perked := false         # retry-meta: this run started with purchased perks (Campaign/Arcade) -> boards flag it assisted
 var _run_vp_gain := 0            # endless-meta-retention: VP this run actually banked (0 unless
                                   # Endless + score-verified) -- shown on the debrief/victory card,
                                   # not just the transient BANKED banner (see _track_bests below)
@@ -477,11 +478,11 @@ const PERK_CHEST := "perk_chest"
 const PERK_TOKEN := "perk_token"
 const PERK_DEFS := [
 	{"id": PERK_VEST, "label": "VETERAN VEST", "cost": [40],
-		"desc": "ENDLESS RUNS START WITH A FLAK VEST ALREADY ON"},
+		"desc": "RUNS START WITH A FLAK VEST ALREADY ON"},
 	{"id": PERK_CHEST, "label": "HEAD START", "cost": [30, 45, 60],
-		"desc": "ENDLESS RUNS START WITH +60 WAR CHEST PER TIER OWNED (STACKS)"},
+		"desc": "RUNS START WITH +60 WAR CHEST PER TIER OWNED (STACKS)"},
 	{"id": PERK_TOKEN, "label": "SIGNAL FLARE", "cost": [50, 70],
-		"desc": "ENDLESS RUNS START WITH +1 COMMENDATION PER TIER OWNED (STACKS)"},
+		"desc": "RUNS START WITH +1 COMMENDATION PER TIER OWNED (STACKS)"},
 ]
 
 
@@ -2180,7 +2181,11 @@ func _reset() -> void:
 	if _assist:
 		for pl in sim.players:
 			pl["vest"] = true
-	if _mode_str == "endless":
+	_run_perked = false
+	if CampaignMeta.perks_apply(_mode_str, _daily):
+		# retry-meta: Campaign and Arcade starts take the perks too (never the daily seed).
+		_run_perked = _mode_str != "endless" and (perk_level(PERK_VEST) > 0 \
+			or perk_level(PERK_CHEST) > 0 or perk_level(PERK_TOKEN) > 0)
 		# endless-meta-retention: owned perk tiers are applied post-construction,
 		# same trick as the assist-vest loop above, so SimWorld itself never
 		# learns a perk system exists. CHEST/TOKEN stack per owned tier.
@@ -2499,6 +2504,41 @@ func _input(event: InputEvent) -> void:
 		else:
 			_reset()
 		get_viewport().set_input_as_handled()
+	# retry-meta: pad Y on the Campaign defeat card = RETRY SECTOR N (Y is otherwise idle there).
+	if event is InputEventJoypadButton and event.pressed \
+			and event.button_index == CampaignMeta.RETRY_PAD_BUTTON \
+			and not _menu.is_active() and _try_retry_sector():
+		if is_inside_tree():
+			get_viewport().set_input_as_handled()
+
+
+## retry-meta: the sector a RETRY would start at, or 0 when the card offers none.
+func _retry_sector() -> int:
+	if not _debrief or _watching or _result_t < 1.0:
+		return 0
+	return CampaignMeta.retry_sector(sim.mode, sim.victory, _daily,
+		CampaignMeta.sector_reached(CampaignMeta.opened_gates(sim)))
+
+
+func _try_retry_sector() -> bool:
+	var k := _retry_sector()
+	if k <= 0:
+		return false
+	start_arcade(k)
+	return true
+
+
+## retry-meta: the Campaign extras on the end cards -- the VP line (Endless keeps its inline
+## row) and, on a defeat, the unranked RETRY SECTOR row. REDEPLOY stays the last, default row.
+func _debrief_meta_rows(pulse: float) -> Array:
+	var rows: Array = []
+	if sim.mode == "campaign" and not _daily:
+		rows.append(CampaignMeta.vp_row(vet_points, _run_vp_gain, perks_maxed()))
+	var k := CampaignMeta.retry_sector(sim.mode, sim.victory, _daily,
+		CampaignMeta.sector_reached(CampaignMeta.opened_gates(sim)))
+	if k > 0:
+		rows.append(CampaignMeta.retry_row(k, Art.pad_button_label(CampaignMeta.RETRY_PAD_BUTTON), Art.use_pad, pulse))
+	return rows
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -2533,6 +2573,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_menu.open(GameMenu.Mode.TITLE)
 			else:
 				_reset()
+		elif event.keycode == CampaignMeta.RETRY_KEY and _try_retry_sector():
+			pass
 		elif event.keycode == KEY_C and (_debrief or sim.victory):
 			_copy_share_text()
 		elif (event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER
@@ -6365,14 +6407,16 @@ func _record_run(score: int) -> void:
 		if g["open"]:
 			opened += 1
 	var rr := _run_rank()   # bank the earned grade/title with the run so the Hall can show it
+	var run_tags := CampaignMeta.board_tags(
+		_recorder.assist_tags if _recorder != null else _run_assist_tags(), _run_perked)
 	var entry := {"score": score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, SimWorld.FINAL_GATE_INDEX), "dist": -Fixed.to_int(sim.camera_top) / 10,
 		# authored-campaign-and-modes: bosses cleared, meaningful only for a
 		# boss_rush entry (the Hall/menu read it only when mode == "boss_rush").
 		"bosses": mini(opened, SimWorld.BOSS_RUSH_COUNT),
 		"streak": _run_best_streak, "won": sim.victory, "daily": _daily,
-		"assist": not (_recorder.assist_tags if _recorder != null else _run_assist_tags()).is_empty(),
-		"assist_tags": _recorder.assist_tags.duplicate() if _recorder != null else _run_assist_tags(),
+		"assist": not run_tags.is_empty(), "perked": _run_perked,
+		"assist_tags": run_tags,
 		"player_count": sim.players.size(),
 		"hard": sim.hard,
 		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues,
@@ -6409,10 +6453,12 @@ func _record_run(score: int) -> void:
 	cf.set_value("best", "score", best_score)
 	cf.set_value("best", "wave", best_wave)
 	cf.set_value("best", "dist", best_dist)
-	if sim.mode == "endless":
+	var vp_award := CampaignMeta.vp_for_run(sim.mode, sim.wave, CampaignMeta.sector_reached(opened), sim.victory, _daily)
+	if vp_award > 0:
 		# endless-meta-retention: 1 Veteran Point per wave survived -- a deeper
 		# run always banks more toward the next perk, independent of score.
-		vet_points += sim.wave
+		# retry-meta: Campaign pays per sector reached + a win bonus (CampaignMeta).
+		vet_points += vp_award
 		cf.set_value("meta", "vp", vet_points)
 		cf.set_value("meta", "levels", _perk_levels)
 	cf.set_value("seen", "hints", _seen)
@@ -6701,7 +6747,7 @@ func _track_bests() -> void:
 			# trusted, so a missing recorder can never be a backdoor around the check.
 			var _score_verified := _recorder != null and _recorder.verify_score(sim.score)
 			_apply_score_verdict(sim.score, _score_verified)   # extracted gate -- see tests/test_leaderboard.gd; also sets _run_vp_gain
-			if sim.mode == "endless" and _run_vp_gain > 0:
+			if _run_vp_gain > 0:
 				# _run_vp_gain is what the debrief/victory card reads too (see _draw below) --
 				# not just this transient banner, so the gain survives past the banner's decay.
 				# Once perks_maxed() the gain buys nothing, so shouting "+N VP" is a reward cue
@@ -16164,6 +16210,7 @@ func _draw_banners(top_msg: String) -> void:
 		# predicate with the debrief) + a REDEPLOY prompt (redeploy input works on victory too,
 		# but the card never told you so — the death card does).
 		var vrp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
+		vrows.append_array(_debrief_meta_rows(vrp))   # retry-meta: Campaign VP line
 		for vr in _victory_extra_rows(sim.score, best_score, vrp):
 			vrows.append(vr)
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), vrows,
@@ -16235,6 +16282,7 @@ func _draw_banners(top_msg: String) -> void:
 			rows.append({"text": vp_row, "color": Art.safe(Color(0.7, 0.95, 0.6)),
 				"icon": "mi_trophy", "icon_size": 14.0})
 		var rp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
+		rows.append_array(_debrief_meta_rows(rp))   # retry-meta: Campaign VP line + RETRY SECTOR
 		# Device-branched prompt: the actual button glyph (pad START / ENTER key)
 		# fronts the row via the panel's icon slot.
 		rows.append({"text": "REDEPLOY", "color": Color(1.0, 0.9, 0.4, rp),
