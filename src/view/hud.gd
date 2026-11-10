@@ -2088,15 +2088,21 @@ func _ovf_fit(cands: Array, budget: float, gap: float, extra_hidden: int) -> Dic
 	}
 
 
-var _wb_wave := -1   # EndlessRoster.wave_budget is a pure function of the wave and costs 93-252 us:
-var _wb_val := 0     # compute it when the wave changes, not on every draw
+var _wb_wave := -1   # EndlessRoster.wave_budget is a pure function of (wave, theme) and costs
+var _wb_theme := -1  # 93-252 us: compute it when either changes, not on every draw
+var _wb_val := 0
 var wave_budget_calls := 0   # test probe: how many times the real function ran
 
 
-func _wave_budget_cached(wave: int) -> int:
-	if wave != _wb_wave:
+func _wave_budget_cached(wave: int, theme: int = 0) -> int:
+	## The theme is part of the key because the sim's own budget is theme-aware
+	## (SimWorld re-derives wave_pending with theme_of once the mutators roll): a MARKSMEN or
+	## BOMBARDMENT wave fields a few more bodies, and a denominator computed without it left
+	## the HOSTILES bar a few bodies short of full on exactly those waves.
+	if wave != _wb_wave or theme != _wb_theme:
 		_wb_wave = wave
-		_wb_val = EndlessRoster.wave_budget(wave)
+		_wb_theme = theme
+		_wb_val = EndlessRoster.wave_budget(wave, theme)
 		wave_budget_calls += 1
 	return _wb_val
 
@@ -2254,7 +2260,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			var boss_up := not sim.endless_boss.is_empty() and bool(sim.endless_boss.get("alive", false))
 			var remaining: int = alive + sim.wave_pending + (1 if boss_up else 0)
 			# The wave's starting budget (same formula _start_wave uses).
-			var wave_total: int = maxi(1, _wave_budget_cached(sim.wave) + (1 + EndlessRoster.boss_escorts(sim.wave / 5) if boss_up else 0))
+			var wave_total: int = maxi(1, _wave_budget_cached(sim.wave, EndlessRoster.theme_of(sim.wave_mod, sim.second_mod())) + (1 + EndlessRoster.boss_escorts(sim.wave / 5) if boss_up else 0))
 			var htxt := "HOSTILES %d" % remaining
 			# Highest optional priority: the push-or-hold combat dashboard survives a crowded
 			# row while vanity records/streak drop — the stated failure was the reverse.
