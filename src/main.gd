@@ -430,11 +430,11 @@ var _seen_kinds := {}             # enemy kind → true once its first-encounter
 const _KIND_TEACH := {
 	"sniper": "LASER SNIPER — BREAK THE LINE",
 	"ghillie": "GHILLIE — CLOSE IN. CLOAK BEATS BLASTS",
-	"grenadier": "GRENADIER — MOVE OFF YOUR GROUND",
+	"grenadier": "GRENADIER — 3 LOBS. RUN TOWARD IT",
 	"shield": "RIOT SHIELD — FLANK OR BLOW IT OPEN",
 	"frogman": "FROGMAN — KILL IT ON THE SURFACE",
 	"sapper": "SAPPER — MIND THE MINE TRAIL",
-	"mg_nest": "MG NEST — BREAK ITS LINE OR FLANK",
+	"mg_nest": "MG NEST TRACKS YOU — COVER OR GRENADE IT",
 	# The counterplay is counterintuitive (it outruns a straight sprint at
 	# 3px/t vs the player's 2.4) — the card must teach the sidestep.
 	"technical": "TECHNICAL — SIDESTEP ITS CHARGE",
@@ -519,7 +519,7 @@ const WHEEL_ITEMS := [
 	{"kind": 2, "icon": "icon_vest", "cost": SimWorld.SHOP_VEST_COST, "label": "FLAK VEST",
 		"blurb": "EATS ONE HIT"},
 	{"kind": 3, "icon": "icon_airstrike", "cost": SimWorld.SHOP_AIRSTRIKE_COST, "label": "AIRSTRIKE",
-		"blurb": "CALLS FIRE ON A LINE"},
+		"blurb": "CLEARS THE SCREEN. NO BOUNTY"},
 	{"kind": 4, "icon": "wall_sandbag", "cost": SimWorld.SHOP_SANDBAG_COST, "label": "SANDBAGS",
 		"blurb": "PLANTS HARD COVER"},
 	{"kind": 5, "icon": "icon_medal", "cost": 0, "label": "CALL: AMMO/NADES/VEST/STRIKE",
@@ -15931,6 +15931,19 @@ func _draw_threat_pips() -> void:
 		else:
 			draw_colored_polygon(tri, Color(col.r, col.g, col.b, 0.9))
 		Art.polyline(self, PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]), Color(0, 0, 0, 0.55), 1.0)
+	# Off-screen riflemen/elites mid-windup (flank squads past the side edges): distinct
+	# DOUBLE-CHEVRON, clustered and capped so a breach never carpets an edge.
+	for gp in TeachTruth.gunner_pips(sim.enemies, _to_screen, SCREEN_W, SCREEN_H, plate_r, panel_b):
+		var gedge: Vector2 = gp["edge"]
+		var gdir: Vector2 = gp["dir"]
+		var gperp := Vector2(-gdir.y, gdir.x)
+		var gcol := Color(1.0, 0.86, 0.62)
+		Art.circle(self, gedge, 8.0, Color(gcol.r, gcol.g, gcol.b, 0.14))
+		for gi in (3 if int(gp["count"]) > 1 else 2):
+			var gb := gedge - gdir * (3.0 - gi * 4.0)
+			var gt := Art.rnd(PackedVector2Array([gb + gdir * 4.0, gb - gdir * 1.0 + gperp * 4.0, gb - gdir * 1.0 - gperp * 4.0]))
+			Art.polyline(self, PackedVector2Array([gt[0], gt[1], gt[2], gt[0]]), Color(0, 0, 0, 0.55), 3.0)
+			Art.polyline(self, PackedVector2Array([gt[0], gt[1], gt[2], gt[0]]), Color(gcol.r, gcol.g, gcol.b, 0.95), 1.0)
 	# Off-screen mortar strikes: a telegraph that scrolls off-frame between cast and
 	# impact gave zero warning; clamp an urgency-scaled amber-red wedge to the edge.
 	for st in sim.strikes:

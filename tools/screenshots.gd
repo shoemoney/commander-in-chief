@@ -298,6 +298,8 @@ func _build_shots() -> void:
 		# an 11px stroke inward from. CHAPTERS is the widest row content of the ten.
 		{"name": "rebind-controls", "build": _shot_firefight, "dress": _dress_rebind},
 		{"name": "chapters-select", "build": _shot_firefight, "dress": _dress_chapters},
+		{"name": "howto-war-chest", "build": _shot_firefight, "dress": _dress_howto_chest},
+		{"name": "offscreen-gunner-pips", "build": _shot_gunner_pips, "dress": _dress_gunner_pips},
 	]
 
 
@@ -553,6 +555,31 @@ func _dress_howto(m: Node2D) -> void:
 	m._menu.open(GameMenu.Mode.HOWTO)
 	m._menu._open_t = 1.0
 	m._hud_icons.visible = false
+
+
+func _dress_howto_chest(m: Node2D) -> void:
+	m._menu.open(GameMenu.Mode.HOWTO)
+	m._menu._open_t = 1.0
+	m._menu._howto_page = 1
+	m._hud_icons.visible = false
+
+
+func _dress_gunner_pips(m: Node2D) -> void:
+	m._menu.mode = GameMenu.Mode.HIDDEN   # the previous shot left HOW TO PLAY open
+	m._hud_icons.visible = true
+
+
+func _shot_gunner_pips() -> SimWorld:
+	## Flank squad winding up past the side edges: the sim gates fire on Y only.
+	var sim := _shot_firefight()
+	sim.enemies.clear()
+	sim.players[0]["x"] = 90 * F
+	for e in [[-30, 200, "rusher"], [-34, 214, "rusher"], [-28, 226, "rusher"], [680, 120, "elite"]]:
+		sim._spawn_enemy(e[0] * F, _cam(sim, e[1]), e[2] == "elite")
+		var en: Dictionary = sim.enemies[sim.enemies.size() - 1]
+		en["x"] = e[0] * F
+		en["windup"] = 12
+	return sim
 
 
 func _dress_options(m: Node2D) -> void:

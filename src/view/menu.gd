@@ -5540,7 +5540,7 @@ func _howto_large_entries(tab: int) -> Array:
 				{"kind": "body", "text": "No health bar. Use cover and keep moving. Death strips vests, buffs and TRIPLE SHOT — buy them again."},
 				{"kind": "heading", "text": "THE WAR CHEST — SHARED COIN FROM EVERY KILL:", "size": HOWTO_PAGER_WARCHEST_SIZE},
 				{"kind": "body", "text": _howto_tr("Spend it to REVIVE yourself or a partner, or BUY supplies. Broke? A %ds rally puts you back up — in ENDLESS chained deaths slow it to %ds, and with nobody up that clock ENDS the run. Past the FINAL GATE, LAST STAND: no revives.") % [SimWorld.BROKE_RESPAWN_TICKS / 60, SimWorld.BROKE_RESPAWN_TICKS * SimWorld.BROKE_WAIT_MAX_MULT / 60]},
-				{"kind": "body", "text": _howto_tr("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home.") % [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT, SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)]},
+				{"kind": "body", "text": _howto_tr("Spend it — %d× score (revives pay none). What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus.") % [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT, SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)]},
 				{"kind": "action", "action": "wheel", "text": "Hold to open the supply wheel."}]
 		2:
 			var out: Array = [{"kind": "heading", "text": "MODES + ASSIST:", "size": HOWTO_PAGER_HEADING_SIZE}]
@@ -5950,7 +5950,7 @@ func _howto_page_warchest() -> void:
 	# discount and 3x salvage are both priced against — went untaught here, and the old closer
 	# ("That's the choice.") presented spend-vs-salvage as the complete decision. It isn't.
 	# One wrapping paragraph, not two blocks: the BACK-plate ratchet leaves the page ~0 slack.
-	y = _body_block("Spend it — %d× score. What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus. Nothing pays like the chest you carry home."
+	y = _body_block("Spend it — %d× score (revives pay none). What's left when you fall salvages at only %d×. WIN, and what's left banks at %d× — plus a %s bonus."
 			% [SimWorld.SPEND_SCORE_MULT, SimWorld.WIPE_SCORE_MULT,
 				SimWorld.VICTORY_SCORE_MULT, Art.group_digits(SimWorld.VICTORY_SCORE_BONUS)],
 		ICON_X, y, HudIcons.TYPE_BODY, Color(0.85, 0.9, 0.8), FRAME_INNER_R - ICON_X)
