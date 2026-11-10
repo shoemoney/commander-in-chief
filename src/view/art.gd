@@ -20,6 +20,7 @@ extends RefCounted
 const ART := "res://assets/art/"
 const KN := "res://assets/cc0/"
 const SOL := "res://assets/troops/"   # owned top-down infantry sprites, size-limited for VRAM
+const FA := "res://assets/fontawesome/solid/"
 
 const TEX := {
 	# --- Top-down entity bakes ---
@@ -356,32 +357,38 @@ const TEX := {
 	"glyph_sw_back": preload(ART + "ui/glyphs/sw_back.png"),
 	"glyph_sw_dpad_lr": preload(ART + "ui/glyphs/sw_dpad_lr.png"),
 	# --- Modern Menus ortho icons (menu rows / toggles) ---
-	"mi_snd_on": preload(ART + "ui/menuicons/snd_on.png"),
-	"mi_snd_off": preload(ART + "ui/menuicons/snd_off.png"),
-	"mi_mus_on": preload(ART + "ui/menuicons/mus_on.png"),
-	"mi_mus_off": preload(ART + "ui/menuicons/mus_off.png"),
-	"mi_trophy": preload(ART + "ui/menuicons/trophy.png"),
-	"mi_book": preload(ART + "ui/menuicons/book.png"),
-	"mi_play": preload(ART + "ui/menuicons/play.png"),
-	"mi_controller": preload(ART + "ui/menuicons/controller.png"),
+	"mi_snd_on": preload(FA + "volume-high.svg"),
+	"mi_snd_off": preload(FA + "volume-xmark.svg"),
+	"mi_mus_on": preload(FA + "music.svg"),
+	"mi_mus_off": preload(FA + "volume-xmark.svg"),
+	"mi_trophy": preload(FA + "trophy.svg"),
+	"mi_book": preload(FA + "book-open.svg"),
+	"mi_play": preload(FA + "play.svg"),
+	"mi_controller": preload(FA + "gamepad.svg"),
 	#"mi_keyboard": preload(ART + "ui/menuicons/keyboard.png"),
 	# Modern Menus batch 2 (256px, white with alpha — modulate for color).
 	# NOTE: mi_controller.png also landed on disk but the "mi_controller" key
 	# above already serves controller.png — kept as-is, duplicate art unregistered.
-	"mi_arrow": preload(ART + "ui/menuicons/mi_arrow.png"),  # points RIGHT — flip/rotate at call site
-	"mi_medal_1": preload(ART + "ui/menuicons/mi_medal_1.png"),
-	"mi_medal_2": preload(ART + "ui/menuicons/mi_medal_2.png"),
-	"mi_medal_3": preload(ART + "ui/menuicons/mi_medal_3.png"),
-	"mi_medal_4": preload(ART + "ui/menuicons/mi_medal_4.png"),
-	"mi_medal_5": preload(ART + "ui/menuicons/mi_medal_5.png"),
-	"mi_settings": preload(ART + "ui/menuicons/mi_settings.png"),
-	"mi_reload": preload(ART + "ui/menuicons/mi_reload.png"),
-	"mi_home": preload(ART + "ui/menuicons/mi_home.png"),
-	"mi_camera": preload(ART + "ui/menuicons/mi_camera.png"),
-	"mi_back": preload(ART + "ui/menuicons/mi_back.png"),
-	"mi_combat": preload(ART + "ui/menuicons/mi_combat.png"),
-	"mi_timer": preload(ART + "ui/menuicons/mi_timer.png"),
-	"mi_cancel": preload(ART + "ui/menuicons/mi_cancel.png"),
+	"mi_medal_1": preload(FA + "medal.svg"),
+	"mi_medal_2": preload(FA + "medal.svg"),
+	"mi_medal_3": preload(FA + "medal.svg"),
+	"mi_medal_4": preload(FA + "medal.svg"),
+	"mi_medal_5": preload(FA + "medal.svg"),
+	"mi_settings": preload(FA + "gear.svg"),
+	"mi_reload": preload(FA + "rotate.svg"),
+	"mi_home": preload(FA + "house.svg"),
+	"mi_camera": preload(FA + "desktop.svg"),
+	"mi_back": preload(FA + "door-open.svg"),
+	"mi_combat": preload(FA + "person-rifle.svg"),
+	"mi_timer": preload(FA + "stopwatch.svg"),
+	"mi_cancel": preload(FA + "circle-xmark.svg"),
+	"fa_minus": preload(FA + "minus.svg"),
+	"fa_plus": preload(FA + "plus.svg"),
+	"fa_filter": preload(FA + "filter.svg"),
+	"fa_file": preload(FA + "file-lines.svg"),
+	"fa_captions": preload(FA + "closed-captioning.svg"),
+	"fa_text": preload(FA + "text-height.svg"),
+	"fa_film": preload(FA + "film.svg"),
 	# --- Apocalypse HUD chrome (tooltip plate, frames, wheel plate, cursor) ---
 	"ui_tooltip": preload(ART + "hud/SPR_HUD_Tooltip.png"),
 	"ui_frame_lrg": preload(ART + "hud/SPR_HUD_Frame_Lrg.png"),
@@ -1054,13 +1061,16 @@ static var _font: Font = null
 ## `colorblind` above is — every draw site reads it without threading a reference
 ## through — and main._set_text_scale is the ONE writer.
 static var text_scale := 1.0
+const MIN_TEXT_SIZE := 9
+const MIN_WINDOW_SCALE := 2
 
 
 ## The size a `size`-px label actually draws at. Whole pixels (the font is a bitmap face
 ## with no subpixel sizes) and never below the design size, so 100% is byte-identical to
 ## the pre-setting behavior.
 static func fs(size: int) -> int:
-	return maxi(size, int(round(float(size) * text_scale)))
+	var readable := maxi(MIN_TEXT_SIZE, size)
+	return maxi(readable, int(round(float(readable) * text_scale)))
 
 
 static func font() -> Font:
@@ -1100,6 +1110,7 @@ static func count_noun(n: int, singular: String, plural := "") -> String:
 
 
 static func tw(txt: String, size: int) -> float:
+	size = maxi(MIN_TEXT_SIZE, size)
 	var by_size: Dictionary = _tw_cache.get(size, {})
 	if by_size.is_empty():
 		_tw_cache[size] = by_size
@@ -1136,6 +1147,7 @@ static var text_capture = null
 ## drop-shadow pattern hand-inlined across the view, now in one place.
 ## max_w > 0 clips the string to that width instead of letting it bleed past the bound.
 static func text(ci: CanvasItem, txt: String, pos: Vector2, size: int, col: Color, max_w := 0.0, outline := 0) -> void:
+	size = maxi(MIN_TEXT_SIZE, size)
 	var f := font()
 	var w := max_w if max_w > 0.0 else -1.0
 	# Snap to whole pixels: centered strings land on fractional x (cx - w/2 with
@@ -1229,7 +1241,7 @@ static func glyph_cap_w(action: String, size: float, keycode := -1, pad_button :
 	if use_pad or force_pad:
 		return size
 	var _pb := pad_button   # keyboard path ignores it; kept so callers pass one arg set
-	return maxf(size, tw(_glyph_letter(action, keycode), maxi(8, int(size * 0.62))) + size * 0.35)
+	return maxf(size, tw(_glyph_letter(action, keycode), maxi(MIN_TEXT_SIZE, int(size * 0.62))) + size * 0.35)
 
 
 static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.0, mod := Color.WHITE, force_pad := false, keycode := -1, pad_button := -1) -> void:
@@ -1256,9 +1268,7 @@ static func draw_glyph(ci: CanvasItem, action: String, pos: Vector2, size := 12.
 		# literal 7-char "UNBOUND", which used to get stamped across a ~12px keycap.
 		var letter := _glyph_letter(action, keycode)
 		var f := font()
-		# Floor at the font's native 8px: PixelOperator8 with AA/hinting off drops
-		# whole strokes below native scale (a 6px 'E' loses horizontals).
-		var fs := maxi(8, int(size * 0.62))
+		var fs := maxi(MIN_TEXT_SIZE, int(size * 0.62))
 		var w := tw(letter, fs)
 		# The square cap only ever fit the single-letter ship defaults. Now that callers
 		# pass the LIVE bind, key_label can hand back "Space"/"Shift"/"Escape" — 3x wider

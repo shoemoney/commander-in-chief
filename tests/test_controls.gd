@@ -289,3 +289,162 @@ func test_pause_footer_names_the_permanent_verb_on_e() -> void:
 	Runner.T.ok("grenade" in acts, "the mid-run footer names GRENADE (the always-available E)")
 	Runner.T.ok(not ("revive" in acts),
 		"...not REVIVE, which only exists over a body and is taught there")
+
+
+func _roll_input(held: bool) -> SimInput:
+	var inp := SimInput.new()
+	inp.roll = held
+	return inp
+
+
+func _step_roll_input(sim: SimWorld, player_index: int, inp: SimInput) -> void:
+	var inputs: Array = []
+	for i in sim.players.size():
+		inputs.append(inp if i == player_index else SimInput.new())
+	sim.step(inputs)
+
+
+func _roll_events(sim: SimWorld, player_index: int) -> int:
+	var n := 0
+	for ev in sim.events:
+		if ev.get("t") == "roll" and ev.get("i") == player_index:
+			n += 1
+	return n
+
+
+func _board_roll_tank(sim: SimWorld, player_index: int, roll_held: bool) -> void:
+	var p: Dictionary = sim.players[player_index]
+	var tank_index := sim.tanks.size()
+	sim.tanks.append({"x": p["x"], "y": p["y"], "alive": true, "burning": false,
+		"fuel": SimWorld.TANK_FUEL_TICKS, "burn_ticks": 0, "crew_ring_ticks": -1,
+		"fire_cd": 0, "occupant": -1})
+	if player_index == 1:
+		sim.players[0]["x"] = p["x"]
+		sim.players[0]["y"] = p["y"]
+		var driver_board := SimInput.new()
+		driver_board.interact = true
+		sim.step([driver_board, _roll_input(roll_held)])
+	var board := _roll_input(roll_held)
+	board.interact = true
+	_step_roll_input(sim, player_index, board)
+	Runner.T.eq(p["in_tank"], tank_index, "the input boards the requested tank seat")
+	Runner.T.eq(sim.tanks[tank_index]["occupant"], 0, "P1 drives and P2 is the gunner when present")
+
+
+func _prime_held_roll(sim: SimWorld, player_index: int) -> void:
+	_step_roll_input(sim, player_index, _roll_input(true))
+	Runner.T.eq(_roll_events(sim, player_index), 1, "the first foot press starts a roll")
+	for i in SimWorld.ROLL_TICKS:
+		_step_roll_input(sim, player_index, _roll_input(true))
+	sim.players[player_index]["roll_cd"] = 0
+
+
+func _held_roll_across_tank_exit(player_index: int) -> void:
+	var sim := SimWorld.new(7, player_index + 1, "campaign")
+	var p: Dictionary = sim.players[player_index]
+	_board_roll_tank(sim, player_index, false)
+	_step_roll_input(sim, player_index, _roll_input(true))
+	Runner.T.eq(_roll_events(sim, player_index), 0, "a seated roll press does not dodge")
+	var exit := _roll_input(true)
+	exit.interact = true
+	_step_roll_input(sim, player_index, exit)
+	Runner.T.eq(p["in_tank"], -1, "interact exits the tank seat")
+	_step_roll_input(sim, player_index, _roll_input(true))
+	Runner.T.eq(_roll_events(sim, player_index), 0, "holding roll across exit creates no new press")
+	Runner.T.eq(p["roll_ticks"], 0, "the first foot tick does not start a held dodge")
+
+
+func _released_roll_across_tank_exit(player_index: int) -> void:
+	var sim := SimWorld.new(7, player_index + 1, "campaign")
+	var p: Dictionary = sim.players[player_index]
+	_prime_held_roll(sim, player_index)
+	_board_roll_tank(sim, player_index, true)
+	_step_roll_input(sim, player_index, _roll_input(false))
+	var exit := _roll_input(false)
+	exit.interact = true
+	_step_roll_input(sim, player_index, exit)
+	Runner.T.eq(p["in_tank"], -1, "interact exits after releasing roll in the seat")
+	_step_roll_input(sim, player_index, _roll_input(true))
+	Runner.T.eq(_roll_events(sim, player_index), 1, "a fresh foot press after a seated release starts a roll")
+	Runner.T.eq(p["roll_ticks"], SimWorld.ROLL_TICKS - 1, "the new press receives the full dodge")
+
+
+func test_roll_held_while_downed_does_not_trigger_after_revive() -> void:
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p: Dictionary = sim.players[0]
+	sim._kill_player(p)
+	sim.war_chest = sim.revive_cost(p)
+	sim.step([_roll_input(true)])
+	var revive := _roll_input(true)
+	revive.revive = true
+	sim.step([revive])
+	Runner.T.ok(p["alive"], "the held-roll player pays for a real self-revive")
+	sim.step([_roll_input(true)])
+	Runner.T.eq(_roll_events(sim, 0), 0, "holding roll across revival creates no new press")
+	Runner.T.eq(p["roll_ticks"], 0, "the first recovered foot tick does not dodge")
+
+
+func test_roll_released_while_downed_allows_a_new_press_after_revive() -> void:
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p: Dictionary = sim.players[0]
+	sim.step([_roll_input(true)])
+	Runner.T.eq(_roll_events(sim, 0), 1, "the first foot press starts a roll")
+	sim._kill_player(p)
+	p["roll_cd"] = 0
+	sim.war_chest = sim.revive_cost(p)
+	sim.step([_roll_input(false)])
+	var revive := _roll_input(false)
+	revive.revive = true
+	sim.step([revive])
+	Runner.T.ok(p["alive"], "the released-roll player pays for a real self-revive")
+	sim.step([_roll_input(true)])
+	Runner.T.eq(_roll_events(sim, 0), 1, "a fresh foot press after a downed release starts a roll")
+	Runner.T.eq(p["roll_ticks"], SimWorld.ROLL_TICKS - 1, "the new press receives the full dodge")
+
+
+func test_roll_held_while_driving_does_not_trigger_after_exit() -> void:
+	_held_roll_across_tank_exit(0)
+
+
+func test_roll_released_while_driving_allows_a_new_press_after_exit() -> void:
+	_released_roll_across_tank_exit(0)
+
+
+func test_roll_held_while_gunning_does_not_trigger_after_exit() -> void:
+	_held_roll_across_tank_exit(1)
+
+
+func test_roll_released_while_gunning_allows_a_new_press_after_exit() -> void:
+	_released_roll_across_tank_exit(1)
+
+
+func test_roll_denied_in_water_does_not_trigger_when_held_on_dry_land() -> void:
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p: Dictionary = sim.players[0]
+	sim.waters.append({"y": p["y"] - 40 * Fixed.ONE, "ford_x": 600 * Fixed.ONE})
+	sim.step([_roll_input(true)])
+	var denied := false
+	for ev in sim.events:
+		if ev.get("t") == "deny" and ev.get("why") == "water":
+			denied = true
+	Runner.T.ok(denied, "a fresh roll press in water emits the water refusal")
+	Runner.T.eq(p["roll_ticks"], 0, "water refuses the dodge")
+	sim.waters.clear()
+	sim.step([_roll_input(true)])
+	Runner.T.eq(_roll_events(sim, 0), 0, "holding the denied press onto dry land does not dodge")
+	sim.step([_roll_input(false)])
+	sim.step([_roll_input(true)])
+	Runner.T.eq(_roll_events(sim, 0), 1, "a fresh dry-land press starts a roll")
+
+
+func test_foot_roll_press_buffers_until_cooldown_ends_after_release() -> void:
+	var sim := SimWorld.new(7, 1, "campaign")
+	var p: Dictionary = sim.players[0]
+	p["roll_cd"] = 3
+	sim.step([_roll_input(true)])
+	Runner.T.eq(_roll_events(sim, 0), 0, "an early foot press waits for the cooldown")
+	sim.step([_roll_input(false)])
+	Runner.T.eq(_roll_events(sim, 0), 0, "the buffer still waits one tick after release")
+	sim.step([_roll_input(false)])
+	Runner.T.eq(_roll_events(sim, 0), 1, "the released foot press rolls when the cooldown ends")
+	Runner.T.eq(p["roll_ticks"], SimWorld.ROLL_TICKS - 1, "the buffered press receives the full dodge")

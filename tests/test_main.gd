@@ -8,6 +8,69 @@ const Runner := preload("res://tests/run_tests.gd")
 const Main := preload("res://src/main.gd")   # main.gd has no class_name — same local alias test_view_honesty.gd uses
 
 
+class DisplayPolicyMain extends Main:
+	var usable := Vector2i(1280, 720)
+	func _display_usable_size() -> Vector2i:
+		return usable
+
+
+class LateChromeDisplay extends DisplayPolicyMain:
+	var applied_modes: Array[bool] = []
+	func _measure_decorations(_accept_zero := false) -> void:
+		_deco_reserve = Vector2i(0, 41)
+	func _apply_display_mode() -> void:
+		applied_modes.append(_uses_fullscreen())
+		super._apply_display_mode()
+
+
+func test_late_chrome_measurement_applies_fullscreen_at_settle_limit() -> void:
+	var m := LateChromeDisplay.new()
+	m.usable = Vector2i(1280, 760)
+	m._deco_reserve = Vector2i(0, 40)
+	m._settle_tries = Main.SETTLE_MAX_TRIES
+	m._settle_active = true
+	var before := m._settings_snapshot()
+	m._settle_window()
+	Runner.T.eq(m.applied_modes, [true], "late chrome applies fullscreen even at the retry limit")
+	Runner.T.eq(m._settings_snapshot(), before, "late fitting retains the saved display preference")
+	m.free()
+
+
+func test_readable_window_falls_back_when_chrome_cannot_fit() -> void:
+	var chrome := Vector2i(0, 40)
+	for usable in [Vector2i(1280, 720), Vector2i(1280, 680), Vector2i(1200, 800)]:
+		Runner.T.ok(Main.display_requires_fullscreen(false, usable, chrome),
+			"the readable client and window chrome cannot fit %s" % usable)
+	for usable in [Vector2i(1280, 760), Vector2i(1920, 1080), Vector2i.ZERO]:
+		Runner.T.ok(not Main.display_requires_fullscreen(false, usable, chrome),
+			"a fitting window or unknown display preserves windowed mode")
+	Runner.T.ok(not Main.display_requires_fullscreen(false, Vector2i(1280, 720), Vector2i.ZERO),
+		"a borderless readable window fits exactly")
+	Runner.T.ok(Main.display_requires_fullscreen(true, Vector2i(3840, 2160), chrome),
+		"the explicit fullscreen preference remains effective on a large display")
+
+
+func test_display_fallback_preserves_saved_preferences_and_restores_windowed() -> void:
+	var m := DisplayPolicyMain.new()
+	m._fullscreen = false
+	m._win_scale = 5
+	var before := m._settings_snapshot()
+	m._apply_display_mode()
+	Runner.T.ok(m.display_forced_fullscreen() and m._uses_fullscreen(),
+		"a small work area selects the readable fullscreen fallback")
+	Runner.T.eq(m._settings_snapshot(), before, "the fallback is absent from persisted settings")
+	m.usable = Vector2i(3840, 2160)
+	m._apply_display_mode()
+	Runner.T.ok(not m.display_forced_fullscreen() and not m._uses_fullscreen(),
+		"a fitting display restores the stored windowed preference")
+	Runner.T.eq(m._settings_snapshot(), before, "restoration retains both preferences")
+	m._fullscreen = true
+	m._apply_display_mode()
+	Runner.T.ok(m._uses_fullscreen() and not m.display_forced_fullscreen(),
+		"explicit fullscreen is not labeled as an automatic fallback")
+	m.free()
+
+
 class CannonCueSfx extends Sfx:
 	var played: Array = []
 	func play(sound: String, vol_db := 0.0, pitch := 1.0) -> void:
@@ -432,6 +495,101 @@ func test_splash_skip_press_is_consumed_before_title_menu_activation() -> void:
 		"the splash press dismisses the splash inside Main._input")
 	Runner.T.ok(consume > dismiss and stop > consume and stop < next_handler,
 		"the exact skip press is marked handled and returns before any title/menu action can see it")
+
+
+func test_production_intro_cannot_advance_or_persist_a_run() -> void:
+	var probe := """extends SceneTree
+const Quiesce = preload("res://tools/quiesce.gd")
+var failures = 0
+func _initialize():
+	_run.call_deferred()
+func check(value, message):
+	if not value:
+		failures += 1
+		push_error("INTRO PROGRESS: " + message)
+func records(main):
+	return [main.best_score, main.best_wave, main.best_dist, main._best_dirty,
+		main._seen.duplicate(true), main._seen_dirty, main.hall.duplicate(true),
+		main._life_runs, main._life_kills, main._life_wins]
+func _run():
+	var scene = load("res://src/main.tscn")
+	var main = scene.instantiate()
+	root.add_child(main)
+	main.set_process(false)
+	main.set_physics_process(false)
+	check(main._splash_t > 0.0 and main._splash_layer.visible, "real boot splash active")
+	check(main._menu.mode == main._menu.Mode.HIDDEN, "boot uses hidden menu")
+	var before = records(main)
+	var tick = main.sim.tick_count
+	var checksum = main.sim.checksum()
+	var frames = main._recorder.frames.size()
+	for i in 480:
+		main._physics_process(1.0 / 60.0)
+	check(main.sim.tick_count == tick, "splash simulation stayed frozen")
+	check(main.sim.checksum() == checksum, "splash state stayed unchanged")
+	check(main._recorder.frames.size() == frames, "splash recorded no inputs")
+	check(records(main) == before, "splash changed no progress or hints")
+	var remaining = main._splash_t
+	main._process(0.25)
+	check(main._splash_t < remaining and main._splash_t > 0.0, "splash process timer stays live")
+	main._end_splash()
+	check(main._menu.mode == main._menu.Mode.TITLE, "skip reaches title")
+	for i in 120:
+		main._physics_process(1.0 / 60.0)
+	check(main.sim.tick_count > tick, "title attract simulation still advances")
+	check(main._recorder.frames.size() == frames, "title records no inputs")
+	check(records(main) == before, "title banks no demo progress")
+	main._flush_bests()
+	var config = ConfigFile.new()
+	if config.load(main.SAVE_PATH) == OK:
+		check(not config.has_section("best") and not config.has_section("hall")
+			and not config.has_section("seen"), "intro/title save has no invented progress")
+	main.start_game(false)
+	main._physics_process(1.0 / 60.0)
+	check(main.sim.tick_count == 1 and main._recorder.frames.size() == 1,
+		"explicit Campaign starts legal simulation and recording")
+	await Quiesce.teardown(self, main)
+	if failures == 0:
+		print("INTRO PROGRESS PASS")
+	quit(0 if failures == 0 else 1)
+"""
+	var probe_path := "user://intro_progress_probe.gd"
+	var file := FileAccess.open(probe_path, FileAccess.WRITE)
+	Runner.T.ok(file != null, "production intro probe can be retained in the private profile")
+	if file == null:
+		return
+	file.store_string(probe)
+	file.close()
+	var launch := """import os, pathlib, subprocess, sys, tempfile
+with tempfile.TemporaryDirectory(prefix="cic-intro-") as temporary:
+    profile = pathlib.Path(temporary).resolve()
+    environment = os.environ.copy()
+    for key in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"):
+        environment.pop(key, None)
+    environment.update(HOME=str(profile), USERPROFILE=str(profile), APPDATA=str(profile / "Roaming"), LOCALAPPDATA=str(profile / "Local"))
+    (profile / "Roaming").mkdir()
+    (profile / "Local").mkdir()
+    result = subprocess.run([sys.argv[1], "--headless", "--path", sys.argv[2], "--script", sys.argv[3]], env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30)
+    print(result.stdout)
+    diagnostics = ("ERROR:", "SCRIPT ERROR", "was leaked", "were leaked", "resources still in use at exit", "leaked ")
+    sys.exit(int(result.returncode != 0 or "INTRO PROGRESS PASS" not in result.stdout or any(word in result.stdout for word in diagnostics)))
+"""
+	var launch_path := "user://intro_progress_launch.py"
+	file = FileAccess.open(launch_path, FileAccess.WRITE)
+	Runner.T.ok(file != null, "production intro supervisor can be retained in the private profile")
+	if file == null:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(probe_path))
+		return
+	file.store_string(launch)
+	file.close()
+	var output: Array = []
+	var code := OS.execute("python3", [ProjectSettings.globalize_path(launch_path), OS.get_executable_path(),
+		ProjectSettings.globalize_path("res://"), ProjectSettings.globalize_path(probe_path)], output, true)
+	var log := "\n".join(output)
+	Runner.T.eq(code, 0, "isolated production intro contract passed without errors or leaks: " + log)
+	Runner.T.ok(log.contains("INTRO PROGRESS PASS"), "production intro probe reached its positive sentinel")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(probe_path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(launch_path))
 
 
 func test_corpses_drop_the_living_threat_silhouette() -> void:
@@ -4499,11 +4657,16 @@ func test_an_explosion_puts_light_in_the_room() -> void:
 		Runner.T.ok(not dblock.contains("Color(1, 1, 1, fla)"),
 			"the draw site no longer hardcodes white — this is the exact line the dead-field "
 			+ "mutation reverts")
-		# 5. Reduce-motion floor: a full-frame flash is the most photosensitive
-		#    thing in the game and the floor is what makes it safe.
-		Runner.T.ok(dblock.contains("maxf(_motion, 0.4)"),
-			"the flash keeps its reduce-motion floor — a full-frame radial is the one channel that "
-			+ "must never go to full brightness unchecked")
+		Runner.T.ok(dblock.contains("_flash_strength()"),
+			"the full-frame radial consumes the user's flash strength and reduced-motion policy")
+		var main := Main.new()
+		main._motion = 0.0
+		Runner.T.eq(main._flash_strength(), 0.4,
+			"reduced motion dims the default full-frame flash to forty percent")
+		main.set_accessibility_setting("flash_level", 0)
+		Runner.T.eq(main._flash_strength(), 0.0,
+			"the independent zero-flash setting removes even the reduced-motion wash")
+		main.free()
 	# 4. The tint walks back to white, so a warm blast cannot leave the NEXT
 	#    (white) flash orange.
 	Runner.T.ok(src.contains("_flash_col = _flash_col.lerp(Color(1, 1, 1), 0.4)"),

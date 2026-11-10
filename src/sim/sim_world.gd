@@ -1281,6 +1281,8 @@ func _step_players(inputs: Array) -> void:
 		p["buy_prev"] = buy_cmd
 		var grenade_edge: bool = inp.grenade and not p["grenade_prev"]
 		p["grenade_prev"] = inp.grenade
+		var roll_edge: bool = inp.roll and not p["roll_prev"]
+		p["roll_prev"] = inp.roll
 
 		if not p["alive"]:
 			_step_dead_player(i, p, inp)
@@ -1329,8 +1331,6 @@ func _step_players(inputs: Array) -> void:
 		# perpetual i-frame chain (18 i-frames per 120 ticks) off one held button,
 		# which also made the buffer meaningless (it only ever mattered for held
 		# input). Tapping still buffers exactly as before.
-		var roll_edge: bool = inp.roll and not p["roll_prev"]
-		p["roll_prev"] = inp.roll
 		if roll_edge:
 			if wading:
 				# Rolling is forbidden in water, and this was the last silent refusal:

@@ -54,8 +54,6 @@ SIZES = {
     "ui/menuicons/book": (512, 512),
     "ui/menuicons/controller": (512, 512),
     "ui/menuicons/keyboard": (512, 512),
-    "ui/menuicons/mi_arrow": (256, 256),
-    "ui/menuicons/mi_back": (256, 256),
     "ui/menuicons/mi_camera": (256, 256),
     "ui/menuicons/mi_cancel": (256, 256),
     "ui/menuicons/mi_combat": (256, 256),
@@ -227,20 +225,6 @@ def i_keyboard(p):
             x += wkey + 0.014
     p.keyline()
 
-
-def i_mi_arrow(p):
-    for off, c in ((0.16, (170, 175, 168)), (0.0, (232, 236, 228))):
-        p.poly([(0.14 + off, 0.14), (0.52 + off, 0.50), (0.14 + off, 0.86),
-                (0.30 + off, 0.86), (0.68 + off, 0.50), (0.30 + off, 0.14)], c)
-    p.keyline()
-
-
-def i_mi_back(p):
-    p.poly([(0.86, 0.14), (0.48, 0.50), (0.86, 0.86), (0.70, 0.86),
-            (0.32, 0.50), (0.70, 0.14)], (206, 186, 96))
-    p.poly([(0.60, 0.14), (0.22, 0.50), (0.60, 0.86), (0.44, 0.86),
-            (0.06, 0.50), (0.44, 0.14)], (162, 142, 66))
-    p.keyline()
 
 
 def i_mi_camera(p):
@@ -557,7 +541,7 @@ def i_icon_rend(p):
 
 MENU = {
     "book": i_book, "controller": i_controller, "keyboard": i_keyboard,
-    "mi_arrow": i_mi_arrow, "mi_back": i_mi_back, "mi_camera": i_mi_camera,
+    "mi_camera": i_mi_camera,
     "mi_cancel": i_mi_cancel, "mi_combat": i_mi_combat, "mi_home": i_mi_home,
     "mi_reload": i_mi_reload, "mi_settings": i_mi_settings, "mi_timer": i_mi_timer,
     "mus_off": i_mus_off, "mus_on": i_mus_on, "play": i_play,

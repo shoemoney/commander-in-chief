@@ -257,11 +257,17 @@ func test_attract_mode_captions_cannot_leak_into_a_real_run() -> void:
 	sfx._cap_text = "STALE WARNING"
 	sfx._cap_until = 999999
 	sfx._cap_queue.append({"text": "ALSO STALE", "is_vo": false})
-	sfx.clear_captions()
-	Runner.T.eq(sfx._cap_text, "", "clear_captions drops the live caption")
+	sfx._vo_pending = {"key": "stale"}
+	sfx._sfx_cap_next["armor_block"] = 999999
+	sfx.reset_run_speech()
+	Runner.T.eq(sfx._cap_text, "", "run reset drops the live combat caption")
 	Runner.T.eq(sfx._cap_queue.size(), 0, "...and the whole pending queue")
+	Runner.T.ok(sfx._vo_pending.is_empty(), "run reset drops deferred old speech")
+	Runner.T.ok(sfx._sfx_cap_next.is_empty(), "run reset releases old caption cooldowns")
 	sfx.free()
-	Runner.T.ok(src.contains("_sfx.clear_captions()"), "main._reset() actually calls it")
+	var reset_body := src.substr(src.find("func _reset("))
+	reset_body = reset_body.substr(0, reset_body.find("\nfunc "))
+	Runner.T.ok(reset_body.contains("_sfx.reset_run_speech()"), "main._reset() owns the speech lifecycle reset")
 
 
 func test_a_radio_line_never_starts_on_top_of_a_commander_bark() -> void:

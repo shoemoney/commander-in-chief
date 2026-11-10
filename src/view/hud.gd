@@ -41,14 +41,14 @@ const ICON := 13.0
 # that already existed (a hard black rim for the mid-fight alert band); it is deliberately
 # NOT used for hierarchy, because a black rim is a legibility crutch, not a weight.
 # ===========================================================================================
-const TYPE_MICRO := 8     # 1.000x em — the em floor. Verb-legend labels, keycap captions.
+const TYPE_MICRO := 9
 const TYPE_BODY := 10     # readout tier, the ONLY in-fight size (1.25x em — see the exception above)
 const TYPE_LABEL := 16    # 2.000x em — a labelled plate/heading that has vertical room
 const TYPE_HEAD := 24     # 3.000x em — a section header
 const TYPE_TITLE := 32    # 4.000x em — the title wordmark
 ## The em grid, as a SET, so a test can assert every DISPLAY-tier constant is on it and that
 ## no new off-grid literal creeps back in. Pure data; nothing draws from it.
-const TYPE_EM_GRID := [8, 16, 24, 32]
+const TYPE_EM_GRID := [16, 24, 32]
 
 const FONT_SIZE := TYPE_BODY   # historical name for the readout size — value UNCHANGED (10).
                         # Read by test_hud/test_assets/test_localization; kept as an alias so
@@ -2762,7 +2762,8 @@ func verb_chip_rect() -> Rect2:
 		return Rect2()   # every verb has been used — the reminder taught what it had to teach
 	var ext := verb_legend_extent(segs)
 	var y := VERB_LEGEND_Y - bottom_band_lift(main.get("sim"))
-	return Rect2(float(ext[0]) - 8.0, y - 8.0, float(ext[1]) + 16.0, 16.0)
+	var h := maxf(16.0, ceilf(Art.font().get_height(Art.fs(TYPE_MICRO))) + 6.0)
+	return Rect2(float(ext[0]) - 8.0, y + 8.0 - h, float(ext[1]) + 16.0, h)
 
 
 func _verb_legend() -> void:
@@ -2771,7 +2772,7 @@ func _verb_legend() -> void:
 		return
 	var segs := verb_active_segs(_verb_used, main.get("sim"))
 	var a := _verb_alpha(_verb_show, main._motion)   # same source the _process dirty check reads
-	var y: float = plate.position.y + 8.0            # the chip rect IS the geometry source
+	var y: float = plate.get_center().y
 	# Fades with the glyphs.
 	_emit_rect(plate, Color(0.03, 0.05, 0.03, 0.75 * a))
 	# Emit straight off the primitive list (through the seams below), so pixels land
@@ -2795,7 +2796,7 @@ func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
 	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act),
 		main.pad_bind_for_glyph(act))
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
-	Art.text(self, txt, pos, TYPE_MICRO, c)
+	Art.text(self, txt, pos, Art.fs(TYPE_MICRO), c)
 
 
 ## c1-04: pure geometry of the transient verb chip — [left_x, content_width]. Same
@@ -2808,7 +2809,7 @@ static func verb_legend_extent(segs: Array = VERB_SEGS) -> Array:
 		# localization-text-pipeline: translate() BEFORE measuring, same reasoning as
 		# hud.gd's K.I.A./BAIL OUT fix -- verb_legend_primitives below measures/draws
 		# the SAME translated string, so the two never disagree on width.
-		total += VERB_GH + 3.0 + f.get_string_size(TranslationServer.translate(s[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, TYPE_MICRO).x + 12.0
+		total += VERB_GH + 3.0 + f.get_string_size(TranslationServer.translate(s[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, Art.fs(TYPE_MICRO)).x + 12.0
 	return [320.0 - total / 2.0, total]
 
 
@@ -2830,9 +2831,9 @@ static func verb_legend_primitives(y: float, segs: Array = VERB_SEGS) -> Array:
 		var label_txt := TranslationServer.translate(s[1])
 		# Real font metrics (measured width + ascent/height), not a hard-coded box —
 		# Art.text places the baseline at y+3, so the ink spans up by the ascent.
-		var lsz := f.get_string_size(label_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, TYPE_MICRO)
+		var lsz := f.get_string_size(label_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, Art.fs(TYPE_MICRO))
 		out.append({"act": s[0], "label_txt": label_txt, "glyph": grect,
-			"label": Rect2(x, y + 3.0 - f.get_ascent(TYPE_MICRO), lsz.x, lsz.y)})
+			"label": Rect2(x, y + 3.0 - f.get_ascent(Art.fs(TYPE_MICRO)), lsz.x, lsz.y)})
 		x += lsz.x + 12.0
 	return out
 

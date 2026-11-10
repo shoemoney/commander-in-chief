@@ -11,6 +11,11 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_archetypes.gd",
 	"res://tests/test_combat.gd",
 	"res://tests/test_controls.gd",
+	"res://tests/test_accessibility_input.gd",
+	"res://tests/test_accessibility_policy.gd",
+	"res://tests/test_accessibility_menu.gd",
+	"res://tests/test_accessibility_main.gd",
+	"res://tests/test_accessibility_replay.gd",
 	"res://tests/test_hitbox_fairness.gd",
 	"res://tests/test_ground_anchors.gd",
 	"res://tests/test_war_chest.gd",
@@ -187,7 +192,9 @@ func _init() -> void:
 		quit(1)
 
 
-## Fail the run for every un-allowlisted engine `ERROR:` line this process logged. Fails CLOSED:
+## Fail the run for every engine script error and un-allowlisted `ERROR:` line.
+## Script errors abort a method without becoming assertions, so skipping them can
+## produce a misleading PASS after half a test. Fails CLOSED:
 ## if the log can't be found the gate itself is the failure, so it can never silently stop running.
 func _gate_engine_errors(marker: String) -> void:
 	var dir := DirAccess.open(LOG_DIR)
@@ -199,6 +206,9 @@ func _gate_engine_errors(marker: String) -> void:
 		if not text.contains(marker):
 			continue   # another process's log (rotation renames ours out from under the path)
 		for line in text.split("\n"):
+			if line.begins_with("SCRIPT ERROR:"):
+				T.ok(false, "script error aborted test execution: " + line)
+				continue
 			if not line.begins_with("ERROR:"):
 				continue
 			if line.begins_with("ERROR: FAIL: "):

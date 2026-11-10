@@ -146,14 +146,20 @@ func test_verb_legend_words_translate_consistently_between_measure_and_draw() ->
 	var tr := load("res://locale/strings.ja.po")
 	TranslationServer.add_translation(tr)
 	TranslationServer.set_locale("ja")
-	var prims := Hud.verb_legend_primitives(100.0)
-	Runner.T.eq(prims.size(), Hud.VERB_SEGS.size(), "verb_legend_primitives emits one entry per VERB_SEGS word")
-	for i in prims.size():
-		var en: String = Hud.VERB_SEGS[i][1]
-		Runner.T.ok(prims[i]["label_txt"] != en, "ja: verb-legend word '%s' is translated" % en)
-		var measured: float = Art.font().get_string_size(prims[i]["label_txt"], HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-		Runner.T.ok(absf(prims[i]["label"].size.x - measured) < 0.5,
-			"ja: the drawn label rect width matches a fresh measure of the SAME translated text")
+	var saved_scale := Art.text_scale
+	# Independent expected sizes pin the readable 9px logical floor and its 200%
+	# enlargement. The retired 8px measurement described a different drawn font.
+	for font_case in [{"scale": 1.0, "size": 9}, {"scale": 2.0, "size": 18}]:
+		Art.text_scale = font_case["scale"]
+		var prims := Hud.verb_legend_primitives(100.0)
+		Runner.T.eq(prims.size(), Hud.VERB_SEGS.size(), "verb_legend_primitives emits one entry per VERB_SEGS word")
+		for i in prims.size():
+			var en: String = Hud.VERB_SEGS[i][1]
+			Runner.T.ok(prims[i]["label_txt"] != en, "ja: verb-legend word '%s' is translated" % en)
+			var measured: float = Art.font().get_string_size(prims[i]["label_txt"], HORIZONTAL_ALIGNMENT_LEFT, -1, font_case["size"]).x
+			Runner.T.ok(absf(prims[i]["label"].size.x - measured) < 0.5,
+				"ja: the drawn label rect width matches a fresh measure of the SAME translated text at %d%%" % int(font_case["scale"] * 100))
+	Art.text_scale = saved_scale
 	self._reset_locale([tr])
 
 
@@ -176,9 +182,13 @@ func test_nav_legend_select_and_back_translate_through_shared_choke_point() -> v
 	# this proves legend_extent reads the SAME translated string _legend_label just returned
 	# (not a stale English one that would silently overrun the layout the extent guarantees).
 	var f := Art.font()
-	var expect_w: float = f.get_string_size(select_fr, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x
-	var got_w: float = GameMenu.legend_extent([select_seg])[1]
-	Runner.T.ok(absf(got_w - expect_w) < 0.5, "fr: legend_extent measures the translated SELECT label, not the English source")
+	var saved_scale := Art.text_scale
+	for font_case in [{"scale": 1.0, "size": 9}, {"scale": 2.0, "size": 18}]:
+		Art.text_scale = font_case["scale"]
+		var expect_w: float = f.get_string_size(select_fr, HORIZONTAL_ALIGNMENT_LEFT, -1, font_case["size"]).x
+		var got_w: float = GameMenu.legend_extent([select_seg])[1]
+		Runner.T.ok(absf(got_w - expect_w) < 0.5, "fr: legend_extent measures the translated SELECT label at %d%%, not the English source" % int(font_case["scale"] * 100))
+	Art.text_scale = saved_scale
 	self._reset_locale([tr])
 
 

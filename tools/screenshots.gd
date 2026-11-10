@@ -124,6 +124,7 @@ func _run() -> void:
 		digests[digest] = path
 		print("SAVED %s (colors=%d stddev=%.2f)" % [path, st["colors"], st["stddev"]])
 	await preload("res://tools/quiesce.gd").teardown(self, main)
+	main = null
 	if failures > 0:
 		push_error("screenshots: %d of %d shots are unusable — refusing to report success" % [failures, shots.size()])
 		print("SHOTS UNUSABLE — %d of %d failed; do not hand these to a reviewer" % [failures, shots.size()])

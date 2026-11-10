@@ -11,6 +11,8 @@ extends Node2D
 ##        Y revive, BACK (hold) spend-wheel
 ##   F2 toggles local 2P · F3 toggles Endless War · F4 toggles Boss Rush · R restarts.
 
+const AccessibleInput := preload("res://src/view/accessibility_input.gd")
+const AccessiblePolicy := preload("res://src/view/accessibility_policy.gd")
 const PX := 1.0 / Fixed.ONE
 const SCREEN_W := 640.0
 const SCREEN_H := 360.0
@@ -85,6 +87,12 @@ var _recorder: Replay             # captures this run's inputs → user://last_r
 var _watching := false            # Watch Last Run playback mode
 var _watch_replay: Replay = null
 var _watch_frame := 0
+var _accessibility_settings: Dictionary = {}
+var _accessible_input := AccessibleInput.new()
+var _accessible_policy := AccessiblePolicy.new()
+var _mouse_aim_override_until := 0
+var _wheel_cancelled: Array[bool] = [false, false]
+var _recorded_accessibility: Dictionary = {}
 var _replay_saved := false        # save the replay once per run, at the debrief
 var _replay_task := -1            # WorkerThreadPool id of the async replay write
 var _two_players := false
@@ -186,7 +194,7 @@ var _rumble_sharp: Array[bool] = [false, false]   # true = punchy crack (gunfire
 var _rumble_on := true            # accessibility: gamepad vibration on/off
 var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad option — swap the MOVE (left) and AIM (right) analog sticks. [0]=P1, [1]=P2, independent like the per-player pad button layouts, so a left-handed P2 swaps without touching P1. The sticks aren't per-button rebindable, so this is the accessible way to reassign them for left-handed / adaptive-controller players. Applied view-side in _gather_inputs.
 var _fullscreen := false          # F11 / Alt+Enter window mode, persisted in [settings]
-var _win_scale := 2               # c1-19: the player's PREFERRED windowed integer scale (Nx of the 640x360 canvas), persisted in [settings]. This is the PREFERENCE, sane-capped to [1, WIN_SCALE_MAX] but NEVER clamped down to a monitor — so moving to a smaller display and back restores it. The window is sized to _effective_scale() (this preference clamped to what the CURRENT display fits); only an explicit user pick or RESET changes this value.
+var _win_scale := 2
 const WIN_SCALE_MAX := 8          # c1-19: sanity ceiling on the STORED preference (8x = 5120x2880, past any real monitor) so a garbage save can't persist an absurd scale; the live per-monitor fit clamps below this for actual sizing.
 var _deco_reserve := Vector2i(0, 40)   # c1-19: window chrome (title bar + borders) kept OFF-canvas when computing the largest scale that fits. The AUTHORITATIVE value is the live windowed decoration delta (window_get_size_with_decorations - window_get_size), written ONLY from _settle_window (deferred, a frame after a mode change) so the transient zero the OS reports right after leaving fullscreen can't clobber it; a settled borderless window's stable zero is valid. The initial 40 is a conservative fallback until the first windowed measurement (e.g. booting straight into fullscreen) — it only shrinks the temporary EFFECTIVE fit, never the stored preference, and is re-evaluated once measured.
 var _last_screen := -1                 # c1-19: monitor index the window is on, polled so a drag to another display (which fires no resize signal) still re-fits/recenters the window to what the new screen holds.
@@ -665,18 +673,7 @@ func _ready() -> void:
 	# _bg_root (the ground layer) had been given the NEAREST override below — this
 	# is the same fix applied to the actual root the sprites draw through.
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	# 1x design-size floor. display/window/size/window_min_width|height are NOT
-	# real Godot settings (silent no-op) — Window.min_size is the actual API, so
-	# the integer-scaled 640x360 canvas can't be shrunk into a cropped degenerate.
-	get_window().min_size = Vector2i(640, 360)
-	# c1-19: the window IS freely resizable (standard desktop behavior on Windows/macOS/X11/Wayland,
-	# where forcing a fixed window is hostile — users expect to grab an edge). The 640x360 canvas is
-	# drawn with viewport + integer stretch (see project.godot / test_display_integer_stretch_configured),
-	# so ANY window size renders at the largest whole-pixel scale that fits and letterboxes the rest —
-	# a free drag can never produce blurry fractional pixels. _on_window_resized then SNAPS the shown
-	# WINDOW SCALE label to that fitted integer, so the OPTIONS control and the real window stay in
-	# sync. min_size keeps the floor at a clean 1x. The OPTIONS WINDOW SCALE row remains the way to
-	# jump to an exact centered multiple; dragging is just the other, equally valid, path.
+	get_window().min_size = Vector2i(640, 360) * Art.MIN_WINDOW_SCALE
 	if not OS.has_feature("movie"):
 		_sfx.lock_startup_audio()
 	add_child(_sfx)
@@ -2020,9 +2017,11 @@ func start_watch() -> void:
 
 
 func _reset() -> void:
+	reset_accessibility_input()
+	_recorded_accessibility.clear()
 	Art.foliage_march = 0.0   # a1-05 r2: neutral until a gameplay frame feeds the march (no stale leak)
 	_sfx.stop_engines()   # tank-index-keyed loops: the next SimWorld re-binds that index (see Sfx.stop_engines)
-	_sfx.clear_captions()   # a new run never inherits the last one's pending subtitle backlog
+	_sfx.reset_run_speech()
 	# Re-arm the water pool's shader push key IN PLACE (it is indexed by pool slot, which outlives
 	# the run — clearing it would index past the end of the pool on the next _sync_water).
 	for wi in _water_pushed.size():
@@ -2096,6 +2095,7 @@ func _reset() -> void:
 	_recorder.start_vest = not sim.players.is_empty() and bool(sim.players[0]["vest"])
 	_recorder.start_chest = sim.war_chest
 	_recorder.start_tokens = sim.tokens
+	_record_accessibility_change()
 	_replay_saved = false
 	# A restart mid-replay must not keep feeding recorded frames into the new sim.
 	_watching = false
@@ -2324,6 +2324,8 @@ static func crosshair_hotspot(cursor_s: int) -> Vector2:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion and event.relative.length_squared() > 0.0 and not _menu.is_active():
+		_mouse_aim_override_until = Time.get_ticks_msec() + 1000
 	# Boot splash: any key / button / click skips straight to the title screen.
 	if _splash_t > 0.0 and _splash_is_skip(event):
 		_end_splash()
@@ -2624,7 +2626,7 @@ func _on_window_resized() -> void:
 	#    OUR OWN resizes (_apply_windowed_scale) produce, so skip: a monitor-clamped effective size
 	#    must NOT collapse a larger stored preference. Only a genuine user drag to a DIFFERENT integer
 	#    scale rewrites the stored preference (an explicit resize IS a new choice).
-	if _fullscreen:
+	if _uses_fullscreen():
 		return
 	if _prog_resize:
 		return   # OUR OWN mode/scale transition is in flight — ignore its intermediate resize events (explicit guard, not a size heuristic), so a fitting transient client size can't overwrite the saved scale
@@ -2649,7 +2651,7 @@ func _on_window_resized() -> void:
 static func snap_scale(client: Vector2i, usable: Vector2i, ceiling: int) -> int:
 	if usable.x > 0 and usable.y > 0 and (client.x > usable.x or client.y > usable.y):
 		return 0
-	return clampi(mini(client.x / 640, client.y / 360), 1, ceiling)
+	return clampi(mini(client.x / 640, client.y / 360), Art.MIN_WINDOW_SCALE, maxi(Art.MIN_WINDOW_SCALE, ceiling))
 
 
 # c1-19: a window dragged onto a DIFFERENT monitor fires no resize signal (its pixel size is
@@ -2669,6 +2671,13 @@ func _watch_display() -> void:
 		return
 	if usable.size.x <= 0 or usable.size.y <= 0:
 		return                           # no display metrics (headless) — nothing to fit
+	var desired_mode := DisplayServer.WINDOW_MODE_FULLSCREEN if _uses_fullscreen() else DisplayServer.WINDOW_MODE_WINDOWED
+	if DisplayServer.window_get_mode() != desired_mode:
+		_apply_display_mode()
+		call_deferred("_bake_cursor")
+		return
+	if _uses_fullscreen():
+		return
 	# c1-19: re-fit when the actual client size no longer matches the EFFECTIVE target for the new
 	# work area — this catches BOTH a shrink (moved to a smaller monitor: the ceiling drops, target
 	# shrinks) AND a regrow (moved back to a bigger monitor: the ceiling rises, target grows again),
@@ -2693,6 +2702,8 @@ static func needs_refit(actual: Vector2i, scale: int) -> bool:
 
 
 func _physics_process(_delta: float) -> void:
+	if _splash_t > 0.0:
+		return
 	# THE god-mode gate, and the only place `sim.god_mode` is ever written. Re-asserted every
 	# tick rather than at the toggle, so it survives `_reset()` rebuilding the sim and a harness
 	# setting `god_mode` at any point in the frame — and so a release build can NEVER run with it
@@ -2778,6 +2789,11 @@ func _physics_process(_delta: float) -> void:
 			_menu.open(GameMenu.Mode.TITLE)
 			queue_redraw()
 			return
+		if not _accessible_policy.should_step(_watch_replay.slow_at(_watch_frame)):
+			_update_feel()
+			_update_hud()
+			queue_redraw()
+			return
 		var rin: Array[SimInput] = []
 		for enc in _watch_replay.frames[_watch_frame]:
 			rin.append(SimInput.decode(enc))
@@ -2794,25 +2810,30 @@ func _physics_process(_delta: float) -> void:
 		queue_redraw()
 		_update_hud()
 		return
+	var buffered_controls := not _debrief and _uses_buffered_accessibility()
+	if buffered_controls:
+		_record_accessibility_change()
+		_accessible_policy.buffer_inputs(_gather_inputs())
 	if _hitstop_frames > 0:
 		_hitstop_frames -= 1
-		# #13: _gather_inputs()/sim.step() are both skipped while frozen, so a grenade/roll
-		# TAP that starts and ends entirely inside the freeze would otherwise never reach the
-		# sim's own input buffers. Sample the same raw reads _gather_inputs uses for those two
-		# verbs and OR them into a latch that the next _gather_inputs() call re-injects.
-		_hs_latch[0]["grenade"] = _hs_latch[0]["grenade"] \
-			or Input.is_physical_key_pressed(bind("grenade")) \
-			or Input.is_physical_key_pressed(bind("grenade_alt")) \
-			or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
-			or pad_pressed(0, "grenade") or _steam.button_pressed(0, "grenade")
-		_hs_latch[0]["roll"] = _hs_latch[0]["roll"] \
-			or Input.is_physical_key_pressed(bind("roll")) \
-			or pad_pressed(0, "roll") or _steam.button_pressed(0, "roll")
-		if _two_players:
-			_hs_latch[1]["grenade"] = _hs_latch[1]["grenade"] \
-				or pad_pressed(1, "grenade") or _steam.button_pressed(1, "grenade")
-			_hs_latch[1]["roll"] = _hs_latch[1]["roll"] \
-				or pad_pressed(1, "roll") or _steam.button_pressed(1, "roll")
+		if not buffered_controls:
+			# #13: _gather_inputs()/sim.step() are both skipped while frozen, so a grenade/roll
+			# TAP that starts and ends entirely inside the freeze would otherwise never reach the
+			# sim's own input buffers. Sample the same raw reads _gather_inputs uses for those two
+			# verbs and OR them into a latch that the next _gather_inputs() call re-injects.
+			_hs_latch[0]["grenade"] = _hs_latch[0]["grenade"] \
+				or Input.is_physical_key_pressed(bind("grenade")) \
+				or Input.is_physical_key_pressed(bind("grenade_alt")) \
+				or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+				or pad_pressed(0, "grenade") or _steam.button_pressed(0, "grenade")
+			_hs_latch[0]["roll"] = _hs_latch[0]["roll"] \
+				or Input.is_physical_key_pressed(bind("roll")) \
+				or pad_pressed(0, "roll") or _steam.button_pressed(0, "roll")
+			if _two_players:
+				_hs_latch[1]["grenade"] = _hs_latch[1]["grenade"] \
+					or pad_pressed(1, "grenade") or _steam.button_pressed(1, "grenade")
+				_hs_latch[1]["roll"] = _hs_latch[1]["roll"] \
+					or pad_pressed(1, "roll") or _steam.button_pressed(1, "roll")
 	elif not _debrief:
 		# THE RUN-ENDER FREEZE. SimWorld.step() has exactly one of these — `if wiped: return` —
 		# and `victory` never got a counterpart, so killing the Colossus stopped nothing: the
@@ -2828,7 +2849,13 @@ func _physics_process(_delta: float) -> void:
 		# _cinematic, driven by _update_feel below), so it plays on over a still world — exactly
 		# what a wipe already looks like. The sim-side `if wiped or victory: return` is still the
 		# better home for half of this; it is not this slice's file.
-		var inputs := _gather_inputs()
+		if not _accessible_policy.should_step(bool(accessibility_setting("slow_mode"))):
+			_update_feel()
+			_update_hud()
+			queue_redraw()
+			return
+		_record_accessibility_change()
+		var inputs: Array[SimInput] = _accessible_policy.take_inputs() if buffered_controls else _gather_inputs()
 		_last_inputs = inputs
 		_check_dry_throw(inputs)
 		_check_dry_roll(inputs)
@@ -5217,6 +5244,19 @@ func _load_bests() -> void:
 			"captions": cf.get_value("settings", "captions", SETTINGS_DEFAULTS["captions"]),
 			# accessibility: a save predating TEXT SIZE lands at 100% (the shipped sizes).
 			"text_scale": cf.get_value("settings", "text_scale", SETTINGS_DEFAULTS["text_scale"]),
+			"single_stick_p1": cf.get_value("settings", "single_stick_p1", SETTINGS_DEFAULTS["single_stick_p1"]),
+			"single_stick_p2": cf.get_value("settings", "single_stick_p2", SETTINGS_DEFAULTS["single_stick_p2"]),
+			"classic_aim_p1": cf.get_value("settings", "classic_aim_p1", SETTINGS_DEFAULTS["classic_aim_p1"]),
+			"classic_aim_p2": cf.get_value("settings", "classic_aim_p2", SETTINGS_DEFAULTS["classic_aim_p2"]),
+			"aim_assist": cf.get_value("settings", "aim_assist", SETTINGS_DEFAULTS["aim_assist"]),
+			"toggle_grenade": cf.get_value("settings", "toggle_grenade", SETTINGS_DEFAULTS["toggle_grenade"]),
+			"toggle_roll": cf.get_value("settings", "toggle_roll", SETTINGS_DEFAULTS["toggle_roll"]),
+			"toggle_interact": cf.get_value("settings", "toggle_interact", SETTINGS_DEFAULTS["toggle_interact"]),
+			"toggle_revive": cf.get_value("settings", "toggle_revive", SETTINGS_DEFAULTS["toggle_revive"]),
+			"toggle_buy": cf.get_value("settings", "toggle_buy", SETTINGS_DEFAULTS["toggle_buy"]),
+			"slow_mode": cf.get_value("settings", "slow_mode", SETTINGS_DEFAULTS["slow_mode"]),
+			"shake_level": cf.get_value("settings", "shake_level", SETTINGS_DEFAULTS["shake_level"]),
+			"flash_level": cf.get_value("settings", "flash_level", SETTINGS_DEFAULTS["flash_level"]),
 		})
 	else:
 		# c1-09: fresh install (no save yet) — apply the SAME authoritative defaults
@@ -5229,7 +5269,36 @@ func _load_bests() -> void:
 # table so _load_settings' fallbacks and _reset_settings' revert can't drift, and
 # a newly-added setting is reset the moment it's given a default here. reduce_motion
 # is the persisted bool; the live field is _motion (1.0 normal / 0.0 reduced).
+const ACCESSIBILITY_KEYS: Array[String] = [
+	"single_stick_p1",
+	"single_stick_p2",
+	"classic_aim_p1",
+	"classic_aim_p2",
+	"aim_assist",
+	"toggle_grenade",
+	"toggle_roll",
+	"toggle_interact",
+	"toggle_revive",
+	"toggle_buy",
+	"slow_mode",
+	"shake_level",
+	"flash_level",
+]
+
 const SETTINGS_DEFAULTS := {
+	"single_stick_p1": false,
+	"single_stick_p2": false,
+	"classic_aim_p1": false,
+	"classic_aim_p2": false,
+	"aim_assist": 0,
+	"toggle_grenade": false,
+	"toggle_roll": false,
+	"toggle_interact": false,
+	"toggle_revive": false,
+	"toggle_buy": false,
+	"slow_mode": false,
+	"shake_level": 10,
+	"flash_level": 10,
 	"colorblind": false,
 	"assist": false,
 	"reduce_motion": false,
@@ -5472,7 +5541,7 @@ func reset_binds() -> void:
 # (which persists it) and the OPTIONS dirty-state (which snapshots it as the revert baseline before
 # staging a change). Shape matches _apply_settings' expected keys so a snapshot round-trips cleanly.
 func _settings_snapshot() -> Dictionary:
-	return {
+	var snapshot := {
 		"colorblind": colorblind,
 		"assist": _assist,
 		"reduce_motion": _motion < 0.5,
@@ -5486,6 +5555,8 @@ func _settings_snapshot() -> Dictionary:
 		"captions": _captions,
 		"text_scale": _text_scale,
 	}
+	snapshot.merge(_accessibility_snapshot())
+	return snapshot
 
 
 # c4-11: true when every persisted setting already equals its ship default, so the OPTIONS
@@ -5498,6 +5569,110 @@ func _settings_at_defaults() -> bool:
 		if snap[k] != SETTINGS_DEFAULTS[k]:
 			return false
 	return true
+
+
+func accessibility_setting(key: String) -> Variant:
+	return _accessibility_settings.get(key, SETTINGS_DEFAULTS.get(key, false))
+
+
+func _normalized_accessibility_setting(key: String, value: Variant) -> Variant:
+	if key in ["aim_assist", "shake_level", "flash_level"]:
+		if typeof(value) not in [TYPE_INT, TYPE_FLOAT] or not is_finite(float(value)):
+			return SETTINGS_DEFAULTS[key]
+		return clampi(int(value), 0, 2 if key == "aim_assist" else 10)
+	return value if typeof(value) == TYPE_BOOL else SETTINGS_DEFAULTS[key]
+
+
+func _accessibility_snapshot() -> Dictionary:
+	var result := {}
+	for key in ACCESSIBILITY_KEYS:
+		result[key] = accessibility_setting(key)
+	return result
+
+
+func set_accessibility_setting(key: String, value: Variant) -> void:
+	if key not in ACCESSIBILITY_KEYS:
+		return
+	_accessibility_settings[key] = _normalized_accessibility_setting(key, value)
+	_refresh_accessibility_input()
+
+
+func _raw_accessibility_actions(seat: int) -> Dictionary:
+	if seat == 0:
+		var e := shared_e(Input.is_physical_key_pressed(bind("grenade")),
+			Input.is_physical_key_pressed(bind("grenade_alt")), Input.is_physical_key_pressed(bind("revive")),
+			bind("grenade") == bind("revive"), revive_context(sim, 0) if sim != null else false)
+		return {"grenade": e[0] or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or pad_pressed(0, "grenade") or _steam.button_pressed(0, "grenade"),
+			"roll": Input.is_physical_key_pressed(bind("roll")) or pad_pressed(0, "roll") or _steam.button_pressed(0, "roll"),
+			"interact": Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact") or _steam.button_pressed(0, "interact"),
+			"revive": e[1] or pad_pressed(0, "revive") or _steam.button_pressed(0, "revive"),
+			"buy": Input.is_physical_key_pressed(bind("buy")) or pad_pressed(0, "buy") or _steam.button_pressed(0, "buy")}
+	var result := {}
+	for action in ["grenade", "roll", "interact", "revive", "buy"]:
+		result[action] = pad_pressed(seat, action) or _steam.button_pressed(seat, action)
+	return result
+
+
+func _refresh_accessibility_input() -> void:
+	_accessible_input.configure(_accessibility_snapshot())
+
+
+func reset_accessibility_input() -> void:
+	_accessible_input.reset()
+	_accessible_policy.reset_clock()
+	_mouse_aim_override_until = 0
+	for seat in (2 if _two_players else 1):
+		var raw := _raw_accessibility_actions(seat)
+		for action in raw:
+			if accessibility_setting("toggle_" + action):
+				_accessible_input.prime_action(seat, action, raw[action])
+	_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
+
+
+func _run_assist_tags() -> Array[String]:
+	return Replay.assist_tags_for_config(_accessibility_snapshot(),
+		sim.players.size() if sim != null else (2 if _two_players else 1),
+		sim != null and sim.assist_mode)
+
+
+func _record_accessibility_change() -> void:
+	if _recorder == null or _watching:
+		return
+	var current := _accessibility_snapshot()
+	if current != _recorded_accessibility:
+		_recorder.record_accessibility(current, _run_assist_tags())
+		_recorded_accessibility = current
+
+
+func _uses_buffered_accessibility() -> bool:
+	for key in ["slow_mode", "toggle_grenade", "toggle_roll", "toggle_interact", "toggle_revive", "toggle_buy"]:
+		if accessibility_setting(key):
+			return true
+	return false
+
+
+func _detent_feedback(seat: int) -> void:
+	if _accessible_input.consume_detent_change(seat) and _rumble_on and Input.has_joy_vibration(seat):
+		Input.start_joy_vibration(seat, 0.04, 0.07, 0.035)
+
+
+func _shake_strength() -> float:
+	return AccessiblePolicy.shake_scale(int(accessibility_setting("shake_level")), _motion < 0.5)
+
+
+func _flash_strength() -> float:
+	return AccessiblePolicy.flash_scale(int(accessibility_setting("flash_level")), _motion < 0.5)
+
+
+func accessibility_summary() -> String:
+	var aids: Array[String] = []
+	if accessibility_setting("single_stick_p1") or accessibility_setting("single_stick_p2"):
+		aids.append("SINGLE STICK")
+	if int(accessibility_setting("aim_assist")) > 0:
+		aids.append("AIM ASSIST")
+	if accessibility_setting("slow_mode"):
+		aids.append("75% SPEED")
+	return " / ".join(aids) if not aids.is_empty() else "STANDARD INPUT"
 
 
 func _save_settings() -> void:
@@ -5548,6 +5723,8 @@ func _step_text_scale(dir: int) -> bool:
 
 
 func _apply_settings(d: Dictionary) -> void:
+	for key in ACCESSIBILITY_KEYS:
+		_accessibility_settings[key] = _normalized_accessibility_setting(key, d.get(key, SETTINGS_DEFAULTS[key]))
 	colorblind = d["colorblind"]
 	_assist = d["assist"]
 	_motion = 0.0 if d["reduce_motion"] else 1.0
@@ -5562,17 +5739,15 @@ func _apply_settings(d: Dictionary) -> void:
 	# .get: saves predating c1-19 land at the 2x ship default. Store the PREFERENCE sane-capped
 	# (NOT clamped to the current monitor) so a scale saved on a bigger display survives a load on
 	# a smaller one; _apply_windowed_scale sizes the window to the live per-monitor fit.
-	_win_scale = clampi(int(d.get("window_scale", 2)), 1, WIN_SCALE_MAX)
+	_win_scale = clampi(int(d.get("window_scale", 2)), Art.MIN_WINDOW_SCALE, WIN_SCALE_MAX)
 	# audio-identity: .get (not d["captions"]) — a save predating the toggle lacks the key,
 	# same back-compat pattern as swap_sticks/window_scale above.
 	_captions = bool(d.get("captions", true))
 	# accessibility: .get — a save predating TEXT SIZE lands at the shipped 100%. The setter
 	# snaps/clamps, so no caller (load, RESET, DISCARD) can install an off-rung value.
 	_set_text_scale(int(d.get("text_scale", TEXT_SCALE_MIN)))
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if _fullscreen \
-		else DisplayServer.WINDOW_MODE_WINDOWED)
-	if not _fullscreen:
-		_apply_windowed_scale()
+	_refresh_accessibility_input()
+	_apply_display_mode()
 	# c1-09: rebake the cursor to the new window size here too — RESET DEFAULTS switches
 	# display mode through this path, and without this it left the cursor scaled for the
 	# old size (the F11/Alt+Enter shortcut always rebaked; reset used to skip it).
@@ -5589,35 +5764,46 @@ func _apply_settings(d: Dictionary) -> void:
 func _toggle_fullscreen(persist := true) -> void:
 	_prog_resize = true   # a programmatic mode change — ignore the transition's resize events until settled
 	_fullscreen = not _fullscreen
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN
-		if _fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)
-	if not _fullscreen:
-		# Returning to windowed restores the chosen integer scale — RE-CLAMPED to the current
-		# monitor first, so a scale carried in from a larger display (save or F11 round-trip)
-		# can never restore an oversized window that overflows the smaller screen. This arms a
-		# windowed settle chain that clears _prog_resize once the transition completes.
-		_apply_windowed_scale()
-	else:
-		# Entering fullscreen applies NO windowed fit, so arm a generation-tagged settle chain anyway:
-		# its fullscreen branch (reached from _process next frame) resets the counters AND clears
-		# _prog_resize, so the guard can never stay stuck true after a bare F11-in.
-		_settle_gen += 1
-		_settle_active = true
+	_apply_display_mode()
 	call_deferred("_bake_cursor")   # cursor scale follows the new window size
 	if persist:
 		_save_settings()
 
 
-# c1-19: largest integer window scale the current display can actually hold (min 1),
-# so the OPTIONS control never offers a window that won't fit. Sized against the WORK
-# area (screen_get_usable_rect excludes the taskbar / macOS menu bar) MINUS the window
-# chrome (title bar + borders) — a raw-screen divide advertised e.g. 2x on a 720p display
-# that the decorated 1280x720 window then overflowed. The live decoration delta is only
-# trustworthy while WINDOWED (it reads 0 in fullscreen); it's cached into _deco_reserve
-# there and reused when queried in fullscreen, so the ceiling computed mid-fullscreen still
-# leaves room for the chrome that returns on the way out.
 func _max_win_scale() -> int:
 	return max_scale_for(DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen()).size, _deco_reserve)
+
+
+static func display_requires_fullscreen(preferred: bool, usable: Vector2i, chrome: Vector2i) -> bool:
+	if preferred:
+		return true
+	if usable.x <= 0 or usable.y <= 0:
+		return false
+	var minimum := Vector2i(640, 360) * Art.MIN_WINDOW_SCALE
+	return usable.x < minimum.x + maxi(0, chrome.x) or usable.y < minimum.y + maxi(0, chrome.y)
+
+
+func _uses_fullscreen() -> bool:
+	return display_requires_fullscreen(_fullscreen, _display_usable_size(), _deco_reserve)
+
+
+func _display_usable_size() -> Vector2i:
+	return DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen()).size
+
+
+func display_forced_fullscreen() -> bool:
+	return not _fullscreen and _uses_fullscreen()
+
+
+func _apply_display_mode() -> void:
+	_prog_resize = true
+	var full := _uses_fullscreen()
+	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if full else DisplayServer.WINDOW_MODE_WINDOWED)
+	if full:
+		_settle_gen += 1
+		_settle_active = true
+	else:
+		_apply_windowed_scale()
 
 
 # c1-19: the ceiling math, pure + static so it's headless-assertable with SYNTHETIC work-area +
@@ -5627,7 +5813,7 @@ func _max_win_scale() -> int:
 static func max_scale_for(usable: Vector2i, reserve: Vector2i) -> int:
 	if usable.x <= 0 or usable.y <= 0:
 		return 3
-	return clampi(mini((usable.x - reserve.x) / 640, (usable.y - reserve.y) / 360), 1, WIN_SCALE_MAX)
+	return clampi(mini((usable.x - reserve.x) / 640, (usable.y - reserve.y) / 360), Art.MIN_WINDOW_SCALE, WIN_SCALE_MAX)
 
 
 # c1-19: cache the real window chrome from the live delta. The cache is only ever written from
@@ -5637,7 +5823,7 @@ static func max_scale_for(usable: Vector2i, reserve: Vector2i) -> int:
 # good value. Once settled, a genuinely borderless / client-side-decoration window reads a stable
 # zero, which is valid and stored as-is.
 func _measure_decorations(accept_zero := false) -> void:
-	if _fullscreen:
+	if _uses_fullscreen():
 		return
 	var raw := DisplayServer.window_get_size_with_decorations() - DisplayServer.window_get_size()
 	var live := Vector2i(maxi(0, raw.x), maxi(0, raw.y))
@@ -5669,7 +5855,8 @@ func _settle_window(gen := 0) -> void:
 	# (gen 0 default = a direct/legacy call adopts the current chain.)
 	if gen != 0 and gen != _settle_gen:
 		return
-	if _fullscreen:
+	if _uses_fullscreen():
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
 		_settle_tries = 0
 		_settle_last_deco = Vector2i(-1, -1)
 		_settle_zero_streak = 0
@@ -5708,6 +5895,9 @@ func _settle_window(gen := 0) -> void:
 	var accept_zero := _settle_zero_streak >= SETTLE_ZERO_FRAMES and at_target
 	var prev_reserve := _deco_reserve
 	_measure_decorations(accept_zero)
+	if _uses_fullscreen():
+		_apply_display_mode()
+		return
 	var reserve_changed := _deco_reserve != prev_reserve
 	# Recompute the target AFTER measuring: committing the reserve (e.g. accepting a borderless zero,
 	# dropping the 40px fallback) can RAISE the effective scale, so the pre-measurement `want` is now
@@ -5770,6 +5960,9 @@ static func center_pos(usable_pos: Vector2i, usable_size: Vector2i, deco: Vector
 # preference, so every path back to windowed (load, RESET, F11 out, a scale step, a monitor hop)
 # fits the live display while a scale chosen on a bigger monitor survives to be restored later.
 func _apply_windowed_scale() -> void:
+	if _uses_fullscreen():
+		_apply_display_mode()
+		return
 	_prog_resize = true   # our own resize — suppress the size-change notifications it emits until the settle completes
 	var eff := _win_scale_norm()
 	DisplayServer.window_set_size(Vector2i(640 * eff, 360 * eff))
@@ -5791,7 +5984,7 @@ func _apply_windowed_scale() -> void:
 # choice. The OPTIONS row label and the ladder step both read through here, so the on-screen
 # control always sits on the real ceiling (a stale over-max preference can't wedge ►).
 func _win_scale_norm() -> int:
-	return clampi(_win_scale, 1, _max_win_scale())
+	return clampi(_win_scale, Art.MIN_WINDOW_SCALE, _max_win_scale())
 
 
 # c1-19: apply an absolute windowed integer scale — the ONE place window size changes,
@@ -5799,13 +5992,12 @@ func _win_scale_norm() -> int:
 # Picking a scale implies WINDOWED: fullscreen has no visible window to size, so a step
 # drops out of it into the chosen clean multiple. Returns true if the value moved.
 func _set_win_scale(s: int, persist := true) -> bool:
-	var ns := clampi(s, 1, _max_win_scale())
+	var ns := clampi(s, Art.MIN_WINDOW_SCALE, _max_win_scale())
 	if ns == _win_scale and not _fullscreen:
 		return false
 	_win_scale = ns
 	_fullscreen = false
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-	_apply_windowed_scale()
+	_apply_display_mode()
 	call_deferred("_bake_cursor")   # cursor scale follows the new window size
 	if persist:   # c3-18: the OPTIONS dirty-state defers the write to SAVE
 		_save_settings()
@@ -5817,7 +6009,7 @@ func _set_win_scale(s: int, persist := true) -> bool:
 # row. The chosen value is what applies the moment you drop back to windowed (via the FULLSCREEN
 # toggle or F11). Clamped to the current effective ceiling and persisted; returns true if it moved.
 func _set_win_scale_pref(s: int, persist := true) -> bool:
-	var ns := clampi(s, 1, _max_win_scale())
+	var ns := clampi(s, Art.MIN_WINDOW_SCALE, _max_win_scale())
 	if ns == _win_scale:
 		return false
 	_win_scale = ns
@@ -5987,7 +6179,10 @@ func _record_run(score: int) -> void:
 		# authored-campaign-and-modes: bosses cleared, meaningful only for a
 		# boss_rush entry (the Hall/menu read it only when mode == "boss_rush").
 		"bosses": mini(opened, SimWorld.BOSS_RUSH_COUNT),
-		"streak": _run_best_streak, "won": sim.victory, "daily": _daily, "assist": _assist,
+		"streak": _run_best_streak, "won": sim.victory, "daily": _daily,
+		"assist": not (_recorder.assist_tags if _recorder != null else _run_assist_tags()).is_empty(),
+		"assist_tags": _recorder.assist_tags.duplicate() if _recorder != null else _run_assist_tags(),
+		"player_count": sim.players.size(),
 		"hard": sim.hard,
 		"grade": rr.grade, "title": rr.title, "rescues": _run_rescues,
 		"hid": _hall_seq}
@@ -6051,7 +6246,10 @@ func _report_to_steam(entry: Dictionary, score: int) -> void:
 	# safely when Steam isn't present (dev/CI/non-Steam builds) -- this call
 	# is always safe to make. `score` is the same already-verified argument
 	# _record_run received -- never sim.score re-read here.
-	_steam.upload_score(sim.mode, score)
+	_steam.upload_score("daily" if entry.get("daily", false) else sim.mode, score, {
+		"player_count": sim.players.size(), "hard": sim.hard,
+		"assist_tags": entry.get("assist_tags", []),
+		"seed": _current_seed, "ticks": sim.tick_count})
 	# unlock(id, false) skips the per-call store_stats() round trip -- a run can
 	# clear several milestones in one tick (e.g. a Boss Rush no-death win), and
 	# flush_stats() below reports them to Steam in a single batch.
@@ -6885,12 +7083,12 @@ func _update_feel() -> void:
 		return
 	# Random per-axis rattle (not a smooth Lissajous sway), biased vertical to match
 	# the scroll axis; trauma² keeps small hits subtle while big ones land.
-	var mag := _trauma * _trauma * 11.0 * _motion
+	var mag := _trauma * _trauma * 11.0 * _shake_strength()
 	var shake := Vector2.ZERO
 	if mag > 0.01:
 		shake = Vector2(randf_range(-0.8, 0.8) * mag, randf_range(-1.0, 1.0) * mag)
 	# Camera zoom-punch pivots around screen center, not the top-left origin.
-	var pz := 1.0 + _punch * _motion
+	var pz := 1.0 + _punch * _shake_strength()
 	scale = Vector2(pz, pz)
 	# Rotational judder: only the biggest hits (boss deaths, phase breaks) get a hair
 	# of dutch-angle roll — a juice axis untouched until now. Pivots on screen center
@@ -6899,9 +7097,9 @@ func _update_feel() -> void:
 	# a hard gate popped visibly as trauma crossed it mid-decay.
 	# 0.55 rad/frame ≈ 5Hz: a readable held twist. The old 2.9 sat near Nyquist
 	# (π rad/frame), flipping sign almost every frame — buzz, not roll.
-	var rot := sin(float(Engine.get_physics_frames()) * 0.55) * _trauma * _trauma * 0.035 * _motion
+	var rot := sin(float(Engine.get_physics_frames()) * 0.55) * _trauma * _trauma * 0.035 * _shake_strength()
 	rotation = rot
-	position = (shake + _kick * _motion + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)).round()
+	position = (shake + _kick * _shake_strength() + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)).round()
 
 
 func _drive_audio() -> void:
@@ -7290,6 +7488,7 @@ static func revive_context(w: SimWorld, i: int) -> bool:
 
 
 func _gather_inputs() -> Array[SimInput]:
+	_wheel_cancelled = [false, false]
 	if OS.has_feature("movie") or demo_autoplay:
 		# One scripted input per player, same as the title attract screen — demo_input
 		# steers off players[0], so P2 just replays P1's plan 53 ticks out of phase.
@@ -7333,7 +7532,7 @@ func _gather_inputs() -> Array[SimInput]:
 	# With the fallback skipped the view sends aim 0 and the sim HOLDS the last aim
 	# (it only writes aim_x/aim_y above a quarter-unit input) — which is what P2,
 	# pad-only with no mouse arm, has always done.
-	if ax == 0.0 and ay == 0.0 and not Art.use_pad and sim.players[0]["alive"]:
+	if ax == 0.0 and ay == 0.0 and not Art.use_pad and sim.players[0]["alive"] and (not accessibility_setting("single_stick_p1") or Time.get_ticks_msec() < _mouse_aim_override_until):
 		var to_mouse := get_local_mouse_position() \
 			- _to_screen(sim.players[0]["x"], sim.players[0]["y"])
 		if to_mouse.length() > 4.0:
@@ -7343,6 +7542,11 @@ func _gather_inputs() -> Array[SimInput]:
 	if pad_aim.length() > 0.25:
 		ax = pad_aim.x
 		ay = pad_aim.y
+	if not _wheel[0]["open"]:
+		var resolved := _accessible_input.resolve_aim(0, Vector2(kx, ky), Vector2(ax, ay), sim)
+		ax = resolved.x
+		ay = resolved.y
+		_detent_feedback(0)
 	p1.move_x = _quantize_axis(kx)
 	p1.move_y = _quantize_axis(ky)
 	p1.aim_x = _quantize_axis(ax)
@@ -7368,28 +7572,16 @@ func _gather_inputs() -> Array[SimInput]:
 	# custom layout that deliberately binds both verbs to one physical key.
 	# GRENADE (ALT) — SHIFT by default — is a PURE throw and sits outside the arbitration on
 	# purpose, so old muscle memory throws even while a partner is bleeding out.
-	var e := shared_e(Input.is_physical_key_pressed(bind("grenade")),
-		Input.is_physical_key_pressed(bind("grenade_alt")),
-		Input.is_physical_key_pressed(bind("revive")),
-		bind("grenade") == bind("revive"), revive_context(sim, 0))
-	p1.grenade = e[0] \
-		or Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
-		or pad_pressed(0, "grenade") \
-		or _steam.button_pressed(0, "grenade")
-	p1.roll = Input.is_physical_key_pressed(bind("roll")) or pad_pressed(0, "roll") \
-		or _steam.button_pressed(0, "roll")
-	p1.interact = Input.is_physical_key_pressed(bind("interact")) or pad_pressed(0, "interact") \
-		or _steam.button_pressed(0, "interact")
-	p1.revive = e[1] \
-		or pad_pressed(0, "revive") \
-		or _steam.button_pressed(0, "revive")
-	p1.buy = _update_wheel(0,
-		Input.is_physical_key_pressed(bind("buy")) or pad_pressed(0, "buy") or _steam.button_pressed(0, "buy"),
-		wheel_dir, Vector2(kx, ky))
+	var raw_p1 := _raw_accessibility_actions(0)
+	for action in ["grenade", "roll", "interact", "revive"]:
+		p1.set(action, _accessible_input.transform_action(0, action, raw_p1[action]))
+	p1.buy = _update_wheel(0, _accessible_input.transform_action(0, "buy", raw_p1["buy"]), wheel_dir, Vector2(kx, ky))
 	# While the wheel is open, the shared roll bind is the CANCEL (a UI action,
 	# not a dodge) and sector flicks steer the wheel, not the gun.
 	# #20: latch the raw press BEFORE it's zeroed below — the wheel silently ate
 	# the dodge with no tell at all; _check_dry_roll reads this to still cue it.
+	if _wheel_cancelled[0]:
+		p1.roll = false
 	_roll_intent[0] = p1.roll
 	if _wheel[0]["open"]:
 		p1.roll = false
@@ -7418,6 +7610,12 @@ func _gather_inputs() -> Array[SimInput]:
 			Input.get_joy_axis(1, JOY_AXIS_RIGHT_X), Input.get_joy_axis(1, JOY_AXIS_RIGHT_Y)), 0.25)
 		if _swap_sticks[1]:   # c1-18: P2's OWN independent left-handed swap
 			var t2 := p2_move; p2_move = p2_aim; p2_aim = t2
+		# Automatic aim must never choose a supply-wheel purchase. P1 already
+		# captures wheel_dir before resolving assistance; retain the same seam for P2.
+		var p2_wheel_dir := p2_aim
+		if not _wheel[1]["open"]:
+			p2_aim = _accessible_input.resolve_aim(1, p2_move, p2_aim, sim)
+			_detent_feedback(1)
 		p2.move_x = _quantize_axis(p2_move.x)
 		p2.move_y = _quantize_axis(p2_move.y)
 		p2.aim_x = _quantize_axis(p2_aim.x)
@@ -7428,13 +7626,13 @@ func _gather_inputs() -> Array[SimInput]:
 		# Always-fire (see P1): no trigger read at all. P2 is pad-only, so grenade (LB) and
 		# revive (Y) stay two distinct buttons and need no contextual arbitration.
 		p2.fire = true
-		p2.grenade = pad_pressed(1, "grenade") or _steam.button_pressed(1, "grenade")
-		p2.roll = pad_pressed(1, "roll") or _steam.button_pressed(1, "roll")
-		p2.interact = pad_pressed(1, "interact") or _steam.button_pressed(1, "interact")
-		p2.revive = pad_pressed(1, "revive") or _steam.button_pressed(1, "revive")
-		p2.buy = _update_wheel(1, pad_pressed(1, "buy") or _steam.button_pressed(1, "buy"),
-			p2_aim, p2_move)
+		var raw_p2 := _raw_accessibility_actions(1)
+		for action in ["grenade", "roll", "interact", "revive"]:
+			p2.set(action, _accessible_input.transform_action(1, action, raw_p2[action]))
+		p2.buy = _update_wheel(1, _accessible_input.transform_action(1, "buy", raw_p2["buy"]), p2_wheel_dir, p2_move)
 		# #20: same raw-press latch as P1, above.
+		if _wheel_cancelled[1]:
+			p2.roll = false
 		_roll_intent[1] = p2.roll
 		if _wheel[1]["open"]:
 			p2.roll = false
@@ -7547,6 +7745,14 @@ func _update_wheel(i: int, held: bool, aim: Vector2, move: Vector2) -> int:
 		# pick. The rebound roll key matches the roll verb (AZERTY-safe physical read).
 		var cancel: bool = (i == 0 and Input.is_physical_key_pressed(bind("roll"))) \
 			or pad_pressed(i, "roll") or _steam.button_pressed(i, "roll")
+		if cancel and accessibility_setting("toggle_buy"):
+			_accessible_input.cancel_action(i, "buy")
+			_accessible_input.prime_action(i, "roll", true)
+			w["open"] = false
+			w["sel"] = -1
+			_wheel_cancelled[i] = true
+			_sfx.play("click_dry", -12.0, 1.4)
+			return 0
 		if cancel and w["sel"] >= 0:
 			w["sel"] = -1
 			_sfx.play("click_dry", -12.0, 1.4)   # soft declined tick — the dedicated dry-click voice
@@ -9109,7 +9315,8 @@ func _draw_field_dim() -> void:
 		var lt := Engine.get_physics_frames() % 431
 		if lt < 3:
 			# wash-exempt: 3-frame sheet-lightning inside NIGHT OPS — a sky flash is full-frame by nature.
-			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0, (1.0 - float(lt) / 3.0) * 0.45 * _motion))
+			draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0.55, 0.66, 1.0,
+				(1.0 - float(lt) / 3.0) * 0.45 * _motion * float(accessibility_setting("flash_level")) / 10.0))
 
 
 func _draw_landmark_previews() -> void:
@@ -15475,7 +15682,7 @@ func _draw_banners(top_msg: String) -> void:
 		# maxf floor (6/9 panel): zeroing the wash under reduce-motion erased the
 		# whole-field-stun gestalt entirely; siblings (damage vignette, airstrike
 		# wash) keep a dimmed floor. The decay is a fade, not a strobe — RM-safe.
-		var fla := _flash_alpha * maxf(_motion, 0.4)
+		var fla := _flash_alpha * _flash_strength()
 		# wash-exempt: impact flash is deliberately centre-HOT (a radial punch, not a
 		# budgeted wash card) — a WASH_KINDS entry would rightly fail the centre-clear ratchet.
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(-160, -180, SCREEN_W + 320, SCREEN_H + 360),

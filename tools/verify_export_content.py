@@ -7,11 +7,15 @@ The ZIP/PCK exporters use the same preset resource selection. No archive is
 extracted, and development files on disk are never removed.
 """
 import argparse
-from pathlib import Path
+import hashlib
+import json
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import tempfile
 import zipfile
+
+from package_attribution import DESTINATION, source_records
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +25,39 @@ DEV_PREFIXES = ("tests/", "docs/", "tools/", "addons/godot_mcp/", "tmp/",
 ERRORS = re.compile(r"SCRIPT ERROR|Parse Error|Compile Error|^ERROR:", re.MULTILINE)
 
 
-def check_archive(path: Path, manifest: bytes) -> list[str]:
+def fontawesome_icons() -> dict[str, str]:
+    records = source_records(ROOT)
+    attribution = json.loads(records[f"{DESTINATION}/manifest.json"])
+    return {f"assets/fontawesome/solid/{icon['icon']}.svg": icon["local_sha256"]
+            for icon in attribution["icons"]}
+
+
+def check_fontawesome(archive, expected_icons) -> list[str]:
+    if not expected_icons:
+        return ["Font Awesome resource contract is empty"]
+    problems = []
+    names = archive.namelist()
+    for resource, digest in expected_icons.items():
+        imported = resource + ".import"
+        if names.count(imported) != 1:
+            problems.append("Font Awesome SVG import is missing or duplicated: " + imported)
+            continue
+        targets = re.findall(r'^path="res://([^"\n]+)"$', archive.read(imported).decode("utf-8", errors="replace"), re.MULTILINE)
+        if len(targets) != 1:
+            problems.append("Font Awesome SVG has no unique texture remap: " + imported)
+            continue
+        texture = targets[0]
+        relative = PurePosixPath(texture)
+        if "\\" in texture or relative.is_absolute() or ".." in relative.parts or not texture.startswith(".godot/imported/") or not texture.endswith(".ctex"):
+            problems.append("Font Awesome SVG has an unsafe texture remap: " + imported)
+        elif names.count(texture) != 1 or not archive.read(texture):
+            problems.append("Font Awesome imported texture is missing, duplicated or empty: " + texture)
+        if resource in names and (names.count(resource) != 1 or hashlib.sha256(archive.read(resource)).hexdigest() != digest):
+            problems.append("Font Awesome raw SVG differs from its source receipt: " + resource)
+    return problems
+
+
+def check_archive(path: Path, manifest: bytes, expected_icons=None) -> list[str]:
     problems = []
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
@@ -33,6 +69,7 @@ def check_archive(path: Path, manifest: bytes) -> list[str]:
             problems.append("exported project settings are missing")
         if not {"src/main.tscn", "src/main.tscn.remap"} & names:
             problems.append("main scene is missing")
+        problems.extend(check_fontawesome(archive, fontawesome_icons() if expected_icons is None else expected_icons))
         leaked = sorted(n for n in names if n.startswith(DEV_PREFIXES))
         if leaked:
             problems.append("development files bundled: " + ", ".join(leaked))

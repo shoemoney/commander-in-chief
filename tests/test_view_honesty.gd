@@ -3073,17 +3073,15 @@ func test_mast_telegraph_sleeps_with_the_shop() -> void:
 # --- r4-menu #2: REDUCE MOTION's copy must not promise more than the floors deliver -----
 
 func test_reduce_motion_copy_does_not_overclaim_past_its_own_floors() -> void:
-	## main.gd deliberately keeps a floor under two motion effects even with REDUCE MOTION
-	## on (main.gd:1264's blast-warp maxf(_motion, 0.25) and :12934's flash-alpha
-	## maxf(_motion, 0.4) — both commented as intentional, "the strongest motion effect in
-	## the game" / a dimmed-not-zeroed wash). The SETTING_HELP copy used to say "NO ...
-	## FLASH" outright, which was simply false. This pins both halves so a floor edit
-	## without a copy edit (or vice versa) goes red instead of quietly drifting apart again.
+	# Reduce Motion damps the default flash; the separate Flash Level can remove it.
 	var msrc := FileAccess.get_file_as_string("res://src/main.gd")
 	Runner.T.ok(msrc.contains("maxf(_motion, 0.25)"),
 		"the blast-warp motion floor still exists at its documented value")
-	Runner.T.ok(msrc.contains("maxf(_motion, 0.4)"),
-		"the flash-alpha motion floor still exists at its documented value")
+	var main := Main.new()
+	main._motion = 0.0
+	Runner.T.eq(main._flash_strength(), 0.4,
+		"reduced motion leaves the documented dimmed flash at the default flash level")
+	main.free()
 	var help: String = GameMenu.setting_help("motion")
 	Runner.T.ok(not help.contains("NO SHAKE, FLASH"),
 		"REDUCE MOTION copy no longer claims FLASH is fully eliminated alongside SHAKE (%s)" % help)

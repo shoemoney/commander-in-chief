@@ -167,6 +167,8 @@ enum CaptionTier { FLAVOR, TEACHING, OBJECTIVE, PLAYER_STATE, LETHAL }
 var _sfx_cap_next: Dictionary = {}   # SFX_CAPTIONS key -> earliest physics frame it may re-arm
 var _vo_fade_tween: Tween      # gfx-loop: in-flight fade-out on _vo (interrupt/click fix)
 var _vo_dry_fade_tween: Tween  # gfx-loop: in-flight fade-out on _vo_dry
+const VO_VOLUME_DB := -2.0
+const VO_DRY_VOLUME_DB := -4.0
 var _sfx_bus_idx := -1         # gfx-loop: cached once in _ready() instead of re-resolved every tick
 var _startup_audio_locked := false
 var _boot_audio_ready := false
@@ -384,10 +386,10 @@ func _ready() -> void:
 		AudioServer.add_bus_effect(vi, dist)
 		AudioServer.add_bus_effect(vi, AudioEffectHardLimiter.new())
 	_vo.bus = "VO"
-	_vo.volume_db = -2.0
+	_vo.volume_db = VO_VOLUME_DB
 	add_child(_vo)
 	_vo_dry.bus = "UI"   # the pilot's close-mic plea: NO radio filter by design
-	_vo_dry.volume_db = -4.0
+	_vo_dry.volume_db = VO_DRY_VOLUME_DB
 	add_child(_vo_dry)
 	# The Commander (player) speaks in his own dry close-mic voice on the UI bus —
 	# he's on the field shouting, not a radio narrator, so NO band-pass/overdrive.
@@ -605,6 +607,30 @@ func _fade_then_stop(ply: AudioStreamPlayer, is_dry: bool) -> void:
 	tw.tween_callback(func() -> void:
 		ply.stop()
 		ply.volume_db = orig_db)
+
+
+func reset_run_speech() -> void:
+	for fade in [_vo_fade_tween, _vo_dry_fade_tween]:
+		if fade != null and fade.is_valid():
+			fade.kill()
+	_vo_fade_tween = null
+	_vo_dry_fade_tween = null
+	_vo.volume_db = VO_VOLUME_DB
+	_vo_dry.volume_db = VO_DRY_VOLUME_DB
+	_vo.stop()
+	_vo.stream = null
+	_cmd.stop()
+	_cmd.stream = null
+	_cmd_next_frame = 0
+	_vo_pending.clear()
+	_sfx_cap_next.clear()
+	_cap_queue.clear()
+	if _startup_line_playing:
+		return
+	_vo_dry.stop()
+	_vo_dry.stream = null
+	_vo_priority = -1
+	clear_captions()
 
 
 func stop_vo() -> void:

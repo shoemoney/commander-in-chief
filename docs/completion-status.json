@@ -1,0 +1,883 @@
+{
+  "updated": "2026-10-04T11:22:03.594110+00:00",
+  "revision": "a495bdc25628e4359f4753cd5f721fa448e35566 plus uncommitted accessibility integration; sealed 1.4.4 retained as historical baseline",
+  "milestones": [
+    {
+      "id": "M0",
+      "title": "Establish the baseline",
+      "exit": "Exit requires a complete requirement inventory, a reproduced baseline and the next implementation units ordered by dependency and risk.",
+      "exit_met": true,
+      "items": [
+        {
+          "title": "Audit the actual simulation, menus, input, presentation and shipped modes against the production plan.",
+          "status": "verified",
+          "evidence": "build/completion-audit/gameplay.md; build/completion-audit/presentation.md; build/completion-audit/requirements-reconciliation.md",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "These are inventory/audit results; their historical defect descriptions are superseded only by named current proving artifacts.",
+          "id": "M0.1",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Audit art, animation, audio, onboarding and accessibility requirements, including unmet acceptance.",
+          "status": "verified",
+          "evidence": "build/completion-audit/presentation.md; docs/ten-item-acceptance.md; docs/completion-external-checks.md",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "An inventory is complete even when the separate human or whole-campaign acceptance remains open.",
+          "id": "M0.2",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Audit exports, Steam integration, CI, media, source provenance and platform requirements.",
+          "status": "verified",
+          "evidence": "build/completion-audit/release/final-20261004-02/release-report.md; build/completion-audit/requirements-reconciliation.md; docs/completion-external-checks.md",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "id": "M0.3",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Reproduce the current full regression and bind its retained logs to the frozen source.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; build/completion-audit/full-run/final-current-verification.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "1,304 methods / 40,531 assertions / zero failures; all 2,775 regression dependencies remain current.",
+          "id": "M0.4",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Assign proved defects, local coverage gaps, unanswered scope choices and external launch gates.",
+          "status": "verified",
+          "evidence": "docs/completion-plan.md; docs/completion-status.json; docs/completion-external-checks.md",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "id": "M0.5",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        }
+      ],
+      "status": "verified",
+      "exit_evidence": "Inventory and current proving artifacts are reconciled."
+    },
+    {
+      "id": "M1",
+      "title": "Complete gameplay",
+      "exit": "Exit requires all gameplay items to pass their behavior checks and a full campaign completion through the production scene. Any intentionally staged test must declare the state it changes.",
+      "exit_met": false,
+      "items": [
+        {
+          "title": "Verify all six Campaign gates, bosses, Last Stand, victory and debrief through normal production input.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-common-matrix-04/summary.json; build/completion-audit/full-run/final-packaged-common-matrix/summary.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Campaign solo/co-op, Arcade chapter one, Boss Rush and actual Daily complete normally. God mode is off; staged endings are excluded.",
+          "id": "M1.1",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify normal finite Campaign, Arcade, Boss Rush and Daily entries, exact replays, save and Watch.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-common-matrix-04/summary.json; build/completion-audit/full-run/final-packaged-common-matrix/summary.json; build/completion-audit/full-run/final-packaged-process-restarts/summary.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Five finite cases cover Campaign solo/co-op and the three other finite entries. Pack gameplay/restarts use plain Godot, not native-template driving.",
+          "id": "M1.2",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify bounded normal Endless progression.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-common-matrix-04/summary.json; build/completion-audit/full-run/final-packaged-common-matrix/summary.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Two waves clear and wave three is entered. This does not establish long-session survival, late modifiers, cooperative ready-up or an Endless terminal save.",
+          "id": "M1.3",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify Chapter Select menu rows and the recorded chapter-jump subsystem contracts.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; tests/test_menu_layout.gd::test_modes_and_chapter_select_screens; tests/test_biomes.gd::test_jump_to_chapter_offsets_every_stream_cursor",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Current tests cover six menu rows and chapter-one/chapter-four stream behavior; these are fixture/subsystem checks.",
+          "id": "M1.4",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Exercise every deep Chapter Select entry through the production scene and retain its resolved entry/progression.",
+          "status": "pending",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; build/completion-audit/gameplay.md",
+          "need": "Current six-mode runs begin Arcade at chapter one. Independent production entry/progression evidence for every deep chapter is not retained.",
+          "scope": "local",
+          "id": "M1.5"
+        },
+        {
+          "title": "Verify independent per-seat legal inputs and paid recovery during normal local co-op completion.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-common-matrix-04/summary.json; build/completion-audit/full-run/final-packaged-common-matrix/summary.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Each seat records exactly one decision per actual replay tick. Bots do not establish independent human input or physical controllers.",
+          "id": "M1.6",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify deaths, recovery, remote rally, tank crews, roll transitions and restart contracts in automated fixtures.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; tests/test_controls.gd; tests/test_tank.gd; tests/test_war_chest.gd; tests/test_main.gd",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Subsystem and synthetic-input fixtures may stage state; they are not uninterrupted human/physical co-op evidence.",
+          "id": "M1.7",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify shared War Chest, partial refill, salvage, spend-wheel and unanimous ready contracts in automated suites.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; tests/test_war_chest.gd; tests/test_shop.gd; tests/test_endless.gd; tests/test_controls.gd",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "This closes the current tests only; the full-run bot matrix does not itself exercise every production tank/rally/shop-vote scenario.",
+          "id": "M1.8",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Retain production-scene integration receipts for tank/rally recovery and two-seat unanimous shop ready-up.",
+          "status": "pending",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; build/completion-audit/gameplay.md",
+          "need": "Use explicit declared staging if needed and legal production inputs; do not substitute subsystem fixtures or normal campaign completion for unexercised integration cases.",
+          "scope": "local",
+          "id": "M1.9"
+        },
+        {
+          "title": "Verify enemy reachability, spawn/strike telegraphs, Observer cleanup, supplies and boss damage invariants.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; build/completion-audit/full-run/final-common-matrix-04/summary.json; tests/test_archetypes.gd; tests/test_observer.gd; tests/test_hitbox_fairness.gd; tests/test_view_honesty.gd",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Automated behavioral checks and normal finite traversal; whole-campaign visual/audio comprehension stays separate.",
+          "id": "M1.10",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Repair reproduced roll-latch, speech-reset, readable-layout and intro hidden-progress defects.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; build/completion-audit/speech-current.log; build/completion-audit/presentation/capture-splash-physics-review.md; build/completion-audit/release/final-20261004-02/release-report.md",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Meaningful failing reproductions and passing current regressions retained. Current committed determinism tests pass; no difficulty/bot tuning was used to force completion.",
+          "id": "M1.11",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify explicit finale victory and Last Stand wipe mechanics with declared staging.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-ending-stages-02/summary.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Declared mutations remain in reports and cannot satisfy normal campaign completion or normal replay acceptance.",
+          "id": "M1.12",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        }
+      ],
+      "status": "open",
+      "exit_evidence": "One or more required local, scope or external acceptance items remains open; verified subsets retain their own evidence."
+    },
+    {
+      "id": "M2",
+      "title": "Complete the player experience",
+      "exit": "Exit requires observed renderer evidence, clean input/audio checks and recorded newcomer/co-op acceptance from `docs/ten-item-acceptance.md`. An automated renderer check does not establish human comprehension or controller feel.",
+      "exit_met": false,
+      "items": [
+        {
+          "title": "Review the captured menu, manual, rebind, Hall and selected HUD states in actual GL pixels.",
+          "status": "verified",
+          "evidence": "build/completion-audit/presentation/capture-splash-physics-review.md; build/completion-audit/presentation/rendered-splash-physics/capture-report.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "70 actual frames, including 20 enlarged manual leaves, accepted on the frozen app. Actual client 1280x720 at 2x; minimum displayed text 18px, default body/controls 20px.",
+          "id": "M2.1",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Complete combat-silhouette, projectile, explosion and world-label review across every environment and boss phase.",
+          "status": "pending",
+          "evidence": "build/completion-audit/presentation/capture-splash-physics-review.md; build/completion-audit/presentation.md",
+          "need": "Captured menus/HUD and automated render/layout tests are not a complete whole-campaign combat review.",
+          "scope": "local",
+          "id": "M2.2"
+        },
+        {
+          "title": "Verify current input lifecycle, rebind, focus, seat and accessibility-setting contracts in automated tests.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; tests/test_controls.gd; tests/test_main.gd; tests/test_menu_layout.gd",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Synthetic/API input checks are separate from physical keyboard/mouse/gamepad behavior and absent planned assist schemes.",
+          "id": "M2.3",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Exercise actual keyboard/mouse, the controller matrix, reconnect/rebinding and independent local co-op seats.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Retain actual devices, platform, candidate hashes and observed input/seat behavior.",
+          "scope": "external",
+          "id": "M2.4"
+        },
+        {
+          "title": "Verify old-run speech cancellation, pending/fade cleanup and preserved startup narration.",
+          "status": "verified",
+          "evidence": "build/completion-audit/speech-current.log; build/completion-audit/full-run/post-splash-regression.json; docs/completion-audio-design.md",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "16 real-scene synthetic speech checks plus current full regression; listening to all campaign cues remains open.",
+          "id": "M2.5",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Review the full hit/death/revive/tank/supply/boss cue set with corresponding audio and captions.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Retain whole-campaign listening evidence and observations for speaker roles and enemy-shout meaning.",
+          "scope": "external",
+          "id": "M2.6"
+        },
+        {
+          "title": "Verify current opening-delivery and recovery-teaching logic and captured guidance.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; tests/test_main.gd::test_onboarding_seen_is_delivery_based_and_empty_profile_rearms_opening; tests/test_view_honesty.gd; build/completion-audit/presentation/capture-splash-physics-review.md",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Automated behavior/current captured guidance; comprehension and controller feel require unfamiliar players.",
+          "id": "M2.7",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Complete newcomer and paired co-op observations from the acceptance protocol.",
+          "status": "external",
+          "evidence": "docs/ten-item-acceptance.md",
+          "need": "Actual unfamiliar participants and recorded observations are required.",
+          "scope": "external",
+          "id": "M2.8"
+        },
+        {
+          "title": "Check existing translation synchronization and current font/string contracts.",
+          "status": "verified",
+          "evidence": "build/completion-audit/lint-i18n-current.log; build/completion-audit/full-run/post-splash-regression.json; tests/test_localization.gd",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "The existing es/fr/ja files and current automated coverage do not establish the planned twelve-language launch contract.",
+          "id": "M2.9",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Obtain human localization QA for the approved language matrix.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Resolve the language scope separately and retain reviewed interface/subtitle/audio coverage.",
+          "scope": "external",
+          "id": "M2.10"
+        }
+      ],
+      "status": "open",
+      "exit_evidence": "One or more required local, scope or external acceptance items remains open; verified subsets retain their own evidence."
+    },
+    {
+      "id": "M3",
+      "title": "Pass the integrated checks",
+      "exit": "Exit requires complete pass sentinels, no unexpected engine errors and zero shutdown leaks. Test success applies only to the behavior each test actually exercises.",
+      "exit_met": false,
+      "items": [
+        {
+          "title": "Import current assets/global classes and retain cache/source identity with the pinned engine.",
+          "status": "verified",
+          "evidence": "build/completion-audit/release/final-20261004-02/import-receipt.json; build/completion-audit/release/final-20261004-02/matrix-dependency-binding.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Zero import diagnostics/leaks and zero class/UID/imported-cache drift from the final source matrix.",
+          "id": "M3.1",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Run the full timing-free isolated-profile regression suite.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/post-splash-regression.json; build/completion-audit/full-run/post-splash-regression.log; build/completion-audit/full-run/final-current-verification.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "1,304 methods / 40,531 assertions / zero failures. Unexpected diagnostics and shutdown leaks are zero; deliberate ConfigFile-corruption errors remain under the existing narrow allowlist.",
+          "id": "M3.2",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Run simulation, asset and localization lint gates for the unchanged component inputs.",
+          "status": "verified",
+          "evidence": "build/completion-audit/lint-sim-current.log; build/completion-audit/lint-assets-current.log; build/completion-audit/lint-i18n-current.log; build/completion-audit/full-run/final-current-verification.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Retained lints cover deterministic sim invariants, asset sidecars and synchronized existing locales. They do not establish human localization or missing feature scope.",
+          "id": "M3.3",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Exercise current production boot, entry, input, debrief/title transitions and replay through real-scene checks.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-common-matrix-04/summary.json; build/completion-audit/full-run/final-packaged-common-matrix/summary.json; build/completion-audit/full-run/final-packaged-process-restarts/summary.json; build/completion-audit/full-run/post-splash-regression.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Earlier smoke-current/e2e-current logs are supplementary short-run history; current completion evidence comes from the final production scene/pack matrices.",
+          "id": "M3.4",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Exercise complete finite modes and bounded Endless with recorded legal inputs, replay checksums and strict error gates.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-common-matrix-04/summary.json; build/completion-audit/full-run/final-packaged-common-matrix/summary.json; build/completion-audit/full-run/final-ending-stages-02/summary.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Actual 30-tick rejection controls, per-seat coverage, deterministic tick limits and owned process-group deadlines are required. Staged cases remain separate.",
+          "id": "M3.5",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify production save/Watch and fresh OS reload of all finite saved runs.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-packaged-process-restarts/summary.json; build/completion-audit/full-run/final-packaged-common-matrix/summary.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Fresh plain-Godot processes load Hall/career/best/replay/Daily metadata and reproduce exact state; durable ConfigFile values stay unchanged. Native-template restart is not established.",
+          "id": "M3.6",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify plain-engine exact-pack menu/window/paused-window shutdown and actual Mac menu/OS Quit routes.",
+          "status": "verified",
+          "evidence": "build/completion-audit/release/final-20261004-02/stock-exact-pack-close/receipt.json; build/completion-audit/release/final-20261004-02/release-report.md",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Actual native menu Quit and OS Cmd+Q during active/paused play exit cleanly. An OS Quit is not proof of the native red-window-button route.",
+          "id": "M3.7",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Observe the actual native Mac red-window-button shutdown route.",
+          "status": "external",
+          "evidence": "build/completion-audit/release/final-20261004-02/release-report.md",
+          "need": "Screen-sharing accessibility hid the button in retained native checks. Exercise and retain that distinct route before closing all normal shutdown requirements.",
+          "scope": "external",
+          "id": "M3.8"
+        }
+      ],
+      "status": "open",
+      "exit_evidence": "One or more required local, scope or external acceptance items remains open; verified subsets retain their own evidence."
+    },
+    {
+      "id": "M4",
+      "title": "Verify stability and compatibility",
+      "exit": "Exit requires direct platform and hardware evidence. A cross-export or headless source test cannot establish a foreign-platform runtime pass.",
+      "exit_met": false,
+      "items": [
+        {
+          "title": "Run accelerated deterministic soak checks and retain allocation/entity samples.",
+          "status": "verified",
+          "evidence": "build/completion-audit/soak-648000.log; docs/completion-memory.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "648,000 live ticks and 180 allocation samples with debug auto-restoration and accelerated simulation only. This is not a normal rendered survival session.",
+          "id": "M4.1",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Run required rendered long sessions and campaign replay soaks with wall-clock, memory and frame-time evidence.",
+          "status": "pending",
+          "evidence": "docs/release-readiness.md; docs/completion-external-checks.md",
+          "need": "Accelerated/debug soak and short GL capture cannot close the rendered long-session requirement.",
+          "scope": "local",
+          "id": "M4.2"
+        },
+        {
+          "title": "Launch the exact stock Mac candidate and observe native menu/active/paused Quit and natural intro/title persistence.",
+          "status": "verified",
+          "evidence": "build/completion-audit/release/final-20261004-02/release-report.md; build/completion-audit/release/final-20261004-02/inspection/native-macos-producer-receipt.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Current-host native Mac observations only; natural intro/title saved no hidden score after repair. Native full-gameplay and red-window-button routes are separate.",
+          "id": "M4.3",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Exercise actual Windows/Linux release games and the full Mac arm64/Intel distribution matrix.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Cross-exports, identical PCK hashes and plain-engine inspection do not establish native foreign-platform execution.",
+          "scope": "external",
+          "id": "M4.4"
+        },
+        {
+          "title": "Exercise Proton and Steam Deck LCD/OLED, including suspend/resume and long sessions.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Retain actual hardware and the exact candidate hashes.",
+          "scope": "external",
+          "id": "M4.5"
+        },
+        {
+          "title": "Exercise Xbox, DualSense, DS4, Switch Pro and 8BitDo device/seat stability.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Retain connect/disconnect/reconnect, rebind and local co-op results.",
+          "scope": "external",
+          "id": "M4.6"
+        },
+        {
+          "title": "Verify the captured readable display layout and automated fullscreen-fallback contracts.",
+          "status": "verified",
+          "evidence": "build/completion-audit/presentation/capture-splash-physics-review.md; build/completion-audit/full-run/post-splash-regression.json; tests/test_main.gd::test_readable_window_falls_back_when_chrome_cannot_fit",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Current 1280x720 client at 2x and selected larger text settings; 1x is unsupported. This does not publish a measured minimum hardware specification.",
+          "id": "M4.7",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Publish a measured minimum specification and complete display/GPU compatibility observations.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Keep Windows10/11, NVIDIA/AMD/Intel, Mac arm64/Intel and each untested display/hardware cell open.",
+          "scope": "external",
+          "id": "M4.8"
+        },
+        {
+          "title": "Gather real crash/session population evidence and human QA required by beta exit.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Source regression results cannot establish participant counts, population crash targets or observer outcomes.",
+          "scope": "external",
+          "id": "M4.9"
+        }
+      ],
+      "status": "open",
+      "exit_evidence": "One or more required local, scope or external acceptance items remains open; verified subsets retain their own evidence."
+    },
+    {
+      "id": "M5",
+      "title": "Produce the release candidates",
+      "exit": "Exit requires checksummed candidate artifacts, reproducible packaging checks and platform execution evidence for the exact candidates.",
+      "exit_met": false,
+      "items": [
+        {
+          "title": "Freeze current working-source/version metadata and bind actual proving artifacts.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-current-verification.json; build/completion-audit/release/final-20261004-02/inspection/native-macos-producer-receipt.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Version1.4.4, baseline revision a495bdc25628e4359f4753cd5f721fa448e35566 plus retained dirty working snapshot; builder and driver/source dependency fingerprints are distinct recorded scopes.",
+          "id": "M5.1",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Export all three desktop stock and Steam-enabled candidates with selected pinned templates/sidecars.",
+          "status": "verified",
+          "evidence": "build/completion-audit/release/final-20261004-02/native-candidates-02/manifest.json; build/completion-audit/release/final-20261004-02/steam-candidates/manifest.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "These are actual fresh cross-exports and artifact hashes; they are not foreign native runtime or intended-account approval.",
+          "id": "M5.2",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Inspect package manifests, required imported resources, official Font Awesome icons/licenses and excluded development files.",
+          "status": "verified",
+          "evidence": "build/completion-audit/release/final-20261004-02/content/manifest.json; build/completion-audit/release/final-20261004-02/packed-runtime/manifest.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Seven configured resource exports and six exact stock/Steam PCK inspections passed, including all24 official FA imported textures.",
+          "id": "M5.3",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Run complete gameplay outside the source tree against the producer-bound Mac pack.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-packaged-common-matrix/summary.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Plain Godot inspector, empty cwd, private profiles and final ZIP/executable/PCK/engine/driver/source hash gates. Stock release templates reject external path/pack/script overrides.",
+          "id": "M5.4",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify saved-run playback after fresh OS processes over the exact exported pack.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-packaged-process-restarts/summary.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Plain-engine exact-PCK OS reload only; not native-template restart or Steam Cloud persistence.",
+          "id": "M5.5",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Verify pinned Steam template archive and native runtime sidecar bytes in current candidates.",
+          "status": "verified",
+          "evidence": "build/completion-audit/release/final-20261004-02/steam-candidates/manifest.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "GodotSteam4.22.1/Godot4.7.2/Steamworks1.65 template and sidecar identities; source/mocks/pack resources do not prove intended-account live behavior.",
+          "id": "M5.6",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Retain a current exact-candidate native Steam binding runtime check without conflating it with account acceptance.",
+          "status": "pending",
+          "evidence": "build/completion-audit/release/final-20261004-02/steam-candidates/manifest.json; docs/steam-candidate-validation.md",
+          "need": "Earlier native binding reflection is historical. Current export/sidecar and plain-engine PCK checks are separate; retain the exact current executable proof if required.",
+          "scope": "local",
+          "id": "M5.7"
+        },
+        {
+          "title": "Exercise actual exported native games on all intended platforms.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Use the platform matrix from M4 for the exact selected candidate bytes.",
+          "scope": "external",
+          "id": "M5.8"
+        },
+        {
+          "title": "Complete signing/notarization and applicable distribution requirements.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Obtain the appropriate signing authority and retain actual distribution/launch acceptance.",
+          "scope": "external",
+          "id": "M5.9"
+        }
+      ],
+      "status": "open",
+      "exit_evidence": "One or more required local, scope or external acceptance items remains open; verified subsets retain their own evidence."
+    },
+    {
+      "id": "M6",
+      "title": "Close launch acceptance",
+      "exit": "Exit requires observed acceptance for the shipping build and no unresolved launch gate. Public publication is a separate release action from preparing a build ready to ship.",
+      "exit_met": false,
+      "items": [
+        {
+          "title": "Verify achievements, Steam Input, leaderboards, rich presence and user-specific Cloud against the intended Steam app.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Confirm AppID/account/depot/build authority and retain actual intended-app results.",
+          "scope": "external",
+          "id": "M6.1"
+        },
+        {
+          "title": "Complete independent human co-op, newcomer, controller-feel and localization acceptance.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Retain actual participants, devices, language scope and observations.",
+          "scope": "external",
+          "id": "M6.2"
+        },
+        {
+          "title": "Preserve all existing store art, packed Blender sources, screenshots/handoff, trailer/poster/capture receipts, copy and provenance.",
+          "status": "verified",
+          "evidence": "build/completion-audit/store-assets-save/CommanderInChief-store-assets-2026-10-04-receipt.json; build/completion-audit/store-assets-save/browser-gallery-review.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Durable Downloads folder and literal ZIP verified against original/source copies and archive contents. Historical/draft media is preserved; no fresh-build media, rights or Steam approval is inferred.",
+          "id": "M6.3",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Retain current structural store-copy checks and selected Blender-source inspection.",
+          "status": "verified",
+          "evidence": "build/completion-audit/store-copy-current.log; build/completion-audit/blender-hero-inspection.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Structure/source preservation is separate from owner-approved final store content and reviewed current gameplay media.",
+          "id": "M6.4",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Review approved current store copy, actual gameplay screenshots/trailer, capsule/library assets and disclosures.",
+          "status": "external",
+          "evidence": "docs/steam-store/owner-review.md; build/completion-audit/store-assets-save/CommanderInChief-store-assets-2026-10-04-receipt.json",
+          "need": "Saved historical assets do not establish final candidate media, owner approval or intended-store page acceptance.",
+          "scope": "external",
+          "id": "M6.5"
+        },
+        {
+          "title": "Resolve generation/permission/voice records, pricing/support/date/language/rights fields and owner decisions.",
+          "status": "external",
+          "evidence": "docs/steam-store/owner-review.md",
+          "need": "Do not infer declarations, permissions, legal decisions or acceptance from asset copies.",
+          "scope": "external",
+          "id": "M6.6"
+        },
+        {
+          "title": "Complete intended-account install/update/uninstall, depot/page previews, upload/review and platform acceptance.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Publishing/account actions require the applicable owner authority and explicit publication instruction.",
+          "scope": "external",
+          "id": "M6.7"
+        },
+        {
+          "title": "Preserve owner-managed IP, legal, market, funding and awards decisions.",
+          "status": "external",
+          "evidence": "docs/PLAN.md",
+          "need": "No participant outcome, consent, permission, commercial decision or platform approval is inferred.",
+          "scope": "external",
+          "id": "M6.8"
+        },
+        {
+          "title": "Resolve missing planned local leaderboard/split/timer, save-ownership/integrity and assist-scheme launch scope, then implement included capabilities.",
+          "status": "active",
+          "evidence": "build/completion-audit/launch-contract-audit/finding.md; mapping.json",
+          "need": "Execute explicit local promises individually; do not use unanswered launch scope as a blanket implementation blocker. Settle the infinite-revive conflict separately.",
+          "scope": "local_authorized_and_separate_owner_decisions",
+          "id": "M6.9"
+        },
+        {
+          "title": "Resolve replay submission, ownership validation, storage, deterministic verification jobs and enforcement scope, then implement included capabilities.",
+          "status": "scope",
+          "evidence": "build/completion-audit/requirements-reconciliation.md",
+          "need": "The optional launch-scope question remains unanswered. Obtain the launch contract, then implement and verify any included capability; account access alone does not remove local implementation.",
+          "scope": "scope",
+          "id": "M6.10"
+        },
+        {
+          "title": "Resolve Steam UGC attachment and intended-app authentication scope, then implement/test the included local boundary.",
+          "status": "scope",
+          "evidence": "build/completion-audit/requirements-reconciliation.md",
+          "need": "The optional launch-scope question remains unanswered. Obtain the launch contract, then implement and verify any included capability; account access alone does not remove local implementation.",
+          "scope": "scope",
+          "id": "M6.11"
+        },
+        {
+          "title": "Obtain replay-service deployment authority and prove real invalid-run rejection/enforcement when included.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Local deterministic score verification does not authenticate submissions or deploy a service.",
+          "scope": "external",
+          "id": "M6.12"
+        },
+        {
+          "title": "Resolve default-off telemetry consent/collection/transport scope and endpoint/retention decisions before included implementation/live collection.",
+          "status": "scope",
+          "evidence": "build/completion-audit/requirements-reconciliation.md",
+          "need": "The optional launch-scope question remains unanswered. Obtain the launch contract, then implement and verify any included capability; account access alone does not remove local implementation.",
+          "scope": "scope",
+          "id": "M6.13"
+        },
+        {
+          "title": "Gather actual beta population crash/session and human QA evidence.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Mocks and source checks cannot establish population targets.",
+          "scope": "external",
+          "id": "M6.14"
+        },
+        {
+          "title": "Resolve the promised language launch matrix and implement missing included interface coverage before human QA.",
+          "status": "scope",
+          "evidence": "build/completion-audit/requirements-reconciliation.md",
+          "need": "The optional launch-scope question remains unanswered. Obtain the launch contract, then implement and verify any included capability; account access alone does not remove local implementation.",
+          "scope": "scope",
+          "id": "M6.15"
+        },
+        {
+          "title": "Resolve the bounded Zone1/ten-wave demo scope and implement/verify the exact included demo artifact.",
+          "status": "scope",
+          "evidence": "build/completion-audit/requirements-reconciliation.md",
+          "need": "The optional launch-scope question remains unanswered. Obtain the launch contract, then implement and verify any included capability; account access alone does not remove local implementation.",
+          "scope": "scope",
+          "id": "M6.16"
+        },
+        {
+          "title": "Obtain intended demo app/depot/store/festival authority and complete applicable submissions when included.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "An implementation or saved store archive does not provide external app/depot authority.",
+          "scope": "external",
+          "id": "M6.17"
+        },
+        {
+          "title": "Prepare a release-day patch candidate, support/review process and local install verification before owner publication.",
+          "status": "pending",
+          "evidence": "docs/release-readiness.md; docs/completion-external-checks.md",
+          "need": "Current review candidates are retained, but a reviewed patch/support/install/update handoff is not established by the source matrix.",
+          "scope": "local",
+          "id": "M6.18"
+        }
+      ],
+      "status": "open",
+      "exit_evidence": "One or more required local, scope or external acceptance items remains open; verified subsets retain their own evidence."
+    },
+    {
+      "id": "M7",
+      "title": "Deliver the shipping handoff",
+      "exit": "Exit requires the full done predicate from `todo.md`. A smaller local-only milestone must retain that label and does not close the goal.",
+      "exit_met": false,
+      "items": [
+        {
+          "title": "Assemble and verify the current checksummed local review handoff with source/pack/restart/presentation/release evidence.",
+          "status": "verified",
+          "evidence": "build/completion-audit/release/final-20261004-02/handoff-receipt.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "356 receipted files and same-source verification; final review archive CommanderInChief-1.4.zip SHA2562b859806cf92a385cf9173734c0372ab139ea338820eeae09fcf22000ba1b578. Optional approved store media was absent.",
+          "id": "M7.1",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Reconcile the plan/status with current proving artifacts and retain local/scope/external gaps.",
+          "status": "verified",
+          "evidence": "docs/completion-plan.md; docs/completion-status.json; todo.md; build/completion-audit/full-run/final-current-verification.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "This closes evidence reconciliation only, not the open launch requirements.",
+          "id": "M7.2",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Independently review local source-mode, exported-pack, fresh-process, renderer and package-tool contracts.",
+          "status": "verified",
+          "evidence": "build/completion-audit/full-run/final-report.md; build/completion-audit/presentation/acceptance-dashboard-review.json; build/completion-audit/release/final-20261004-02/offline-fixtures.json",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Current read-only verifier reviews and81 release-tool fixtures pass; human/foreign-platform/live-service acceptance remains separate.",
+          "id": "M7.3",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Record the precise local review-ready verdict and named remaining launch prerequisites.",
+          "status": "verified",
+          "evidence": "build/completion-audit/release/final-20261004-02/handoff-receipt.json; docs/completion-external-checks.md",
+          "need": "Current authoritative evidence is retained.",
+          "scope": "local",
+          "coverage_limit": "Current local review is verified. Overall shipping remains blocked and the optional launch-scope question is unanswered.",
+          "id": "M7.4",
+          "evidence_applies_to": "retained named source/candidate, not automatically the changed working source"
+        },
+        {
+          "title": "Complete the shipping handoff after every required launch gate and approved media decision is closed.",
+          "status": "external",
+          "evidence": "docs/completion-external-checks.md",
+          "need": "Meet the unchanged full done predicate in todo.md. A verified local review bundle and saved historical store archive do not close the shipping goal.",
+          "scope": "external",
+          "id": "M7.5"
+        }
+      ],
+      "status": "open",
+      "exit_evidence": "One or more required local, scope or external acceptance items remains open; verified subsets retain their own evidence."
+    }
+  ],
+  "overall_status": "active_local_implementation_and_verification",
+  "shipping_complete": false,
+  "local_review_verified": false,
+  "launch_scope_question_state": "unanswered",
+  "scope_note": "Explicit local promises remain authorized under the completion grant. Infinite revive/Last Stand conflict, account/operator/privacy/language choices, hardware and human acceptance remain separate. Historical verified items below retain their source-specific evidence; changed working source needs fresh acceptance.",
+  "current_evidence": {
+    "full_regression": {
+      "report": "build/completion-audit/full-run/post-splash-regression.json",
+      "methods": 1304,
+      "assertions": 40531,
+      "failures": 0
+    },
+    "source_modes": "build/completion-audit/full-run/final-common-matrix-04/summary.json",
+    "staged_endings": "build/completion-audit/full-run/final-ending-stages-02/summary.json",
+    "exact_mac_pack_plain_godot": "build/completion-audit/full-run/final-packaged-common-matrix/summary.json",
+    "fresh_os_save_watch_plain_godot": "build/completion-audit/full-run/final-packaged-process-restarts/summary.json",
+    "actual_gl_presentation": "build/completion-audit/presentation/capture-splash-physics-review.md",
+    "final_current_receipt": "build/completion-audit/full-run/final-current-verification.json",
+    "source_dependency_fingerprint": "bd5dfcca9c7716068df17c67ad047e1499a3726e26178f6922c722c8bf594336",
+    "app_asset_fingerprint": "ea0451a71c83612f3c71cfb9941d6cde8487e7ea6f40a06d5295633ab93b0ad2",
+    "local_review_bundle_receipt": "build/completion-audit/release/final-20261004-02/handoff-receipt.json",
+    "review_archive": "/Users/shoemoney/Projects/commander-in-chief/build/completion-audit/release/final-20261004-02/CommanderInChief-1.4.zip",
+    "review_archive_sha256": "2b859806cf92a385cf9173734c0372ab139ea338820eeae09fcf22000ba1b578"
+  },
+  "latest_user_request": {
+    "request": "Save all the store assets.",
+    "status": "verified",
+    "receipt": "build/completion-audit/store-assets-save/CommanderInChief-store-assets-2026-10-04-receipt.json",
+    "folder": "/Users/shoemoney/Downloads/CommanderInChief-store-assets-2026-10-04",
+    "archive": "/Users/shoemoney/Downloads/CommanderInChief-store-assets-2026-10-04.zip",
+    "archive_sha256": "a1ae28f26e1f8a82db29011964a89eea1f30ec862f50c653cd702065fcf68c7f",
+    "historical_media": true,
+    "current_approved_final_build_media_verified": false,
+    "gallery_review": "build/completion-audit/store-assets-save/browser-gallery-review.json",
+    "gallery_browser_verified": true
+  },
+  "active_work": {
+    "accessibility": "full_regression_running",
+    "timing": "accepted_design_offline",
+    "progress": "accepted_design_offline",
+    "endurance": "not_started_until_final_source_freeze"
+  },
+  "last_sealed_review": {
+    "version": "1.4.4",
+    "verified": true,
+    "path": "build/completion-audit/release/final-20261004-02/CommanderInChief-1.4.4-review",
+    "applies_to_current_working_source": false
+  },
+  "local_followup_items": [
+    {
+      "id": "AC-input",
+      "status": "focused_verified",
+      "evidence": "build/completion-audit/accessibility-integration/helper-tests-01/receipt.json",
+      "limit": "37 input tests; no physical-controller proof"
+    },
+    {
+      "id": "AC-production",
+      "status": "focused_verified",
+      "evidence": "build/completion-audit/accessibility-integration/production-tests-03/receipt.json",
+      "limit": "9 main-path tests; fresh full regression/runtime completion pending"
+    },
+    {
+      "id": "AC-menu",
+      "status": "rendered_reviewed",
+      "evidence": "build/completion-audit/presentation/capture-accessibility-01-process.json",
+      "limit": "104 staged frames reviewed; supplemental/final gallery receipt pending"
+    },
+    {
+      "id": "AC-replay",
+      "status": "focused_verified",
+      "evidence": "build/completion-audit/accessibility-integration/focused-final-01/receipt.json",
+      "limit": "Current behavioral suites pass. Fresh native reflection and complete runtime/export acceptance remain separate."
+    },
+    {
+      "id": "AC-board-identity",
+      "status": "focused_verified",
+      "limit": "Current behavioral suites pass. Fresh native reflection and complete runtime/export acceptance remain separate.",
+      "evidence": "build/completion-audit/accessibility-integration/focused-final-01/receipt.json"
+    },
+    {
+      "id": "AC-script-error-gates",
+      "status": "verified",
+      "evidence": "build/completion-audit/accessibility-integration/error-gates-01/receipt.json",
+      "limit": "Actual aborted method and wrapper-only runtime-error controls rejected"
+    },
+    {
+      "id": "TM-history",
+      "status": "design",
+      "scope": "local_authorized"
+    },
+    {
+      "id": "SV-integrity",
+      "status": "design",
+      "scope": "local_authorized_external_account_acceptance"
+    },
+    {
+      "id": "M4.2",
+      "status": "pending",
+      "limit": "No 3-hour rendered run started"
+    },
+    {
+      "id": "AC-behavior-controls",
+      "status": "verified",
+      "evidence": "build/completion-audit/accessibility-integration/behavior-controls-02/receipt.json",
+      "limit": "Production positive13 checks; no-op aim fault exact5 failures; cadence fault exact153 mismatches. Scratch-only faults, production source unchanged."
+    }
+  ]
+}

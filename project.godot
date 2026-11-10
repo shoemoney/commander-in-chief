@@ -33,8 +33,6 @@ window/size/window_height_override=720
 ; with black bars — HUD/menu stay in visible_rect ∩ OS safe area (notch) via
 ; MarginContainer safe insets in hud.gd / menu.gd and main.gd's
 ; get_visible_rect() centering, so bands and labels never sit on black bars.
-; Supported: 16:9 (640x360, 1280x720, 1920x1080) and 21:9/32:9 pillarbox;
-; portrait letterboxes. Keep integer letterbox.
 window/stretch/mode="viewport"
 window/stretch/scale_mode="integer"
 window/stretch/aspect="keep"

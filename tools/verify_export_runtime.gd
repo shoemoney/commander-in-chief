@@ -1,8 +1,14 @@
 extends SceneTree
-## Run EXTERNALLY against a pack, with --path pointing at an empty directory.
+## Run EXTERNALLY against a pack, from an empty working directory.
 ## No project class preloads: every game dependency must resolve from the pack.
 ## The sole external helper is this tool's sibling quiet-shutdown implementation.
 const Quiesce := preload("quiesce.gd")
+const FONT_AWESOME_ICONS := [
+	"volume-high", "volume-xmark", "music", "bell-slash", "trophy", "book-open",
+	"play", "gamepad", "gear", "rotate", "house", "desktop", "door-open",
+	"person-rifle", "stopwatch", "circle-xmark", "minus", "plus", "filter",
+	"file-lines", "closed-captioning", "text-height", "film", "medal",
+]
 
 
 func _initialize() -> void:
@@ -19,6 +25,13 @@ func _run() -> void:
 		push_error("EXPORT RUNTIME FAIL: use plain Godot for this offline pack inspector")
 		quit(1)
 		return
+	var profile := OS.get_environment("PACKED_EXPORT_PROFILE").replace("\\", "/").simplify_path()
+	var save_path := ProjectSettings.globalize_path("user://").replace("\\", "/").simplify_path()
+	if profile.is_empty() or not save_path.to_lower().begins_with(profile.to_lower() + "/"):
+		push_error("EXPORT RUNTIME FAIL: user data escaped the required isolated profile")
+		quit(1)
+		return
+	print("EXPORT PROFILE PASS: packed user data is isolated")
 	if FileAccess.file_exists("res://project.godot") or not FileAccess.file_exists("res://project.binary"):
 		push_error("EXPORT RUNTIME FAIL: expected a packed project with no source-tree fallback")
 		quit(1)
@@ -54,6 +67,14 @@ func _run() -> void:
 			push_error("EXPORT RUNTIME FAIL: missing or empty packed texture: " + path)
 			quit(1)
 			return
+	for icon in FONT_AWESOME_ICONS:
+		var path: String = "res://assets/fontawesome/solid/" + icon + ".svg"
+		var texture: Texture2D = load(path)
+		if texture == null or texture.get_width() <= 0 or texture.get_height() <= 0:
+			push_error("EXPORT RUNTIME FAIL: missing or empty packed Font Awesome icon: " + path)
+			quit(1)
+			return
+	print("EXPORT FONT AWESOME PASS: ", FONT_AWESOME_ICONS.size(), " packed textures loaded")
 	var scene: PackedScene = load("res://src/main.tscn")
 	if scene == null:
 		push_error("EXPORT RUNTIME FAIL: main scene cannot load")

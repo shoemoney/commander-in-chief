@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dmqnf4qatb46j"
-path="res://.godot/imported/mi_back.png-7d67736353109a32ec9cfec487b41993.ctex"
+uid="uid://pwgcv2wmwefu"
+path="res://.godot/imported/minus.svg-ccf5a583e6d3191d1c628d45f825db44.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/art/ui/menuicons/mi_back.png"
-dest_files=["res://.godot/imported/mi_back.png-7d67736353109a32ec9cfec487b41993.ctex"]
+source_file="res://assets/fontawesome/solid/minus.svg"
+dest_files=["res://.godot/imported/minus.svg-ccf5a583e6d3191d1c628d45f825db44.ctex"]
 
 [params]
 
@@ -37,4 +37,7 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=0
+detect_3d/compress_to=1
+svg/scale=1.0
+editor/scale_with_editor_scale=false
+editor/convert_colors_with_editor_theme=false

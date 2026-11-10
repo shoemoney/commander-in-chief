@@ -66,11 +66,6 @@ func _finish(code: int) -> void:
 	if _finishing:
 		return
 	_finishing = true
-	main.process_mode = Node.PROCESS_MODE_DISABLED
-	# Release Sfx's retained playback handles BEFORE the audio-drain grace period,
-	# not only when Quiesce frees the scene at the end of that period.
-	main._sfx._pb = null
-	main._sfx._ui_pb = null
 	await Quiesce.teardown(self, main)
 	main = null
 	quit(code)

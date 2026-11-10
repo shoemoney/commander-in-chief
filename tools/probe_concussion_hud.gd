@@ -176,7 +176,8 @@ func _run() -> void:
 	for px in SWEEP_X:
 		if await _pose(px):
 			fail = true
-	_main.set_physics_process(true)
+	await preload("res://tools/quiesce.gd").teardown(self, _main)
+	_main = null
 	if fail:
 		print("PROBE FAILED")
 		quit(1)

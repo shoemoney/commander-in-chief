@@ -22,6 +22,15 @@ func _initialize() -> void:
 	for name in names:
 		if not methods.has(name):
 			missing.append(name)
+	if methods.has("getLeaderboardName"):
+		var getter: Dictionary = methods["getLeaderboardName"]
+		if getter["return"]["type"] != TYPE_STRING:
+			missing.append("native-return-type:getLeaderboardName")
+		if getter["args"].size() != 1 or getter["args"][0]["type"] != TYPE_INT:
+			missing.append("native-argument-type:getLeaderboardName")
+		var defaults: Array = getter["default_args"]
+		if defaults.size() != 1 or typeof(defaults[0]) != TYPE_INT or defaults[0] != 0:
+			missing.append("native-default:getLeaderboardName")
 	# The test double must expose the same typed arguments and signal arity,
 	# rather than teaching tests a fictional interface the native binding lacks.
 	var mock = load("res://tests/mock_steam_singleton.gd").new()
@@ -32,6 +41,8 @@ func _initialize() -> void:
 		if not names.has(method.name) or not methods.has(method.name):
 			continue
 		var native: Dictionary = methods[method.name]
+		if method.name == "getLeaderboardName" and method["return"]["type"] != TYPE_STRING:
+			missing.append("mock-return-type:getLeaderboardName")
 		if method.args.size() != native.args.size():
 			missing.append("mock-arity:" + str(method.name))
 			continue

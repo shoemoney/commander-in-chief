@@ -1,8 +1,9 @@
 # Pinned GodotSteam API and verification scope
 
-The bridge targets **GodotSteam 4.22.1 / Steamworks 1.65**. Its method names,
-argument types, and signal shapes were checked against the real Steam singleton
-in the official Godot 4.7.2 macOS module build, not just the hand-written mock.
+The bridge targets **GodotSteam 4.22.1 / Steamworks 1.65**. The previously used
+method names, argument types, and signal shapes were checked against the real
+Steam singleton in the official Godot 4.7.2 macOS module build. The additional
+`getLeaderboardName` check below still needs native reflection after integration.
 
 ## Pin and primary evidence
 
@@ -41,6 +42,35 @@ The original real-binding probe failed on fifteen method names and
 
 The mock matches the pinned names and typed argument surface, but still
 simulates callbacks and controllers. It is not a network or hardware test.
+
+## Contextual leaderboard identity
+
+Production uploads select
+`scores_v2_<mode>_p<1|2>_<standard|hard>_<unassisted|assisted>`.
+All assisted runs remain eligible on their assisted board. The board name
+separates mode, player count, difficulty, and assistance presence. Legacy
+two-argument calls retain `scores_<mode>` and empty details.
+
+The detail array contains eight signed 32-bit integers. In order, these are
+schema 1, player count, hard flag, assist bitmask, seed low word, seed high word,
+tick low word, and tick high word. `SteamBridge.ASSIST_BITS` defines the stable
+bits for every current run assistance tag. Unknown tags and malformed context
+prevent upload rather than selecting an unassisted board.
+
+Before upload, the bridge compares the returned handle's native
+`getLeaderboardName(handle)` with its captured expected board name. Unrelated
+find results leave the pending identity waiting. Upload results must match
+the pending handle. This prevents an old callback from posting a new score
+to a different board.
+
+The [pinned source](https://codeberg.org/godotsteam/godotsteam/src/commit/5853a7741d174cfa37edee1ca44a11581a989d0b/godotsteam.cpp)
+declares `getLeaderboardName(uint64_t)` returning `String` and binds one integer
+argument with default 0. The source-based API verifier extracts required method
+names from `_call`, so this method is now required without an allowlist exception.
+The mock supplies the same argument and return shape. Local callback tests
+cover delayed old find and upload results, duplicate find results, and a valid
+new handle. The focused rerun of the new guards, native reflection of the added
+method, and all live account behavior remain pending.
 
 ## Repeat the real-binding check
 

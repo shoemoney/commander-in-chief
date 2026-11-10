@@ -13,7 +13,8 @@ and `docs/steam-store/owner-review.md` before release or redistribution.
 
 | Path | Files | Source | License |
 |---|---|---|---|
-| `assets/art/ui/` `hud/` `icons/` | 105 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py`, `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
+| `assets/art/ui/` `hud/` `icons/` | 103 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py`, `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
+| `assets/fontawesome/solid/` | 24 SVGs | Official Font Awesome Free 6.7.2, Fonticons, Inc. Sources and hashes in `assets/fontawesome/manifest.json`. Runtime fill changed to white. | Icons CC BY 4.0, retained `assets/fontawesome/LICENSE.txt`; attribution to [Font Awesome](https://fontawesome.com/) |
 | `assets/art/ui/title_logo.png` | 1 | Generative AI, **service/model/date unrecorded** | Project-owned **unverified** |
 | `assets/art/fx/` | 21 | Procedurally generated — `tools/gen_fx_cards.py` | Project-owned |
 | `assets/art/{decor,p2,mil2,cast2}` + 7 top-level | 87 | Procedurally generated — `tools/gen_entities.py` | Project-owned |
