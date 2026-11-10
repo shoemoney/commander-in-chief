@@ -31,6 +31,12 @@ func _fixture(have: Array, skew := {}) -> Callable:
 func _dir(have: Array, skew := {}) -> MusicDirector:
 	var d := MusicDirector.new()
 	d.loader = _fixture(have, skew)
+	# Fixture streams need a fixture manifest too. MusicDirector._init reads the SHIPPED
+	# assets/music/manifest.json, so once the real soundtrack landed these tests were
+	# timing a 0.5 s fixture sting against the real stinger's 3-5 s and a 110 BPM bar
+	# against each track's own tempo. Everything here is about director STATE; the
+	# shipped files get their own suite (test_soundtrack_wiring.gd).
+	d.manifest = {}
 	return d
 
 

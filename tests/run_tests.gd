@@ -50,6 +50,7 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_assets.gd",
 	"res://tests/test_capture_guard.gd",
 	"res://tests/test_audio_director.gd",
+	"res://tests/test_soundtrack_wiring.gd",
 	"res://tests/test_main.gd",
 	"res://tests/test_view_honesty.gd",
 	"res://tests/test_teach_truth.gd",
