@@ -383,6 +383,9 @@ const TEX := {
 	"mi_medal_3": preload(FA + "medal.svg"),
 	"mi_medal_4": preload(FA + "medal.svg"),
 	"mi_medal_5": preload(FA + "medal.svg"),
+	"medal_flawless": preload(ART + "ui/menuicons/medal_flawless.png"),   # service-record medals (tools/gen_ui_icons.py)
+	"medal_swift": preload(ART + "ui/menuicons/medal_swift.png"),
+	"medal_hoarder": preload(ART + "ui/menuicons/medal_hoarder.png"),
 	"mi_settings": preload(FA + "gear.svg"),
 	"mi_reload": preload(FA + "rotate.svg"),
 	"mi_home": preload(FA + "house.svg"),

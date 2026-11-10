@@ -673,6 +673,7 @@ var _splash_bigit: Texture2D       # Big IT studio medallion spritesheet (6×6 g
 var _splash_keyart: Texture2D      # the hero key-art poster, revealed on beat 4
 var _splash_vo_fired := false      # latch: fire the crawl narration once as the crawl beat begins
 var _splash_len := SPLASH_DUR      # this boot's splash length: SPLASH_DUR first boot / replay, FrontDoor.SPLASH_SHORT after
+var svc := ServiceRecord.new()      # service-record: per-sector medals + best rank per mode (view-only, persisted under [service])
 var front := FrontDoor.new()       # front-door: intro-seen flag, furthest sector, daily streak/score (view-only, persisted under [front])
 var _front_dirty := false
 
@@ -2366,6 +2367,7 @@ func _reset() -> void:
 	_victory_banked_score = 0
 	_wipe_banked = 0
 	_wipe_banked_score = 0
+	svc.begin_run(sim)   # service-record: a fresh medal tracker for this sim
 	_warn_p2_pad()   # after _banners.clear(), so the warning survives the reset
 
 
@@ -2570,6 +2572,9 @@ func _debrief_meta_rows(pulse: float) -> Array:
 	var rows: Array = []
 	if sim.mode == "campaign" and not _daily:
 		rows.append(CampaignMeta.vp_row(vet_points, _run_vp_gain, perks_maxed()))
+	var medal_row := svc.callout_row()   # service-record: fires once, on the run that earned it
+	if not medal_row.is_empty():
+		rows.append(medal_row)
 	var k := CampaignMeta.retry_sector(sim.mode, sim.victory, _daily,
 		CampaignMeta.sector_reached(CampaignMeta.opened_gates(sim)))
 	if k > 0:
@@ -3125,6 +3130,8 @@ static func levelstart_should_arm(seen: Dictionary) -> bool:
 
 
 func _consume_events() -> void:
+	if not _watching:
+		svc.observe(sim)   # service-record: per-sector knockdowns / clear time / chest spend
 	# Level-1 motivation: gate_open covers sectors 2+, but the opening sector has
 	# no gate to cross — fire the rally once, the first frame we're actually in
 	# combat (not still under the title/splash). _cmd_bark self-gates on HIDDEN.
@@ -5493,6 +5500,7 @@ func _load_bests() -> void:
 		_life_wins = _cfg_int(cf, "life", "wins", 0)
 		front = FrontDoor.new()
 		front.load_from(cf)
+		svc.load_from(cf)   # service-record: tolerant of absent / corrupt [service]
 		if not cf.has_section("front"):
 			# Saves that predate [front]: a veteran has seen the intro and the hall proves how far they got.
 			front.intro_seen = _life_runs > 0 or best_score > 0
@@ -6518,6 +6526,7 @@ func _record_run(score: int) -> void:
 	cf.set_value("life", "runs", _life_runs)
 	cf.set_value("life", "kills", _life_kills)
 	cf.set_value("life", "wins", _life_wins)
+	_commit_service_record(cf, entry, rr)
 	cf.set_value("best", "score", best_score)
 	cf.set_value("best", "wave", best_wave)
 	cf.set_value("best", "dist", best_dist)
@@ -6543,6 +6552,20 @@ func _record_run(score: int) -> void:
 	# the exact same final state a reloaded save would see, not a
 	# provisional pre-save snapshot.
 	_report_to_steam(entry, score)
+
+
+## service-record: bank this (already replay-verified) run's medals and best rank into `cf`.
+## The Hall's own `assist` flag (vest / accessibility assists / purchased perks) gates both.
+func _commit_service_record(cf: ConfigFile, entry: Dictionary, rr: Dictionary) -> void:
+	var assisted: bool = entry.get("assist", false)
+	var key := ServiceRecord.mode_key(str(entry["mode"]), bool(entry["daily"]))
+	var reach := ServiceRecord.reach_value(str(entry["mode"]), int(entry["sector"]),
+		int(entry["bosses"]), int(entry["wave"]), bool(entry["won"]))
+	svc.commit_run(ServiceRecord.medals_eligible(str(entry["mode"]), bool(entry["daily"]), assisted),
+		key, str(rr["grade"]), reach, assisted)
+	var sec := svc.to_section()
+	for k in sec:
+		cf.set_value("service", k, sec[k])
 
 
 func _report_to_steam(entry: Dictionary, score: int) -> void:

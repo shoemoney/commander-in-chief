@@ -136,6 +136,7 @@ var mode: int = Mode.TITLE
 var sel := 0
 var main: Node2D
 var _confirm := -1   # index of a destructive item awaiting a 2nd press
+var _record_view := false   # service-record: HALL's frame showing the SERVICE RECORD page (INFO row), never a board filter
 var _hall_filter := 0   # Hall of Fame view: 0 = ALL, 1 = CAMPAIGN, 2 = ENDLESS, 3 = BOSS RUSH
 var _hall_page := 0     # c1-13: which page of HALL_PAGE_ROWS-run pages is shown (up/down pages)
 var _hall_seen_hid := -1  # c1-13: hid of the latest run we've already auto-jumped to — once surfaced, reopening HALL keeps the player's chosen filter/page instead of snapping back
@@ -958,6 +959,7 @@ func open(m: int, select_id := "") -> void:
 	_rebind_pad_dev = 0   # c1-18: and on P1's pad layout
 	_rebind_msg = ""      # c1-18: no stale swap/clear notice carries into a fresh screen
 	_rebind_msg_t = 0.0
+	_record_view = false   # only the INFO > SERVICE RECORD row turns it on (after open())
 	if m == Mode.HALL:
 		# Auto-jump to the run you just finished — but ONLY the first time the board
 		# is opened after it was banked. Once surfaced (hid recorded), reopening HALL
@@ -1194,6 +1196,7 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 		# reached from TITLE's INFO row; each climbs back here.
 		var iitems: Array[Dictionary] = [
 			{"id": "hall", "label": "HALL OF FAME", "destructive": false, "grp": 0, "submenu": true},
+			{"id": "record", "label": "SERVICE RECORD", "destructive": false, "grp": 0, "submenu": true},
 			{"id": "howto", "label": "HOW TO PLAY", "destructive": false, "grp": 0, "submenu": true},
 			{"id": "intro", "label": "WATCH INTRO", "destructive": false, "grp": 0},   # front-door: the full intro, replayable after the first boot
 		]
@@ -2229,7 +2232,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			# Hall filter tabs get hover feedback too — they were click-only,
 			# the lone interactive surface with zero mouse cue (rows hover-select,
 			# arrows pulse; the file's own parity invariant, line ~317).
-			if mode == Mode.HALL:
+			if mode == Mode.HALL and not _record_view:
 				var ht := -1
 				var tabs := _hall_tab_rects()
 				for ti in tabs.size():
@@ -2303,7 +2306,7 @@ func _unhandled_input(ev: InputEvent) -> void:
 			# Hall filter tabs are clickable — they were the one visible control
 			# a mouse-only player couldn't operate (every other surface has
 			# hover/click/wheel parity).
-			if mode == Mode.HALL:
+			if mode == Mode.HALL and not _record_view:
 				var tabs := _hall_tab_rects()
 				for ti in tabs.size():
 					if tabs[ti].has_point(ev.position):
@@ -2453,6 +2456,8 @@ func _nav(move: int, hmove: int) -> void:
 			main._sfx.play("ui_tick", -13.0)
 			_mark_dirty()
 		return   # HALL vertical nav OWNS paging — always consume it, even at a boundary, so it never falls through to the 1-row list nav below
+	if mode == Mode.HALL and hmove != 0 and _record_view:
+		return   # service-record: the record page has no filter tabs to cycle
 	if mode == Mode.HALL and hmove != 0:
 		_hall_filter = wrapi(_hall_filter + hmove, 0, HALL_FILTER_NAMES.size())
 		_hall_page = 0   # a new filter is a fresh list — always start on page 1 (keeps the "OF N" counter honest)
@@ -3420,6 +3425,9 @@ func _activate() -> void:
 				_exit_opts(false)   # c3-18: revert the staged changes to the on-disk baseline, then climb
 				return
 			"hall": open(Mode.HALL)   # INFO screen link
+			"record":
+				open(Mode.HALL)   # service-record: same frame, medal page (open() clears the flag first)
+				_record_view = true
 			"watch": _watch_last_run()   # WATCH LAST RUN lives on the INFO screen now
 			"coop":
 				main._two_players = not main._two_players   # run-setup toggle (SETUP); left/right + Enter share this path
@@ -5092,6 +5100,10 @@ const HALL_FILTER_NAMES := ["ALL", "CAMPAIGN", "ENDLESS", "RUSH"]
 
 func _draw_hall() -> void:
 	var names := HALL_FILTER_NAMES
+	if _record_view:   # service-record: INFO > SERVICE RECORD reuses the Hall's frame, with its own body
+		_center_text("SERVICE RECORD", CONTENT_TITLE_Y, CONTENT_TITLE_SIZE, HEADER_ACCENT)
+		_draw_service_record()
+		return
 	_center_text("HALL OF FAME", CONTENT_TITLE_Y, CONTENT_TITLE_SIZE, HEADER_ACCENT)
 	# Persistent filter tab row — the old single "◄ NAME ►" line hid the other
 	# two choices, so nobody knew left/right cycled anything. Selected tab is
@@ -5357,6 +5369,48 @@ func _draw_hall() -> void:
 			# indicator reads identically across every filter state (here start=0,
 			# stop=rows.size(), so it renders "1-N OF N").
 			_center_text("%d-%d OF %d" % [start + 1, stop, rows.size()], _hall_page_rects()[0].end.y, HudIcons.TYPE_BODY, HALL_COUNT_COL)
+
+
+## service-record: the RECORD tab body. Layout numbers all come from ServiceRecord's pure statics.
+func _draw_service_record() -> void:
+	var sr: ServiceRecord = main.svc
+	var gold := Color(1.0, 0.82, 0.4)
+	var dim := Color(0.62, 0.66, 0.58)
+	var body := HudIcons.TYPE_BODY
+	var micro := Art.fs(HudIcons.TYPE_MICRO)
+	_center_text("MEDALS %d/%d   \u00b7   %d VP BANKED" % [sr.medal_total(), sr.medal_max(), main.vet_points],
+		ServiceRecord.SUMMARY_Y, body, HALL_COUNT_COL)
+	for s in range(1, ServiceRecord.SECTORS + 1):
+		var cx := ServiceRecord.sector_col_x(s)
+		_center_text_at("S%d" % s, cx, ServiceRecord.HEAD_Y, body, gold)
+		_center_text_at(ServiceRecord.clock_text(ServiceRecord.par_ticks(s)), cx,
+			ServiceRecord.PAR_Y, micro, dim)
+	Art.text(self, "PAR", Vector2(ServiceRecord.X_L, ServiceRecord.PAR_Y), micro, dim)
+	for mi in ServiceRecord.MEDALS.size():
+		var medal: int = ServiceRecord.MEDALS[mi]
+		Art.text(self, ServiceRecord.MEDAL_NAMES[medal],
+			Vector2(ServiceRecord.X_L, ServiceRecord.ROW_Y[mi] + 4.0), body, Color(0.88, 0.9, 0.82))
+		for s in range(1, ServiceRecord.SECTORS + 1):
+			var got: bool = (sr.medals[s - 1] & medal) != 0
+			_emit_tex(ServiceRecord.MEDAL_TEX[medal], ServiceRecord.icon_rect(s, mi),
+				Color.WHITE if got else Color(0.22, 0.24, 0.22, 0.75))
+	_emit_rect(Rect2(ServiceRecord.X_L, ServiceRecord.RULE_Y, HALL_CELL_R - ServiceRecord.X_L, 1.0),
+		Color(1.0, 0.82, 0.4, 0.3))
+	for i in ServiceRecord.MODES.size():
+		var key: String = ServiceRecord.MODES[i]
+		var x := ServiceRecord.rank_cell_x(i)
+		Art.text(self, ServiceRecord.MODE_LABELS[key], Vector2(x, ServiceRecord.RANK_LABEL_Y), body, gold)
+		var g: String = sr.best_grade.get(key, "")
+		if g == "":
+			Art.text(self, "--", Vector2(x, ServiceRecord.RANK_GRADE_Y), HudIcons.TYPE_LABEL, dim)
+		else:
+			Art.text(self, g, Vector2(x, ServiceRecord.RANK_GRADE_Y), HudIcons.TYPE_LABEL, ServiceRecord.GRADE_COLS[g])
+			Art.text(self, ServiceRecord.reach_text(key, int(sr.best_reach.get(key, 0))),
+				Vector2(x, ServiceRecord.RANK_REACH_Y), micro, dim)
+	_center_text_at("FLAWLESS NO KNOCKDOWN \u00b7 SWIFT UNDER PAR \u00b7 HOARDER NO SPEND",
+		CENTER_X, ServiceRecord.LEGEND_Y, micro, dim)
+	_center_text_at("PLAIN CAMPAIGN ONLY \u00b7 ASSISTED OR PERKED RUNS EARN NONE",
+		CENTER_X, ServiceRecord.NOTE_Y, micro, dim)
 
 
 func _hall_rows() -> Array:
@@ -6931,6 +6985,8 @@ static var _help_warned := {}
 func _mode_hint_segs(focused: Dictionary) -> Array:
 	match mode:
 		Mode.HALL:
+			if _record_view:
+				return []   # service-record: nothing to filter or page
 			var head: Array = footer_hall_filter_segs()
 			if main != null and _hall_pages(_hall_rows().size()) > 1:
 				head += footer_page_segs()   # UP/DN = PAGE only when the board actually pages

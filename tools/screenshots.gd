@@ -218,6 +218,8 @@ func _pose(idx: int) -> void:
 	main._debrief = false
 	main._result_t = 0.0
 	main._run_vp_gain = 0
+	main.svc = ServiceRecord.new()   # service-record: medals / bests / call-out must not carry between poses
+	main._menu.mode = GameMenu.Mode.HIDDEN   # ...nor may the previous pose's open menu page (the record page rode into the debrief shot)
 	# Same class, older: the OPTIONS pose turns REDUCE MOTION, COLORBLIND, ASSIST and
 	# FULLSCREEN on to exercise the header summary, and nothing ever turned them off. It
 	# went unnoticed while only menu poses followed it; the first gameplay pose added after
@@ -316,6 +318,9 @@ func _build_shots() -> void:
 		{"name": "pause-menu", "build": _shot_firefight, "dress": _dress_pause},
 		{"name": "how-to-play", "build": _shot_firefight, "dress": _dress_howto},
 		{"name": "hall-of-fame", "build": _shot_firefight, "dress": _dress_hall},
+		# service-record: the Hall's RECORD tab, and a Campaign debrief that just earned medals.
+		{"name": "service-record", "build": _shot_firefight, "dress": _dress_service_record},
+		{"name": "debrief-new-medal", "build": _shot_defeat, "dress": _dress_new_medal},
 		{"name": "options-screen", "build": _shot_firefight, "dress": _dress_options},
 		# 7 of the 12 framed modes had NEVER been rendered by this harness while the
 		# bezel was being rebuilt, and REBIND is the one that was actually broken:
@@ -565,6 +570,33 @@ func _dress_defeat(m: Node2D) -> void:
 	m._debrief = true
 	m.vet_points = 61
 	m._run_vp_gain = 10
+
+
+func _fill_record(m: Node2D) -> void:
+	m.svc.medals.assign([7, 7, 5, 3, 0, 0])
+	m.svc.best_grade = {"campaign": "A", "endless": "B", "boss_rush": "C", "arcade": "B", "daily": "S"}
+	m.svc.best_reach = {"campaign": 5, "endless": 12, "boss_rush": 3, "arcade": 4, "daily": 6}
+
+
+func _dress_service_record(m: Node2D) -> void:
+	_fill_record(m)
+	m.vet_points = 61
+	m._menu.open(GameMenu.Mode.HALL)
+	m._menu._open_t = 1.0
+	m._menu._record_view = true
+	m._hud_icons.visible = false
+
+
+func _dress_new_medal(m: Node2D) -> void:
+	_dress_defeat(m)
+	# Earned through the real tracker + bank path, not a hand-set call-out.
+	m.svc.begin_run(m.sim)
+	for t in [420, 910, 2300]:
+		m.sim.tick_count = t
+		m.sim.events.clear()
+		m.sim.events.append({"t": "gate_open"})
+		m.svc.observe(m.sim)
+	m.svc.commit_run(true, "campaign", "A", 4, false)
 
 
 func _shot_shop() -> SimWorld:

@@ -47,6 +47,7 @@ class _StubMain extends Node2D:
 	var best_wave := 0
 	var best_dist := 0
 	var front := FrontDoor.new()   # front-door: title reads the streak/score/sector/intro state off main.front
+	var svc := ServiceRecord.new()   # service-record: the SERVICE RECORD page reads medals/bests off main.svc
 	var _replays := 0
 	func replay_intro() -> void: _replays += 1
 	var _life_wins := 0

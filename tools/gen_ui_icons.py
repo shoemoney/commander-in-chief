@@ -64,6 +64,9 @@ SIZES = {
     "ui/menuicons/mi_medal_3": (256, 256),
     "ui/menuicons/mi_medal_4": (256, 256),
     "ui/menuicons/mi_medal_5": (256, 256),
+    "ui/menuicons/medal_flawless": (256, 256),
+    "ui/menuicons/medal_hoarder": (256, 256),
+    "ui/menuicons/medal_swift": (256, 256),
     "ui/menuicons/mi_reload": (256, 256),
     "ui/menuicons/mi_settings": (256, 256),
     "ui/menuicons/mi_timer": (256, 256),
@@ -281,6 +284,46 @@ def i_medal(p, tier: int):
     p.ell(0.5, 0.60, 0.27, 0.27, fill=face)
     p.ell(0.5, 0.60, 0.20, 0.20, fill=shade)
     p.text(0.5, 0.60, str(tier), 0.20, face, weight=0.22)
+    p.keyline()
+
+
+def _ribbon(p, left, right):
+    p.poly([(0.34, 0.05), (0.47, 0.05), (0.55, 0.42), (0.40, 0.42)], left)
+    p.poly([(0.53, 0.05), (0.66, 0.05), (0.60, 0.42), (0.45, 0.42)], right)
+
+
+def i_medal_flawless(p):
+    """Service-record medal: cleared a sector with no knockdown. Gold disc, star."""
+    _ribbon(p, (70, 96, 150), (176, 68, 60))
+    p.ell(0.5, 0.62, 0.31, 0.31, fill=GOLD_D)
+    p.ell(0.5, 0.62, 0.26, 0.26, fill=GOLD)
+    star = []
+    for i in range(10):
+        r = 0.20 if i % 2 == 0 else 0.085
+        a = -math.pi / 2 + i * math.pi / 5
+        star.append((0.5 + math.cos(a) * r, 0.62 + math.sin(a) * r))
+    p.poly(star, (252, 240, 190))
+    p.keyline()
+
+
+def i_medal_swift(p):
+    """Service-record medal: cleared a sector under par time. Silver disc, bolt."""
+    _ribbon(p, (60, 120, 160), (230, 230, 220))
+    p.ell(0.5, 0.62, 0.31, 0.31, fill=SILVER_D)
+    p.ell(0.5, 0.62, 0.26, 0.26, fill=SILVER)
+    p.poly([(0.56, 0.44), (0.40, 0.65), (0.49, 0.65), (0.43, 0.82),
+            (0.62, 0.58), (0.52, 0.58)], (38, 74, 120))
+    p.keyline()
+
+
+def i_medal_hoarder(p):
+    """Service-record medal: cleared a sector without spending the war chest. Bronze disc, coin stack."""
+    _ribbon(p, (120, 150, 70), (200, 160, 60))
+    p.ell(0.5, 0.62, 0.31, 0.31, fill=BRONZE_D)
+    p.ell(0.5, 0.62, 0.26, 0.26, fill=BRONZE)
+    for cy in (0.72, 0.62, 0.52):
+        p.ell(0.5, cy + 0.04, 0.15, 0.055, fill=BRASS_D)
+        p.ell(0.5, cy, 0.15, 0.055, fill=(240, 205, 96))
     p.keyline()
 
 
@@ -569,6 +612,8 @@ def i_icon_rocket(p):
 MENU = {
     "book": i_book, "controller": i_controller, "keyboard": i_keyboard,
     "mi_camera": i_mi_camera,
+    "medal_flawless": i_medal_flawless, "medal_swift": i_medal_swift,
+    "medal_hoarder": i_medal_hoarder,
     "mi_cancel": i_mi_cancel, "mi_combat": i_mi_combat, "mi_home": i_mi_home,
     "mi_reload": i_mi_reload, "mi_settings": i_mi_settings, "mi_timer": i_mi_timer,
     "mus_off": i_mus_off, "mus_on": i_mus_on, "play": i_play,
