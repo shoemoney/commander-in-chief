@@ -179,6 +179,9 @@ var _steam := SteamBridge.new()   # Steamworks facade -- no-ops offline (see src
 var _recoil: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player gun kick
 var _hit_flinch: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]   # per-player body kick when hit
 var _kick := Vector2.ZERO         # directional screen nudge from firing
+var _camera_lead := CameraLead.new()   # smoothed aim look-ahead (view-only, see camera_lead.gd)
+var _locator := PlayerLocator.new()    # per-soldier ring pulse state (view-only, see player_locator.gd)
+var _locator_tick := -1
 # AUDIO ONLY. Its window advances on PHYSICS FRAMES (which keep running through
 # hitstop and pause) and it counts mg_nest kills the sim deliberately excludes, so
 # it is NOT the run's streak — it is a blip-pitch ramp that must never be read as
@@ -5835,6 +5838,19 @@ func _shake_strength() -> float:
 	return AccessiblePolicy.shake_scale(int(accessibility_setting("shake_level")), _motion < 0.5)
 
 
+func _lead_strength() -> float:
+	## Aim look-ahead scale: the shake setting (0 under reduce-motion). Dev harnesses
+	## (no_autopause) get zero lead so staged shots stay byte-reproducible, unless
+	## CIC_CAMERA_LEAD=1 asks for it.
+	if no_autopause and OS.get_environment("CIC_CAMERA_LEAD") != "1":
+		return 0.0
+	return _shake_strength()
+
+
+func _lead_shift() -> Vector2:
+	return _camera_lead.offset if _lead_strength() > 0.0 else Vector2.ZERO
+
+
 func _flash_strength() -> float:
 	return AccessiblePolicy.flash_scale(int(accessibility_setting("flash_level")), _motion < 0.5)
 
@@ -7258,6 +7274,10 @@ func _update_feel() -> void:
 			_down_anim[i] = minf(1.0, _down_anim[i] + 0.12)
 	if _hitstop_frames == 0:
 		_kick *= 0.78
+	if sim.tick_count < _locator_tick:
+		_locator.reset()   # a restart rewinds the tick: the new run's soldiers get their spawn pulse
+	_locator_tick = sim.tick_count
+	_locator.observe(sim.players)
 	# Gamepad rumble: HD/adaptive — in 2P each pad buzzes for ITS OWN player's hits
 	# only (device 0 == P1, device 1 == P2), and `sharp` events (gunfire, melee,
 	# a lost soldier) get a punchier weak/strong split and a short snap, while
@@ -7318,7 +7338,8 @@ func _update_feel() -> void:
 	# (π rad/frame), flipping sign almost every frame — buzz, not roll.
 	var rot := sin(float(Engine.get_physics_frames()) * 0.55) * _trauma * _trauma * 0.035 * _shake_strength()
 	rotation = rot
-	position = (shake + _kick * _shake_strength() + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)).round()
+	_camera_lead.step(CameraLead.mean_aim(sim.players), _lead_strength())
+	position = (shake + _kick * _shake_strength() + _lead_shift() + SCREEN_CENTER - (SCREEN_CENTER * pz).rotated(rot)).round()
 
 
 func _drive_audio() -> void:
@@ -13660,21 +13681,26 @@ func _draw_players() -> void:
 			# a1-18 LEG#2/LEG#3: P1 ring routes through Art.safe (green->blue in colorblind
 			# so it never reads as danger-red), and P1/P2 are SHAPE-distinct — P1 a SOLID
 			# ring, P2 a DASHED ring — so identity survives without the green-vs-gold hue.
-			var idc := _player_ident_color(i, 0.6)
 			# Neutral seat + soft cool footprint: the colored identity ring used to
 			# disappear on pale sand and water. The backing carries no team meaning;
 			# it only guarantees the ring's silhouette on every biome.
 			draw_texture_rect(Art.tex("fx_softspot"),
 				Rect2(pos + Vector2(-13.0, -4.0), Vector2(26.0, 18.0)), false,
 				Color(0.02, 0.025, 0.03, 0.16))
-			Art.arc(self, pos + Vector2(0, 5), 11.5, 0, TAU, 22,
-				Color(0.01, 0.015, 0.02, 0.58), 3.0)
-			if _player_ring_dashed(i):
-				for ds in 8:
-					var da := ds * TAU / 8.0
-					Art.arc(self, pos + Vector2(0, 5), 10.0, da, da + TAU / 16.0, 3, idc, 1.5)
-			else:
-				Art.arc(self, pos + Vector2(0, 5), 10.0, 0, TAU, 20, idc, 1.5)
+			# Dark under-ring with the identity rim INSIDE it (dark on both sides of the
+			# hairline), plus one expanding pulse on spawn / revive / roll end — see
+			# PlayerLocator. P2's rim is dashed (shape identity, hue-independent).
+			var ring_c := pos + Vector2(0, 5)
+			var ring_layers := PlayerLocator.layers(true, _player_ident_color(i, 1.0),
+				_locator.pulse_age[i] if i < _locator.pulse_age.size() else -1)
+			for ri in ring_layers.size():
+				var rl: Dictionary = ring_layers[ri]
+				if ri == 1 and _player_ring_dashed(i):
+					for ds in 8:
+						var da := ds * TAU / 8.0
+						Art.arc(self, ring_c, rl["r"], da, da + TAU / 16.0, 3, rl["col"], rl["w"])
+				else:
+					Art.arc(self, ring_c, rl["r"], 0, TAU, 20, rl["col"], rl["w"])
 			# The opening/respawn command chevron answers "where am I?" during the
 			# exact beats where a small overhead sprite is easiest to lose, then fades.
 			var locator_a := hero_locator_alpha(sim.tick_count, p.get("hurt_iframes", 0))
