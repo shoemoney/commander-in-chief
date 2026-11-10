@@ -6886,19 +6886,20 @@ func _step_waves(inputs: Array = []) -> void:
 			# skipped) and joins the rotation the wave after; locked rolls fall back to the
 			# already-debuted specials. The roll is still drawn, so the stream is unchanged.
 			var debut_k: String = ""
+			var theme: int = EndlessRoster.theme_of(wave_mod, second_mod())
 			if mode == "endless" and wave >= 3 and is_elite:
 				var dk: String = EndlessRoster.debut_kind(wave)
-				if dk != "" and wave_pending == EndlessRoster.debut_slot(EndlessRoster.wave_budget(wave), elite_every):
+				if dk != "" and wave_pending == EndlessRoster.debut_slot(EndlessRoster.wave_budget(wave, theme), elite_every):
 					debut_k = dk
 			if debut_k != "" or (wave >= 3 and is_elite and wave_mod != 1):
 				var roll := rng.range_i(0, 9)
 				# c3 2v per-wave COMPOSITION THEMES: remap the SAME draw (no extra rng)
 				# onto a themed subset so a marksmen/bombardment wave reads as a unit.
-				if has_mod(7):   # MARKSMEN: balanced sniper(1)/ghillie(4)/drone(5)
-					roll = [1, 4, 5, 1, 4, 5, 1, 4, 5, 4][roll]   # ranged paint, even weights
-				elif has_mod(8):   # BOMBARDMENT: balanced grenadier(0)/sapper(3)
-					roll = [0, 3, 0, 3, 0, 3, 0, 3, 0, 3][roll]   # area denial, 50/50
-				var spawn_kind: String = debut_k if debut_k != "" else EndlessRoster.kind_for(roll, wave)
+				# MARKSMEN: sniper/ghillie/drone, even weights. BOMBARDMENT: grenadier/sapper, 50/50.
+				roll = EndlessRoster.themed_roll(roll, theme)
+				# A still-locked theme member falls back to the nearest UNLOCKED member of the
+				# SAME theme, never to a plain elite (the debut itself is kept: first-sight cards stay).
+				var spawn_kind: String = debut_k if debut_k != "" else EndlessRoster.themed_kind(roll, wave, theme)
 				if spawn_kind == "ghillie":
 					# ROOTED, like the nest and the mast: _step_ghillie writes
 					# neither x nor y on ANY branch (submerged / revealing /
@@ -7187,6 +7188,9 @@ func _start_wave() -> void:
 	# stay legal for flavor. Roll-then-clamp preserves the rng stream.
 	if wave % 5 == 0 and wave_mod in [1, 2, 3, 6, 7, 8]:
 		wave_mod = 0
+	# The theme is only known now (the mutator rolls after the base budget was set), so the
+	# themed wave's compensation bodies are re-derived here: a theme is NEVER an easier wave.
+	wave_pending = EndlessRoster.wave_budget(wave, EndlessRoster.theme_of(wave_mod, second_mod()))
 	if has_mod(3):
 		# Spotter wave: a Mortar Observer joins the fray.
 		observer = {
@@ -8295,6 +8299,11 @@ func checksum() -> int:
 		h = feed.call(e.get("face_y", 0), h)
 		h = feed.call(int(e.get("marked", false)), h)
 		h = feed.call(e.get("hp", 0), h)   # MG Nest armor (other kinds have none)
+		if e.get("escort", false):
+			h = feed.call(0xE5C027, h)   # Siege Tank escort tag (decides _dismount's respawn count); conditional, absent on every other enemy
+	for s in strikes:
+		if s.get("crater", false):
+			h = feed.call(0xC4A7E4, h)   # Siege Tank cover-cratering shell (_resolve_strikes breaks bags only when set); conditional
 	for pk in pickups:
 		h = feed.call(pk["kind"], h)
 		h = feed.call(pk.get("cost", 0), h)

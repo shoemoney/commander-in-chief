@@ -43,6 +43,7 @@ const RAM_R := 22 * F                     # lethal radius of the hull while it C
 const REST_DY := 60 * F                   # rest row: this far south of the gate wall
 const X_MIN := 90 * F
 const X_MAX := 550 * F
+const WALL_STRIP_DY := 14 * F                # the strip along the gate wall a player can stand in (SimWorld.GATE_BLOCK_PAD)
 const Y_LIMIT_DY := 300 * F               # a charge never ends further south than the gate + this
 const MUZZLE := 22 * F                    # MG / strike origin ahead of the hull centre
 ## Act 1 has no charge and no stun, so the rear plate never opens and only grenades (8) and
@@ -194,13 +195,21 @@ static func step_supply(sim, boss: Dictionary) -> void:
 	if not starved:
 		return
 	for pk in sim.pickups:
-		if pk["kind"] == 1 and int(pk.get("cost", 0)) == 0:
+		if pk["kind"] == 1 and int(pk.get("cost", 0)) == 0 and crate_reachable(sim, boss, pk):
 			boss["sc"] = 0
 			return
 	boss["sc"] = boss["sc"] + 1
 	if boss["sc"] >= RESUPPLY_TICKS:
 		boss["sc"] = 0
 		sim.pickups.append({"x": CRATE_POS[0] * F, "y": boss["gate_y"] + CRATE_POS[1] * F, "kind": 1, "cost": 0})
+
+
+static func crate_reachable(sim, boss: Dictionary, pk: Dictionary) -> bool:
+	## A crate counts against the re-arm only if a player can still walk to it: inside the
+	## locked arena, between the gate wall and the bottom of the screen. Campaign and Arcade
+	## never cull pickups, so elite drops and the landing-zone crate pile up BEHIND the camera
+	## forever; counting those starved the anti-softlock re-arm in every real run.
+	return pk["y"] >= boss["gate_y"] and pk["y"] <= sim.camera_top + sim.VIEW_H
 
 
 static func step(sim, boss: Dictionary) -> void:
@@ -336,16 +345,58 @@ static func _begin_rev(sim, boss: Dictionary, target: Dictionary) -> void:
 	var speed: int = CHARGE_SPEED[act - 1]
 	var travel: int = CHARGE_TICKS * speed
 	travel = mini(travel, _room(boss["x"], boss["fx"], X_MIN, X_MAX))
-	travel = mini(travel, _room(boss["y"], boss["fy"], boss["gate_y"] + 14 * F + HIT_R, boss["gate_y"] + Y_LIMIT_DY))
+	travel = mini(travel, _room(boss["y"], boss["fy"], boss["gate_y"] + WALL_STRIP_DY, boss["gate_y"] + Y_LIMIT_DY))
 	travel = maxi(travel, speed)
 	boss["sx"] = boss["x"]
 	boss["sy"] = boss["y"]
 	boss["ex"] = boss["x"] + Fixed.mul(boss["fx"], travel)
 	boss["ey"] = boss["y"] + Fixed.mul(boss["fy"], travel)
 	boss["cn"] = (travel + speed - 1) / speed
+	_truncate_at_wreck(sim, boss)
 	boss["rv"] = REV_TICKS[act - 1]
 	_enter(boss, St.REV)
 	sim.events.append({"t": "technical_rev", "x": boss["x"], "y": boss["y"]})
+
+
+static func _charge_pos(boss: Dictionary, k: int) -> Array:
+	## The hull centre on charge tick k: THE formula _step_charge drives with.
+	var n: int = boss["cn"]
+	return [boss["sx"] + (boss["ex"] - boss["sx"]) * k / n, boss["sy"] + (boss["ey"] - boss["sy"]) * k / n]
+
+
+static func _wreck_hit(sim, nx: int, ny: int) -> bool:
+	for rk in sim.rocks:
+		if sim._rk_solid(rk) and absi(nx - rk["x"]) <= sim._rk_hw(rk) + HIT_R / 2 \
+				and absi(ny - rk["y"]) <= sim._rk_hh(rk) + HIT_R / 2:
+			return true
+	return false
+
+
+static func _truncate_at_wreck(sim, boss: Dictionary) -> void:
+	## The lane drawn must be the lane swept: walk the very per-tick positions _step_charge
+	## will visit and cut the lane (end point and tick count) where the first solid wreck stops
+	## the hull -- the hull rests on the last free tick, so that is the new end. Re-checked
+	## after each cut because the shorter lane re-divides its ticks.
+	var guard := 0
+	while guard < 8:
+		guard += 1
+		var hit_k := 0
+		for k in range(1, int(boss["cn"]) + 1):
+			var pos := _charge_pos(boss, k)
+			if _wreck_hit(sim, pos[0], pos[1]):
+				hit_k = k
+				break
+		if hit_k == 0:
+			return
+		if hit_k == 1:
+			boss["ex"] = boss["sx"]
+			boss["ey"] = boss["sy"]
+			boss["cn"] = 1
+			return
+		var rest := _charge_pos(boss, hit_k - 1)
+		boss["ex"] = rest[0]
+		boss["ey"] = rest[1]
+		boss["cn"] = hit_k - 1
 
 
 static func _room(pos: int, comp: int, lo: int, hi: int) -> int:
@@ -360,15 +411,14 @@ static func _room(pos: int, comp: int, lo: int, hi: int) -> int:
 static func _step_charge(sim, boss: Dictionary) -> void:
 	var k: int = boss["st_t"]
 	var n: int = boss["cn"]
-	var nx: int = boss["sx"] + (boss["ex"] - boss["sx"]) * k / n
-	var ny: int = boss["sy"] + (boss["ey"] - boss["sy"]) * k / n
+	var pos := _charge_pos(boss, k)
+	var nx: int = pos[0]
+	var ny: int = pos[1]
 	# A wreck stops it dead (the slam is the stun); bags are crushed under it.
-	for rk in sim.rocks:
-		if sim._rk_solid(rk) and absi(nx - rk["x"]) <= sim._rk_hw(rk) + HIT_R / 2 \
-				and absi(ny - rk["y"]) <= sim._rk_hh(rk) + HIT_R / 2:
-			sim.events.append({"t": "siege_slam", "x": nx, "y": ny})
-			_begin_stun(sim, boss)
-			return
+	if _wreck_hit(sim, nx, ny):
+		sim.events.append({"t": "siege_slam", "x": nx, "y": ny})
+		_begin_stun(sim, boss)
+		return
 	boss["x"] = nx
 	boss["y"] = ny
 	var si: int = sim.sandbags.size() - 1
@@ -387,6 +437,10 @@ static func _step_charge(sim, boss: Dictionary) -> void:
 				continue
 			sim._hurt_player(p)
 	if k >= n:
+		# A lane cut short by a wreck (_truncate_at_wreck) ends touching it: that is still a slam.
+		var beyond := _charge_pos(boss, k + 1)
+		if _wreck_hit(sim, beyond[0], beyond[1]):
+			sim.events.append({"t": "siege_slam", "x": nx, "y": ny})
 		_begin_stun(sim, boss)
 
 

@@ -36,6 +36,18 @@ const THREAT := {
 	"ghillie": 4, "drone": 4, "mg_nest": 4, "technical": 4, "broadcast": 4,
 }
 const MAX_BONUS := 24
+## c3 2v composition themes: the wave mutator -> the rolls it remaps every elite draw onto
+## (the SAME draw, no extra rng) and the archetypes that make up the theme.
+const THEME_MARKSMEN := 7
+const THEME_BOMBARDMENT := 8
+const THEME_REMAP := {
+	7: [1, 4, 5, 1, 4, 5, 1, 4, 5, 4],   # sniper / ghillie / drone, even weights
+	8: [0, 3, 0, 3, 0, 3, 0, 3, 0, 3],   # grenadier / sapper, 50/50
+}
+const THEME_MEMBERS := {
+	7: ["sniper", "ghillie", "drone"],
+	8: ["grenadier", "sapper"],
+}
 
 
 static func unlocked(kind: String, wave: int) -> bool:
@@ -65,6 +77,39 @@ static func kind_for(roll: int, wave: int) -> String:
 	return "elite"
 
 
+static func theme_of(mod_a: int, mod_b: int = 0) -> int:
+	## The composition theme a wave runs (7 or 8), 0 for none. Same precedence the spawner
+	## has always had: MARKSMEN is checked before BOMBARDMENT, either mutator slot counts.
+	if mod_a == THEME_MARKSMEN or mod_b == THEME_MARKSMEN:
+		return THEME_MARKSMEN
+	if mod_a == THEME_BOMBARDMENT or mod_b == THEME_BOMBARDMENT:
+		return THEME_BOMBARDMENT
+	return 0
+
+
+static func themed_roll(roll: int, theme: int) -> int:
+	if theme == 0:
+		return roll
+	return THEME_REMAP[theme][roll]
+
+
+static func themed_kind(roll: int, wave: int, theme: int) -> String:
+	## Archetype a THEMED elite roll resolves to. `roll` is the already-remapped roll. A theme
+	## member that is still locked falls back to the NEAREST UNLOCKED member of the same theme
+	## (next in the theme's own order, wrapping), and only when the whole theme is still locked
+	## to a plain elite -- the theme used to dissolve into elites on every early themed wave.
+	var k: String = ROLL_KIND[roll]
+	if unlocked(k, wave) or theme == 0:
+		return kind_for(roll, wave)
+	var members: Array = THEME_MEMBERS[theme]
+	var at: int = members.find(k)
+	for off in range(1, members.size()):
+		var cand: String = members[(at + off) % members.size()]
+		if unlocked(cand, wave):
+			return cand
+	return "elite"
+
+
 static func debut_kind(wave: int) -> String:
 	for k in DEBUT:
 		if DEBUT[k] == wave:
@@ -88,14 +133,15 @@ static func base_total(wave: int) -> int:
 	return SimWorld.WAVE_BASE_ENEMIES + SimWorld.WAVE_ENEMIES_PER_WAVE * (wave - 1)
 
 
-static func wave_budget(wave: int) -> int:
+static func wave_budget(wave: int, theme: int = 0) -> int:
 	## Enemies a wave spawns from the trickle (bonus bodies included). Boss and
 	## escorts are not counted here.
-	return base_total(wave) + bonus_count(wave)
+	return base_total(wave) + bonus_count(wave, theme)
 
 
-static func _threat10(wave: int, total: int, tiered: bool) -> int:
-	## Sum of the trickle's threat x10 (the elite roll is uniform over 10 faces).
+static func _threat10(wave: int, total: int, tiered: bool, theme: int = 0) -> int:
+	## Sum of the trickle's threat x10 (the elite roll is uniform over 10 faces). A themed
+	## wave remaps every roll first; the debut slot keeps the debuting archetype.
 	var every: int = elite_every(wave)
 	var dk: String = debut_kind(wave) if tiered else ""
 	var slot: int = debut_slot(total, every)
@@ -109,26 +155,30 @@ static func _threat10(wave: int, total: int, tiered: bool) -> int:
 			sum += THREAT[dk] * 10
 		else:
 			for r in 10:
-				sum += THREAT[kind_for(r, wave) if tiered else legacy_kind(r, wave)]
+				var rr: int = themed_roll(r, theme)
+				if tiered:
+					sum += THREAT[themed_kind(rr, wave, theme)]
+				else:
+					sum += THREAT[legacy_kind(rr, wave)]
 	return sum
 
 
-static func threat_old(wave: int) -> int:
-	return _threat10(wave, base_total(wave), false)
+static func threat_old(wave: int, theme: int = 0) -> int:
+	return _threat10(wave, base_total(wave), false, theme)
 
 
-static func threat_new(wave: int) -> int:
-	return _threat10(wave, wave_budget(wave), true)
+static func threat_new(wave: int, theme: int = 0) -> int:
+	return _threat10(wave, wave_budget(wave, theme), true, theme)
 
 
-static func bonus_count(wave: int) -> int:
+static func bonus_count(wave: int, theme: int = 0) -> int:
 	## Extra trickle bodies that keep the tiered wave at least as heavy as the old one.
 	if wave < 3:
 		return 0
-	var want: int = threat_old(wave)
+	var want: int = threat_old(wave, theme)
 	var base: int = base_total(wave)
 	for b in MAX_BONUS + 1:
-		if _threat10(wave, base + b, true) >= want:
+		if _threat10(wave, base + b, true, theme) >= want:
 			return b
 	return MAX_BONUS
 

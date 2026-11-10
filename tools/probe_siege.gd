@@ -9,6 +9,9 @@ extends SceneTree
 ##                      and fetches again. Reports kill tick, deaths, grenades thrown and crate
 ##                      re-arms. NOREARM=1 deletes every crate after the first pickup, which is the
 ##                      pre-fix arena (the crate was a one-shot). Env: SEEDS, CAP.
+##   WALL=1           - stationary-player sweep over the arena (x 60..540, rows from the gate wall
+##                      down): for each post, which of charge / MG fan / shell reached him over a
+##                      2-act fight. Prints the posts NOT reached by the charge or the fan.
 ##   CAMPAIGN=1       - the scripted bot (main.gd demo_input) through a whole god-mode campaign:
 ##                      ticks to victory (or the cap) and the tick each gate opened. This part
 ##                      uses only SimWorld + demo_input, so it also runs on a tree without the
@@ -21,6 +24,8 @@ func _init() -> void:
 		var cap2: int = int(OS.get_environment("CAP")) if OS.has_environment("CAP") else 12000
 		for sd in seeds:
 			_starved(sd, cap2, OS.has_environment("NOREARM"))
+	elif OS.has_environment("WALL"):
+		_wall_sweep()
 	elif OS.has_environment("CAMPAIGN"):
 		var cap: int = int(OS.get_environment("CAP")) if OS.has_environment("CAP") else 24000
 		for sd in seeds:
@@ -194,3 +199,43 @@ func _starved(sd: int, cap: int, norearm: bool) -> void:
 		t += 1
 	print("siege STARVED seed=%d norearm=%s boss_dead=%s ticks=%d (%.1fs) act1_end=%d deaths=%d (in act 1: %d) grenades_thrown=%d crate_rearms=%s boss_hp=%d/%d"
 		% [sd, str(norearm), str(not boss["alive"]), t, t / 60.0, act1_end, deaths, deaths_act1, thrown, "n/a" if norearm else str(crates), boss["hp"], boss["max_hp"]])
+
+
+func _wall_sweep() -> void:
+	var F := Fixed.ONE
+	for dy in [14, 30, 60, 130, 200, 280]:
+		var row := ""
+		for px in range(60, 600, 60):
+			var charge := false
+			var fan := false
+			var shell := false
+			for act in [2, 3]:
+				var sim := SimWorld.new(41, 1)
+				var gy: int = sim.camera_top + 100 * F
+				sim.rocks.clear()
+				sim.sandbags.clear()
+				sim.god_mode = true
+				var boss := SiegeBoss.make(gy, sim._scaled_boss_hp(SiegeBoss.HP))
+				var mx: int = boss["max_hp"]
+				boss["hp"] = [mx, mx * 2 / 3, mx / 3][act - 1]
+				sim.gates.append({"y": gy, "open": false, "b1": {}, "b2": {}, "boss": boss})
+				var p: Dictionary = sim.players[0]
+				p["x"] = px * F
+				p["y"] = gy + dy * F
+				for _t in 1800:
+					SiegeBoss.step(sim, boss)
+					if boss["st"] == SiegeBoss.St.CHARGE and SiegeBoss._near(p["x"], p["y"], boss["x"], boss["y"], SiegeBoss.RAM_R):
+						charge = true
+					if boss["st"] == SiegeBoss.St.SWEEP and boss["st_t"] % SiegeBoss.SWEEP_FIRE_EVERY == 0:
+						var d := SiegeBoss.fan_dir(boss["fx"], boss["fy"], SiegeBoss.beam_index(boss))
+						var m := SiegeBoss._muzzle(boss)
+						var rx: int = p["x"] - m[0]
+						var ry: int = p["y"] - m[1]
+						var along := Fixed.mul(rx, d[0]) + Fixed.mul(ry, d[1])
+						if along > 0 and along <= SiegeBoss.SWEEP_RANGE and absi(Fixed.mul(rx, d[1]) - Fixed.mul(ry, d[0])) <= 9 * F:
+							fan = true
+				for st in sim.strikes:
+					if SiegeBoss._near(st["x"], st["y"], p["x"], p["y"], SimWorld.GRENADE_RADIUS):
+						shell = true
+			row += " %s%s%s" % ["C" if charge else ".", "F" if fan else ".", "S" if shell else "."]
+		print("dy=%3d %s" % [dy, row])
