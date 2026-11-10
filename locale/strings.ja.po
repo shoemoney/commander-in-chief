@@ -30,9 +30,6 @@ msgstr "色弱者モード：緑のサインを青に再着色し、形状を追
 msgid "ASSIST: EACH LIFE TAKES TWO HITS, NOT ONE. RUNS ARE TAGGED *ASSIST. SAVE IN OPTIONS."
 msgstr "アシスト：各ライフは1発ではなく2発耐えます。記録には*ASSISTが付きます。オプションで保存してください。"
 
-msgid "CAPTIONS: SUBTITLES FOR COMMANDER/SPOTTER VOICE LINES. SAVE IN OPTIONS."
-msgstr "字幕：指揮官・観測兵のボイスに字幕を表示。オプションで保存してください。"
-
 msgid "FULLSCREEN: FILL THE WHOLE DISPLAY INSTEAD OF A WINDOW. SAVE IN OPTIONS."
 msgstr "フルスクリーン：ウィンドウではなく画面全体を使用。オプションで保存してください。"
 
@@ -243,3 +240,36 @@ msgstr "トグル：ホイールを開きます。もう一度押すと購入し
 
 msgid "TOGGLE REPEATS ROLL UNTIL YOU PRESS AGAIN. MENUS RESET IT. SAVE IN OPTIONS."
 msgstr "トグル：もう一度押すまでローリングを繰り返します。メニューで解除されます。オプションで保存してください。"
+
+msgid "MORTAR"
+msgstr "迫撃砲"
+
+msgid "SNIPER"
+msgstr "狙撃手"
+
+msgid "DRONE"
+msgstr "ドローン"
+
+msgid "MG NEST"
+msgstr "MG陣地"
+
+msgid "ELITE"
+msgstr "エリート"
+
+msgid "GRENADE"
+msgstr "手榴弾"
+
+msgid "TECHNICAL"
+msgstr "テクニカル"
+
+msgid "BEHIND"
+msgstr "背後"
+
+msgid "FLANK"
+msgstr "側面"
+
+msgid "ARMOR"
+msgstr "装甲"
+
+msgid "CAPTIONS: ALL, SMART (FADES SEEN CUES) OR OFF. SAVE IN OPTIONS."
+msgstr "字幕: ALL、SMART(見た警告を薄く)、OFF。オプションで保存。"

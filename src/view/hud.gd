@@ -2689,6 +2689,12 @@ func caption_layout() -> Dictionary:
 	var a := 1.0 if main._motion < 0.5 else float(cap.get("fade", 1.0))
 	if a <= 0.0:
 		return {}
+	# CUES NOT WORDS: a non-speech warning cue (the bracket captions) draws as a compact chip, a
+	# glyph plus one or two words on a slim scrim, hung from the same baseline so the arbiters'
+	# reservation (bottom_rail_rects reads this very layout) is unchanged. Voice subtitles carry
+	# no "chip" and keep the full wrapped text below.
+	if String(cap.get("chip", "")) != "":
+		return _chip_layout(String(cap["chip"]), col, a)
 	var font := Art.font()
 	# accessibility: subtitles are the one HUD element a player may be reading INSTEAD of hearing
 	# the game, so TEXT SIZE scales them. Wrap, measure, leading, scrim and draw all key off this
@@ -2707,9 +2713,56 @@ func caption_layout() -> Dictionary:
 	return {"lines": lines, "cs": cs, "line_h": line_h, "y0": y0, "bg": bg, "col": col, "a": a}
 
 
+const CHIP_ICON_W := 8.0
+const CHIP_GAP := 4.0
+const CHIP_PAD := 4.0
+const CHIP_ABOVE := 7.0   # ascent of the 9px chip type over its baseline; scrim BELOW stays CAPTION_BG_BELOW
+
+## The chip form of an SFX-cue caption: {"lines", "cs", "line_h", "y0", "bg", "col", "a"} like the
+## full strip, plus "icon" (the glyph's rect, inside bg) and "cx" (where the word is centred).
+func _chip_layout(word: String, col: Color, a: float) -> Dictionary:
+	var font := Art.font()
+	var cs := Art.fs(TYPE_MICRO)
+	var scale := float(cs) / float(TYPE_MICRO)
+	var txt := TranslationServer.translate(word)
+	var tw := font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, cs).x
+	var iw := CHIP_ICON_W * scale
+	var total := iw + CHIP_GAP + tw
+	var y_bottom := VERB_LEGEND_Y - 20.0 - bottom_band_lift(main.get("sim"))
+	var x0 := 320.0 - total / 2.0
+	var bg := Rect2(x0 - CHIP_PAD, y_bottom - CHIP_ABOVE * scale, total + CHIP_PAD * 2.0,
+		CHIP_ABOVE * scale + CAPTION_BG_BELOW)
+	var icon := Rect2(x0, y_bottom - iw + 1.0, iw, iw)
+	return {"lines": [txt] as Array[String], "cs": cs, "line_h": CAPTION_LINE_H * scale, "y0": y_bottom,
+		"bg": bg, "col": col, "a": a, "icon": icon, "cx": x0 + iw + CHIP_GAP + tw / 2.0}
+
+
+func _draw_chip_glyph(icon: Rect2, col: Color) -> void:
+	## A warning triangle with a bang: reads as "danger" with no words and no hue dependence.
+	var l := icon.position.x
+	var r := icon.end.x
+	var t := icon.position.y
+	var b := icon.end.y
+	var mx := (l + r) / 2.0
+	draw_colored_polygon(PackedVector2Array([Vector2(mx, t), Vector2(r, b), Vector2(l, b)]), col)
+	var ink := Color(0.03, 0.04, 0.03, col.a)
+	draw_rect(Rect2(mx - 0.5, t + icon.size.y * 0.38, 1.0, icon.size.y * 0.30), ink)
+	draw_rect(Rect2(mx - 0.5, b - 2.0, 1.0, 1.0), ink)
+
+
 func _draw_caption() -> void:
 	var lay := caption_layout()
 	if lay.is_empty():
+		return
+	if lay.has("icon"):
+		var cbg: Rect2 = lay["bg"]
+		var ccol: Color = lay["col"]
+		var ca: float = lay["a"]
+		var csoft := cbg.grow_individual(10.0, 2.0, 10.0, 2.0)
+		_emit_bg_rect(cbg, Color(CAPTION_SCRIM_FILL.r, CAPTION_SCRIM_FILL.g, CAPTION_SCRIM_FILL.b, CAPTION_SCRIM_FILL.a * ca))
+		draw_texture_rect(Art.tex("fx_softspot"), csoft, false, Color(0.02, 0.03, 0.02, 0.7 * ca))
+		_draw_chip_glyph(lay["icon"], Color(ccol.r, ccol.g, ccol.b, ca))
+		Art.text_center(self, (lay["lines"] as Array)[0], lay["cx"], lay["y0"], lay["cs"], Color(ccol.r, ccol.g, ccol.b, ca))
 		return
 	var lines: Array[String] = lay["lines"]
 	var cs: int = lay["cs"]

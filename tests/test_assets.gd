@@ -238,7 +238,7 @@ func test_attract_mode_captions_cannot_leak_into_a_real_run() -> void:
 	# the draw path, which returns early while a menu is up — so the backlog emptied into the
 	# player's real run as warnings for threats that happened to a demo bot.
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
-	var at := src.find("_sfx.caption_sfx(kind)")
+	var at := src.find("_caption_cue(kind)")   # cues-not-words: the policy-syncing wrapper around _sfx.caption_sfx
 	Runner.T.ok(at > 0, "the caption choke point still exists")
 	# Pin the PROPERTY, not the exact line. v1 of this required the literal
 	# "if _menu.mode == GameMenu.Mode.HIDDEN:" including the colon, and went red the moment

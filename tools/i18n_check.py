@@ -78,6 +78,7 @@ def extract_source_keys() -> set[str]:
     keys |= _dict_string_values(menu_src, "SETTING_HELP")
     keys |= _dict_string_values(sfx_src, "_VO_CAPTIONS")
     keys |= _dict_string_values(sfx_src, "_BARK_CAPTIONS")
+    keys |= _dict_string_values(sfx_src, "SFX_CAPTION_CHIPS")
     keys |= _hint_literals(main_src)
     keys |= _verb_seg_labels(hud_src)
     # Hand-wired choke points -- one-off translate() calls, not dict/array literals, so no

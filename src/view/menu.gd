@@ -1249,7 +1249,7 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 			{"id": "access_effects", "label": "SHAKE & FLASH", "destructive": false, "grp": 0, "submenu": true},
 			{"id": "motion", "label": "REDUCE MOTION: %s" % ("ON" if main._motion < 0.5 else "OFF"), "destructive": false, "on": main._motion < 0.5, "grp": 3},
 			{"id": "colorblind", "label": "COLORBLIND: %s" % ("ON" if main.colorblind else "OFF"), "destructive": false, "on": main.colorblind, "grp": 3},
-			{"id": "captions", "label": "CAPTIONS: %s" % ("ON" if main._captions else "OFF"), "destructive": false, "on": main._captions, "grp": 3},
+			{"id": "captions", "label": "CAPTIONS: %s" % CuePolicy.mode_label(main._caption_mode), "destructive": false, "on": main._caption_mode != CuePolicy.CAP_OFF, "grp": 3},
 			{"id": "assist", "label": "ASSIST (2-HIT): %s" % ("ON" if main._assist else "OFF"), "destructive": false, "on": main._assist, "grp": 4},
 			_accessibility_row({"key": "slow_mode", "label": "75% GAME SPEED", "kind": "bool"}, 4),
 			{"id": "back", "label": "BACK", "destructive": false, "grp": 8},
@@ -2660,7 +2660,7 @@ const SETTING_HELP := {
 	"motion": "REDUCE MOTION: NO SHAKE OR SCROLL, DAMPED FLASH/WARP. SAVE IN OPTIONS.",
 	"colorblind": "COLORBLIND: RECOLORS GREEN CUES TO BLUE AND ADDS SHAPES. SAVE IN OPTIONS.",
 	"assist": "ASSIST: EACH LIFE TAKES TWO HITS, NOT ONE. RUNS ARE TAGGED *ASSIST. SAVE IN OPTIONS.",
-	"captions": "CAPTIONS: SUBTITLES FOR COMMANDER/SPOTTER VOICE LINES. SAVE IN OPTIONS.",
+	"captions": "CAPTIONS: ALL, SMART (FADES SEEN CUES) OR OFF. SAVE IN OPTIONS.",
 	"fullscreen": "FULLSCREEN: FILL THE WHOLE DISPLAY INSTEAD OF A WINDOW. SAVE IN OPTIONS.",
 	"winscale": "WINDOW SCALE: SIZE OF THE GAME WINDOW WHILE NOT FULLSCREEN. SAVE IN OPTIONS.",
 	"textscale": "TEXT SIZE: ENLARGES SMALL ON-SCREEN LABELS AND SUBTITLES. SAVE IN OPTIONS.",
@@ -3432,7 +3432,7 @@ func _activate() -> void:
 				# MUSIC volume rows) — BACK climbs back to this row. Same pattern as DISPLAY below.
 				open(Mode.AUDIO)
 			"captions":
-				main._captions = not main._captions
+				main._caption_mode = CuePolicy.next_mode(main._caption_mode)   # ALL -> SMART -> OFF
 				_stage_opts()	# c3-18: apply live, defer the disk write to SAVE
 				_flash_setting()
 			"display":

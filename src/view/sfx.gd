@@ -98,6 +98,29 @@ const SFX_CAPTIONS := {
 # would be pinned open by one sustained event and stop reading as news.
 const SFX_CAPTION_GAP := 180
 
+# CUES NOT WORDS: the compact chip that stands in for the bracket line on the strip. One or two
+# short words; hud.gd draws a warning glyph beside it. The bracket text above stays the canonical
+# caption (tests, translators, active_caption()["text"]); the chip is only how it is DRAWN.
+const SFX_CAPTION_CHIPS := {
+	"strike_warn": "MORTAR",
+	"sniper_paint": "SNIPER",
+	"drone_windup": "DRONE",
+	"mg_nest_aim": "MG NEST",
+	"elite_windup": "ELITE",
+	"grenadier_windup": "GRENADE",
+	"technical_rev": "TECHNICAL",
+	"rear_warn": "BEHIND",
+	"flank_warn": "FLANK",
+	"armor_block": "ARMOR",
+}
+# CAPTIONS: ALL / SMART / OFF (CuePolicy.CaptionMode), pushed in by main before each cue. SMART
+# needs the per-cue exposure counters (main's persisted dict, shared by reference) and the SFX
+# level (0..10 steps) to know whether the player can hear the cue at all.
+var caption_mode := 0
+var sfx_step := 10
+var cue_counts: Dictionary = {}
+var cue_counts_dirty := false
+
 var _sounds: Dictionary = {}
 var _pool: Array[AudioStreamPlayer2D] = []
 var _player := AudioStreamPlayer.new()
@@ -847,8 +870,29 @@ func caption_sfx(key: String) -> void:
 	var f := Engine.get_physics_frames()
 	if f < int(_sfx_cap_next.get(key, 0)):
 		return
+	# SMART fades a cue the player has met enough times, unless they cannot hear it. ALL (the
+	# default) never reaches the fade branch, so it is behaviourally the shipped path.
+	var cap_key: String = CuePolicy.KEY_CAP + key
+	if caption_mode == CuePolicy.CAP_SMART \
+			and CuePolicy.smart_suppresses(CuePolicy.count_of(cue_counts, cap_key), sfx_step):
+		return
 	_sfx_cap_next[key] = f + SFX_CAPTION_GAP
+	if caption_mode != CuePolicy.CAP_OFF:
+		CuePolicy.bump(cue_counts, cap_key)
+		cue_counts_dirty = true
 	_arm_caption(SFX_CAPTIONS[key], null, false, false, CaptionTier.LETHAL)
+
+
+# bracket line -> chip word, so the strip can draw the compact form without the caption queue
+# having to carry a second field through its preempt/resume copies.
+var _cap_chip_by_text: Dictionary = _build_chip_index()
+
+
+static func _build_chip_index() -> Dictionary:
+	var out := {}
+	for k in SFX_CAPTION_CHIPS:
+		out[SFX_CAPTIONS[k]] = SFX_CAPTION_CHIPS[k]
+	return out
 
 
 func active_caption() -> Dictionary:
@@ -860,8 +904,11 @@ func active_caption() -> Dictionary:
 	var left := _cap_until - Engine.get_physics_frames()
 	if left <= 0:
 		return {"text": "", "radio": false, "fade": 0.0}
-	return {"text": _cap_text, "radio": _cap_radio, "tier": _cap_tier,
+	var out := {"text": _cap_text, "radio": _cap_radio, "tier": _cap_tier,
 		"fade": minf(float(left) / CAPTION_FADE_FRAMES, 1.0)}
+	if not _cap_is_vo and _cap_chip_by_text.has(_cap_text):
+		out["chip"] = _cap_chip_by_text[_cap_text]
+	return out
 
 
 func duck_sfx_under_vo(active: bool, base_db: float = 0.0) -> void:

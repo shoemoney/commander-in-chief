@@ -227,7 +227,17 @@ var _motion := 1.0               # accessibility: 0 = reduce shake/flash/vignett
 const STROBE_HALF_TICKS := 10
 var colorblind := false: set = _set_colorblind  # deuteran-safe: remap 'affordable/safe' green → cyan
 var _assist := false             # accessibility: permanent 2-hit vest (flagged on the leaderboard)
-var _captions := true            # accessibility: on-screen subtitles for Commander/Spotter VO+barks (hud.gd _draw_caption)
+var _caption_mode := CuePolicy.CAP_ALL   # CAPTIONS: ALL / SMART / OFF (CuePolicy.CaptionMode); saved as the int
+## accessibility: on-screen subtitles for Commander/Spotter VO+barks (hud.gd _draw_caption). Derived: every
+## existing reader (hud gates, tools, tests) keeps asking "are captions on at all", and only the CAPTIONS row,
+## the save and the cue gate know about the three states.
+var _captions: bool:
+	get:
+		return _caption_mode != CuePolicy.CAP_OFF
+	set(v):
+		if v != (_caption_mode != CuePolicy.CAP_OFF):
+			_caption_mode = CuePolicy.CAP_ALL if v else CuePolicy.CAP_OFF
+var _cue_seen := {}              # persisted cue counters beside _seen: caption exposures, pickup counts, armor mastery
 # accessibility: TEXT SIZE, as a PERCENT of the design font sizes (100 = the shipped 640x360
 # sizes). The game draws load-bearing information at 7-8px inside a 640x360 design frame — the
 # shop item NAME, the seed-validity tag, the in-world RESCUE/HOLD FIRE/LOW FUEL callouts — which
@@ -2602,7 +2612,7 @@ func _flush_bests() -> void:
 	if _best_dirty:
 		sections["best"] = {"score": best_score, "wave": best_wave, "dist": best_dist}
 	if _seen_dirty:
-		sections["seen"] = {"hints": _seen}
+		sections["seen"] = {"hints": _seen, "cues": _cue_seen}
 	if sections.is_empty():
 		return
 	# save-integrity: clear the dirty flags only once the write actually LANDED.
@@ -3048,6 +3058,9 @@ func _consume_events() -> void:
 			break
 	for ev in sim.events:
 		var kind: String = ev["t"]
+		if kind == "throw" and not _cue_seen.has(CuePolicy.KEY_THREW) and _menu.mode != GameMenu.Mode.TITLE:
+			_cue_seen[CuePolicy.KEY_THREW] = 1   # the player has found the grenade: the armor re-arm retires
+			_seen_dirty = true
 		if kind == "pickup":
 			_sfx.play("buy" if ev.get("cost", 0) > 0 else "pickup", -5.0)
 			if ev.get("cost", 0) == 0 and not ev.get("full", false):
@@ -3078,9 +3091,14 @@ func _consume_events() -> void:
 				_sfx.play("buy", -9.0, 0.8)
 			elif ev.get("kind", 0) >= 4:
 				var cap_i: int = clampi(int(ev["kind"]) - 4, 0, _CAPSULE_CALLOUT.size() - 1)
-				_fx.append({"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
+				var cap_fx := {"x": ev["x"], "y": ev["y"] - 6, "t": 0.0, "kind": "floattext",
 					"rate": 0.013, "size": 13, "text": _CAPSULE_CALLOUT[cap_i],
-					"col": _CAPSULE_COL[cap_i]})
+					"col": _CAPSULE_COL[cap_i]}
+				# CUES NOT WORDS: the first two grabs of each kind spell the callout; after that the
+				# capsule's own sprite pulses in a ring (the teach hints below still fire once).
+				if not _pickup_word_due(str(int(ev["kind"]))):
+					cap_fx["icon"] = _CAPSULE_TEX[cap_i]
+				_fx.append(cap_fx)
 				# First-grab teaching: the new capsules are rules, not just stats —
 				# one-shot hints (persisted) say what each actually DOES.
 				match int(ev["kind"]):
@@ -3152,7 +3170,7 @@ func _consume_events() -> void:
 			# the sim steps a run the player cannot see, and the old HIDDEN-only gate happily armed
 			# lethal-tier captions for it. Same backlog leak as the attract fix, different cover.
 			if _menu.mode == GameMenu.Mode.HIDDEN and _splash_t <= 0.0:
-				_sfx.caption_sfx(kind)
+				_caption_cue(kind)
 		match kind:
 			"cannon_deny":
 				var pi := int(ev["i"])
@@ -3268,6 +3286,7 @@ func _consume_events() -> void:
 						# ...and the keyboard half now reads the LIVE bind instead of a hardcoded
 						# stamp: grenade moved SHIFT->E, and a stamped key would have lied about it
 						# (and about every rebind) exactly like the old one did.
+						_note_armor_block()   # mastery re-arm: may clear _seen["armor"] so the hint below teaches once more
 						_hint("armor", TranslationServer.translate("GRENADES CRACK ARMOR — [%s] — BUNKERS TAKE NO BULLETS")
 							% (Art.pad_button_label(pad_bind_for_glyph("grenade")) if Art.use_pad else GameMenu.key_label(bind("grenade"))))
 				if not armor_pinged:
@@ -3283,7 +3302,7 @@ func _consume_events() -> void:
 					# per hit-target), so it needs its own caption call. The plink is what tells a
 					# player their bullets are doing NOTHING to this — the _hint teaches it once
 					# ever, then it's audio-only forever.
-					_sfx.caption_sfx("armor_block")
+					_caption_cue("armor_block")
 				# Riot-shield deflect: armor_block fires for bunkers AND shields, but a
 				# shieldman eating your frontal rounds looked identical to plinking a
 				# wall. If the block landed on a shieldman, add a bright cyan ricochet
@@ -3847,8 +3866,11 @@ func _consume_events() -> void:
 				# hulk salvage. Same mount grammar as sandbag_plant/tank_crew: tread dust,
 				# the tank-blue callout, and a short punch so the hull has weight.
 				_burst(ev["x"], ev["y"], "dust", 6, 0.8, 1.8, 0.4)
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.014, "text": "ARMOR UP", "col": Color(0.7, 0.9, 1.0)})
+				var armor_fx := {"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
+					"rate": 0.014, "text": "ARMOR UP", "col": Color(0.7, 0.9, 1.0)}
+				if not _pickup_word_due("armor_up"):
+					armor_fx["icon"] = "icon_vest"
+				_fx.append(armor_fx)
 				_trauma = minf(1.0, _trauma + 0.14)
 				_hitstop_frames = maxi(_hitstop_frames, 2)
 				# -1 (both pads): the sim event carries no player index, so the buzz can't
@@ -3866,8 +3888,9 @@ func _consume_events() -> void:
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_softspot",
 					"sz": 18.0, "grow": 0.4, "fade": 0.75, "rate": 0.03, "col": Color(1.0, 0.55, 0.3, 0.35)})
 			"flank_breach":
-				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "floattext",
-					"rate": 0.014, "text": "FLANKS!", "col": Color(1.0, 0.5, 0.3)})
+				# CUES NOT WORDS: an edge chevron pointing at the breach replaces the word FLANKS!.
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "edge_chev",
+					"rate": 0.011, "col": Color(1.0, 0.5, 0.3)})
 				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex", "tex": "fx_smoke",
 					"sz": 20.0, "grow": 1.0, "fade": 1.4, "rate": 0.02, "col": Color(0.5, 0.42, 0.35, 0.5)})
 			"strafe_lock":
@@ -5301,6 +5324,7 @@ func _load_bests() -> void:
 		last_run_score = _cfg_int(cf, "replay", "last_score", -1)   # c4-18: last-run score banked with the replay (-1 = none/pre-feature)
 		replay_watched_score = _cfg_int(cf, "replay", "watched_score", -999)   # c4-18: replay already watched (persisted) so NEW stays quiet across relaunch
 		_seen = _cfg_dict(cf, "seen", "hints")
+		_cue_seen = _cfg_dict(cf, "seen", "cues")
 		# c4-fix: a type-corrupt "runs" value (wrong element type from an older/newer build or
 		# partial file corruption) makes Array[Dictionary].assign() throw a runtime error and
 		# abort the rest of _load_bests BEFORE _apply_settings runs — silently reverting ALL
@@ -5412,7 +5436,7 @@ const SETTINGS_DEFAULTS := {
 	"music_vol": 10,
 	"fullscreen": false,
 	"window_scale": 2,
-	"captions": true,
+	"captions": CuePolicy.CAP_ALL,   # was a bool (true == on): CuePolicy.migrate_caption_mode reads both
 	"text_scale": TEXT_SCALE_MIN,
 }
 
@@ -5655,7 +5679,7 @@ func _settings_snapshot() -> Dictionary:
 		"music_vol": _bus_vol("Music"),
 		"fullscreen": _fullscreen,
 		"window_scale": _win_scale,
-		"captions": _captions,
+		"captions": _caption_mode,
 		"text_scale": _text_scale,
 	}
 	snapshot.merge(_accessibility_snapshot())
@@ -5845,7 +5869,7 @@ func _apply_settings(d: Dictionary) -> void:
 	_win_scale = clampi(int(d.get("window_scale", 2)), Art.MIN_WINDOW_SCALE, WIN_SCALE_MAX)
 	# audio-identity: .get (not d["captions"]) — a save predating the toggle lacks the key,
 	# same back-compat pattern as swap_sticks/window_scale above.
-	_captions = bool(d.get("captions", true))
+	_caption_mode = CuePolicy.migrate_caption_mode(d.get("captions", CuePolicy.CAP_ALL))
 	# accessibility: .get — a save predating TEXT SIZE lands at the shipped 100%. The setter
 	# snaps/clamps, so no caller (load, RESET, DISCARD) can install an off-rung value.
 	_set_text_scale(int(d.get("text_scale", TEXT_SCALE_MIN)))
@@ -6328,6 +6352,7 @@ func _record_run(score: int) -> void:
 		cf.set_value("meta", "vp", vet_points)
 		cf.set_value("meta", "levels", _perk_levels)
 	cf.set_value("seen", "hints", _seen)
+	cf.set_value("seen", "cues", _cue_seen)
 	# save-integrity: same rule as _flush_bests — the flags stay dirty unless the
 	# write landed, so a failed save is retried at the next flush instead of
 	# being silently dropped.
@@ -6451,6 +6476,49 @@ func _visible_hint_text() -> String:
 	# Keep the existing once-per-profile teaching window, but never display a
 	# stale promise or let an already-resolved recovery hide the next objective.
 	return _recovery_hint_text() if _hint_id == "revive" else _hint_text
+
+
+func _on_title() -> bool:
+	return _menu != null and _menu.mode == GameMenu.Mode.TITLE
+
+
+## CUES NOT WORDS: every caption cue funnels through here so the SMART fade sees the live mode,
+## the live SFX level (0..10) and the persisted exposure counters. ALL stays the shipped path.
+func _caption_cue(key: String) -> void:
+	_sfx.caption_mode = _caption_mode
+	_sfx.sfx_step = _bus_vol("SFX")
+	# The attract bot's cues are not the player's exposures: count into a throwaway dict on the title.
+	_sfx.cue_counts = {} if _on_title() else _cue_seen
+	_sfx.caption_sfx(key)
+	if _sfx.cue_counts_dirty:
+		_sfx.cue_counts_dirty = false
+		_seen_dirty = _seen_dirty or not _on_title()
+
+
+## True when this pickup/status of `key` should still spell its word (first WORD_PICKUPS of each
+## kind); after that the toast is an icon with a pulse ring. Counts the grab, persisted with _seen.
+func _pickup_word_due(key: String) -> bool:
+	if _on_title():
+		return true   # the attract bot's grabs teach nobody and bank nothing
+	var prior := CuePolicy.count_of(_cue_seen, CuePolicy.KEY_PICK + key)
+	CuePolicy.bump(_cue_seen, CuePolicy.KEY_PICK + key)
+	_seen_dirty = true
+	return CuePolicy.show_word(prior)
+
+
+## One armor_block the player caused. After ARMOR_BLOCKS_TO_REARM of them with no grenade ever
+## thrown, the armor/grenade hint (already delivered once) is re-queued a single time and then
+## retired for good. Returns true on the call that re-arms; the caller's _hint("armor") follows.
+func _note_armor_block() -> bool:
+	if _on_title():
+		return false   # the attract bot's blocks are not the player's (same gate as _hint)
+	CuePolicy.bump(_cue_seen, CuePolicy.KEY_ARMOR_BLOCKS)
+	_seen_dirty = true
+	if not _seen.get("armor", false) or not CuePolicy.rearm_due(_cue_seen):
+		return false
+	_cue_seen[CuePolicy.KEY_REARMED] = 1
+	_seen.erase("armor")
+	return true
 
 
 func _hint(id: String, text: String, urgent := false) -> void:
@@ -8252,7 +8320,7 @@ const _GLOW_KINDS := {"muzzle": true, "spark": true, "shockwave": true,
 # _draw_fx would discard them for most or all of their life. chopper ignores `pos`
 # entirely (a left->right sweep it re-derives); coin migrates to the HUD War Chest
 # at (16, 13). Only _draw_fx consults this; every _draw_glow kind is world-anchored.
-const _SCREEN_ANCHORED_FX := {"chopper": true, "coin": true}
+const _SCREEN_ANCHORED_FX := {"chopper": true, "coin": true, "edge_chev": true}   # edge_chev pins itself to the frame edge
 
 # Corpse sprite per enemy kind — mirrors the live-draw choices in _draw_enemies.
 # sol-08: rusher/elite/sniper corpses follow their new live RED-team sprites (a fallen body must match
@@ -11482,13 +11550,26 @@ func _draw_pickups() -> void:
 			Art.circle(self, ppos, 7.0 + pg * 2.0, Color(pcol.r, pcol.g, pcol.b, 0.18 + pg * 0.12))
 			Art.arc(self, ppos, 9.0, 0, TAU, 20, Color(pcol.r, pcol.g, pcol.b, 0.6 + pg * 0.3), 1.5)
 			Art.line(self, ppos, ppos - Vector2(0, 15.0 + pg * 4.0), Color(pcol.r, pcol.g, pcol.b, 0.3), 2.0)
-			_world_label_centered(_CAPSULE_LABEL[cap_i], ppos.x, ppos.y - 24.0, pcol, ppos)
+			# CUES NOT WORDS: the ground word is for the first WORD_PICKUPS grabs of this kind only;
+			# afterwards the pulsing ring and beam above already say "a capsule" and the sprite says which.
+			if CuePolicy.show_word(CuePolicy.count_of(_cue_seen, CuePolicy.KEY_PICK + str(int(pk["kind"])))):
+				_world_label_centered(_CAPSULE_LABEL[cap_i], ppos.x, ppos.y - 24.0, pcol, ppos)
 		else:
 			var glyph: String = ["icon_ammo", "icon_grenade", "icon_vest", "icon_airstrike"][pk["kind"]]
 			draw_rect(Rect2(ppos + Vector2(-6, -23), Vector2(12, 12)), Color(0.02, 0.025, 0.02, 0.62))
 			draw_texture_rect(Art.tex(glyph), Rect2(ppos + Vector2(-5, -22), Vector2(10, 10)), false)
 		if maxed:
-			_world_label_centered("MAXED", ppos.x, ppos.y - 25.0, Color(0.6, 0.6, 0.6), ppos)
+			# CUES NOT WORDS: a struck-through ring on a plate instead of the word MAXED (the crate
+			# is already greyed). It claims its pixels through the same arbiter the word did.
+			if WORLD_LABEL_SUBJECT_FRAME.has_point(ppos):
+				var mwant := Rect2(ppos.x - 6.5, ppos.y - 33.0, 13.0, 13.0)
+				var mgot := claim_label_slot(mwant, _label_slots, 0.0, false, _label_rail_ceiling,
+					_label_safe_l, _label_safe_r)
+				_label_slots.append(mgot)
+				draw_texture_rect(Art.tex("fx_softspot"), mgot.grow(3.0), false, Color(LABEL_PLATE_FILL, 0.9))
+				var mcen := mgot.get_center()
+				Art.arc(self, mcen, 4.5, 0, TAU, 14, Color(0.68, 0.68, 0.68), 1.3)
+				Art.line(self, mcen + Vector2(-3.2, 3.2), mcen + Vector2(3.2, -3.2), Color(0.68, 0.68, 0.68), 1.3)
 		elif pk.get("cost", 0) > 0:
 			# Price tinted by affordability (matches the spend-wheel language).
 			var afford: bool = sim.war_chest >= quoted_price
@@ -14252,6 +14333,19 @@ func _draw_fx() -> void:
 			draw_texture_rect(Art.tex("wep_grenade"), Rect2(-fs, -fs, fs * 2.0, fs * 2.0), false,
 				Color(1, 1, 1, 1.0 - t))
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		elif fx["kind"] == "edge_chev":
+			# CUES NOT WORDS: the flank warning. A chevron on the frame edge nearest the breach,
+			# pointing at it, throbbing for its life and never printing a word.
+			var ec := CuePolicy.edge_chevron(pos)
+			var ec_pos: Vector2 = ec["pos"]
+			var ec_a := (1.0 - t * t) * (1.0 if _motion < 0.5 else 0.65 + Art.pulse(0.3) * 0.35)
+			var ec_col: Color = fx.get("col", Color(1.0, 0.5, 0.3))
+			draw_set_transform(ec_pos, float(ec["angle"]), Vector2.ONE)
+			Art.line(self, Vector2(-8, -9), Vector2(4, 1), Color(0, 0, 0, ec_a * 0.6), 4.0)
+			Art.line(self, Vector2(-8, 11), Vector2(4, 1), Color(0, 0, 0, ec_a * 0.6), 4.0)
+			Art.line(self, Vector2(-8, -10), Vector2(4, 0), Color(ec_col.r, ec_col.g, ec_col.b, ec_a), 3.0)
+			Art.line(self, Vector2(-8, 10), Vector2(4, 0), Color(ec_col.r, ec_col.g, ec_col.b, ec_a), 3.0)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "floattext":
 			if not toast_keep.has(idx):
 				continue   # over the on-screen cap — stacking arbitrates overlap, this bounds COUNT
@@ -14265,6 +14359,9 @@ func _draw_fx() -> void:
 			var fsz: int = fx.get("size", 9)   # headline callouts (power-ups) bump this
 			var ffont := Art.font()
 			var fw := Art.tw(String(fx["text"]), fsz)
+			var ficon: String = fx.get("icon", "")   # CUES NOT WORDS: icon toast, the word has been taught
+			if ficon != "":
+				fw = float(fsz)
 			# Ease-out rise (fast at spawn, settling at the top) + a ~3-frame scale
 			# punch pivoted on the text center — pops in, then glides.
 			var rise := 1.0 - (1.0 - t) * (1.0 - t)
@@ -14339,9 +14436,18 @@ func _draw_fx() -> void:
 			var oc := Color(0, 0, 0, fc.a * 0.85)
 			draw_set_transform(fpivot, 0.0, Vector2.ONE * fpunch)
 			var frel := Vector2(-fw / 2.0, 0.0)
-			for od in _TEXT_OUTLINE_OFFSETS:
-				draw_string(ffont, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
-			draw_string(ffont, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
+			if ficon != "":
+				# Pulse ring + the item's own sprite, centred in the same plate the word would use.
+				var icx := Vector2(0.0, -float(fsz) * 0.35)
+				var ipulse := 1.0 if _motion < 0.5 else Art.pulse(0.18)   # steady under reduce-motion
+				Art.arc(self, icx, float(fsz) * (0.55 + ipulse * 0.12), 0, TAU, 18,
+					Color(fc.r, fc.g, fc.b, fc.a * (0.55 + ipulse * 0.3)), 1.2)
+				draw_texture_rect(Art.tex(ficon), Rect2(icx - Vector2.ONE * float(fsz) * 0.36,
+					Vector2.ONE * float(fsz) * 0.72), false, Color(1, 1, 1, fc.a))
+			else:
+				for od in _TEXT_OUTLINE_OFFSETS:
+					draw_string(ffont, frel + od, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, oc)
+				draw_string(ffont, frel, fx["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, fsz, fc)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		elif fx["kind"] == "smoke":
 			# smoothstep ramp-in: puffs swell into view instead of stamping at full alpha.

@@ -72,7 +72,8 @@ class _StubMain extends Node2D:
 	var _rumble_on := true
 	var _swap_sticks: Array[bool] = [false, false]   # c1-18: PER-PLAYER left-handed pad toggle the SWAP STICKS row reads
 	var _assist := false
-	var _captions := true   # audio-identity: mirrors main._captions the CAPTIONS row reads
+	var _caption_mode := 0   # CuePolicy.CAP_ALL: mirrors main._caption_mode the CAPTIONS row reads
+	var _captions := true
 	var _fullscreen := false
 	var _win_scale := 2   # c1-19: windowed integer scale the WINDOW SCALE row reads/steps
 	var _text_scale := MainScript.TEXT_SCALE_MIN   # accessibility: percent the TEXT SIZE row reads/steps
@@ -139,7 +140,7 @@ class _StubMain extends Node2D:
 		var snapshot := {"colorblind": colorblind, "assist": _assist, "reduce_motion": _motion < 0.5,
 			"rumble": _rumble_on, "swap_sticks": _swap_sticks[0], "swap_sticks_p2": _swap_sticks[1],
 			"sfx_vol": _bus_vol("SFX"), "music_vol": _bus_vol("Music"),
-			"fullscreen": _fullscreen, "window_scale": _win_scale, "captions": _captions,
+			"fullscreen": _fullscreen, "window_scale": _win_scale, "captions": _caption_mode,
 			"text_scale": _text_scale}
 		for key in MainScript.ACCESSIBILITY_KEYS:
 			snapshot[key] = accessibility_setting(key)
@@ -171,7 +172,7 @@ class _StubMain extends Node2D:
 		_set_bus_vol("Music", d["music_vol"])
 		_fullscreen = d["fullscreen"]
 		_win_scale = int(d.get("window_scale", 2))
-		_captions = bool(d.get("captions", true))
+		_caption_mode = CuePolicy.migrate_caption_mode(d.get("captions", CuePolicy.CAP_ALL))
 		_set_text_scale(int(d.get("text_scale", MainScript.TEXT_SCALE_MIN)))
 	# c1-19: WINDOW SCALE stub — headless has no display, so cap the ladder at 3x and
 	# apply the clamped absolute scale the menu's ◄/►/Enter drive (records a save).
