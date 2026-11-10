@@ -1204,9 +1204,10 @@ static func ground_base_variant(band_index: int) -> int:
 ## screenshot read as desert, and every reviewer flagged it independently. So the
 ## ground now follows the zone names the game already ships.
 static func ground_biome(sector: int) -> int:
-	# sectors 0 (STAGING) and 1 (MARSH) are the wet jungle; 2 (BRIDGE) is the
-	# transitional span; 3+ are arid/industrial.
-	return 1 if sector <= 1 else 0
+	# One owned card per zone: 1 jungle turf (STAGING), 2 marsh mud (MARSH BASIN),
+	# 3 cracked bridge deck, 4 packed gravel (FOUNDRY WORKS), 5 scorched asphalt
+	# (CRASHED CONVOY), 6 slag (FOUNDRY CORE). Biome 0 (sand) is the endless/legacy card.
+	return clampi(sector, 0, 5) + 1
 
 
 ## a3-28: the source texture key for a biome's base strip. Static and pure so
@@ -1214,6 +1215,11 @@ static func ground_biome(sector: int) -> int:
 static func ground_biome_source(biome: int) -> String:
 	match biome:
 		1: return "jungle_turf"
+		2: return "ground_marsh"
+		3: return "ground_deck"
+		4: return "ground_gravel"
+		5: return "ground_asphalt"
+		6: return "ground_slag"
 		_: return "sand"
 
 
@@ -1361,10 +1367,12 @@ func _ground_base_strip(v: int) -> Texture2D:
 ## its OWN cache so switching biomes never rebuilds or crosses streams. Built
 ## lazily on first paint, same 64-blit cost as the sand strips.
 func _ground_biome_strip(biome: int, v: int) -> Texture2D:
-	if _jungle_strips.is_empty():
+	if not _biome_strips.has(biome):
+		var arr: Array[Texture2D] = []
 		for i in GROUND_BASE_VARIANTS:
-			_jungle_strips.append(ImageTexture.create_from_image(ground_biome_strip_image(1, i)))
-	return _jungle_strips[v % GROUND_BASE_VARIANTS]
+			arr.append(ImageTexture.create_from_image(ground_biome_strip_image(biome, i)))
+		_biome_strips[biome] = arr
+	return (_biome_strips[biome] as Array)[v % GROUND_BASE_VARIANTS]
 
 
 ## The bare-earth dressing FILL texture for a biome: a 2x2 atlas of four soft, organic
@@ -1372,7 +1380,7 @@ func _ground_biome_strip(biome: int, v: int) -> Texture2D:
 ## and pure so tests/test_view_honesty.gd measures the exact pixels _paint_bg binds.
 ## View-only: floats and trig are fine here, the sim never sees this.
 static func ground_dressing_patch_image(biome: int) -> Image:
-	var src: Image = Art.tex("jungle_mud" if biome == 1 else "dirt").get_image()
+	var src: Image = Art.tex("jungle_mud" if biome == 1 or biome == 2 else "dirt").get_image()
 	if src.is_compressed():
 		src.decompress()   # a VRAM-compressed import has no raw pixels to read
 	src.convert(Image.FORMAT_RGBA8)
@@ -1412,7 +1420,7 @@ static func ground_dressing_tex(biome: int) -> Texture2D:
 	if _dirt_patch_tex.is_empty():
 		for b in 2:
 			_dirt_patch_tex.append(ImageTexture.create_from_image(ground_dressing_patch_image(b)))
-	return _dirt_patch_tex[1 if biome == 1 else 0]
+	return _dirt_patch_tex[1 if biome == 1 or biome == 2 else 0]
 
 
 ## THE ground-dressing generator: the bare-earth cards scattered over the base sand
@@ -1498,12 +1506,14 @@ static func ground_dressing_cards(base_iy: int, march: float) -> Array:
 ## read, and the ground is many bands) and handed to every band's strip lookup, so
 ## a whole frame is never half sand and half grass.
 var _ground_biome := 0
+var _ground_campaign := false          # ground follows WORLD y per band only in the campaign world
+var _ground_biome_map: Array = []      # [ground_biome(0) .. ground_biome(5)] for GroundStructure
 
 
 ## Pick the right cached strip for a biome. Kept as a function (not inlined at the
 ## draw site) so the desert path stays literally the old _ground_base_strip call.
 func _ground_band_strip(biome: int, v: int) -> Texture2D:
-	return _ground_biome_strip(biome, v) if biome == 1 else _ground_base_strip(v)
+	return _ground_biome_strip(biome, v) if biome >= 1 else _ground_base_strip(v)
 
 
 func _paint_bg(canvas: Node2D) -> void:
@@ -1516,8 +1526,17 @@ func _paint_bg(canvas: Node2D) -> void:
 	# card, so the wet zones (STAGING GROUND, MARSH BASIN) rendered as arid desert
 	# under a `jungle-firefight` filename. current_sector() is a clamped sim read;
 	# the sector never changes mid-frame, so every band below agrees on the biome.
-	_ground_biome = ground_biome(sim.current_sector())
+	var fallback_biome := ground_biome(sim.current_sector())
+	_ground_campaign = sim.is_campaign_world()
+	if _ground_biome_map.is_empty():
+		for gs in GroundStructure.SECTORS:
+			_ground_biome_map.append(ground_biome(gs))
 	var cam_y := sim.camera_top * PX
+	# Campaign: each band takes the biome of ITS world y (so a seam can be feathered);
+	# other modes keep the old one-biome-per-run behaviour. _ground_biome = the biome
+	# at screen centre, which picks nothing but the frame-level fallbacks below.
+	_ground_biome = GroundStructure.biome_at(_ground_campaign, fallback_biome,
+		cam_y + 180.0, _ground_biome_map)
 	var oy := -fposmod(cam_y, 64.0)
 	var base_iy := int(floor(cam_y / 64.0))
 	var march := _sector_march()
@@ -1536,6 +1555,7 @@ func _paint_bg(canvas: Node2D) -> void:
 	var dirt_cards: Array = []   # [center, rot, size, dirt_col] tuples
 	var row_ys := PackedFloat32Array(); row_ys.resize(8)     # per-row screen y, filled below
 	var row_cols: Array[Color] = []; row_cols.resize(8)      # per-row biome stop (c2 3v)
+	var row_atlas := PackedInt32Array(); row_atlas.resize(8) # per-row dressing atlas: 1 wet mud, 0 dry dirt
 	# 5-stop biome ramp (5v: one biome with a linear scorch felt like a dimmer
 	# switch, not a JOURNEY): jungle -> scorched -> marsh -> ruins -> foundry
 	# ash. c2 3v: sample PER TILE ROW, not per frame — the new sector's flat
@@ -1576,14 +1596,24 @@ func _paint_bg(canvas: Node2D) -> void:
 		# the source's real green through, and biome 0 keeps the byte-identical old
 		# path.
 		var shade := GROUND_SHADE
-		var tint := Color(gt.r, gt.g, gt.b)
-		if _ground_biome == 1:
-			tint = Color.WHITE
 		canvas.draw_set_transform(Vector2(-32.0, band[0] as float), 0.0,
 			Vector2(band_scale, band_scale))
-		canvas.draw_texture_rect(_ground_band_strip(_ground_biome, band[2] as int),
-			Rect2(Vector2.ZERO, Vector2(1024, 128)), true,
-			Color(shade * tint.r, shade * tint.g, shade * tint.b))
+		# Every biome except the legacy sand card keeps a NEUTRAL tint (its hue is baked
+		# into the card). A seam band carries the outgoing card whole, then the incoming
+		# card in 12px slices at ramping alpha (GroundStructure.band_layers) = the feather.
+		for layer in GroundStructure.band_layers(_ground_campaign, fallback_biome,
+				band_wy, float(GROUND_TILE_PX), _ground_biome_map):
+			var lb: int = layer["b"]
+			var tint := Color(gt.r, gt.g, gt.b) if lb < 1 else Color.WHITE
+			var lcol := Color(shade * tint.r, shade * tint.g, shade * tint.b, float(layer["a"]))
+			var r0: int = layer["r0"]
+			var r1: int = layer["r1"]
+			if r0 == 0 and r1 == 128:
+				canvas.draw_texture_rect(_ground_band_strip(lb, band[2] as int),
+					Rect2(Vector2.ZERO, Vector2(1024, 128)), true, lcol)
+			else:
+				canvas.draw_texture_rect_region(_ground_band_strip(lb, band[2] as int),
+					Rect2(0, r0, 1024, r1 - r0), Rect2(0, r0, 1024, r1 - r0), lcol)
 		canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# The dressing still rides 64px rows (the cards' own cell), so the per-row
 	# bookkeeping the dirt pass reads is unchanged — only the paint moved.
@@ -1597,9 +1627,16 @@ func _paint_bg(canvas: Node2D) -> void:
 		# re-browned the mud into a foreign stain and, at full strength, blew the
 		# paths out into pale hard-edged slabs. Alpha is still the ramp's, so the
 		# feathered halo/fill passes batch and fade exactly as before.
-		if _ground_biome == 1:
+		var row_b := GroundStructure.biome_at(_ground_campaign, fallback_biome,
+			float(base_iy + ty) * 64.0 + 32.0, _ground_biome_map)
+		row_atlas[ty] = 1 if row_b == 1 or row_b == 2 else 0
+		if row_b == 1:
 			var ds := _biome_ramp(row_march, dirt_stops)
 			row_cols[ty] = Color(GROUND_SHADE, GROUND_SHADE, GROUND_SHADE, ds.a)
+		elif row_b >= 2:
+			var ds := _biome_ramp(row_march, dirt_stops)
+			var dt := GroundStructure.dressing_tint(row_b)
+			row_cols[ty] = Color(GROUND_SHADE * dt.r, GROUND_SHADE * dt.g, GROUND_SHADE * dt.b, ds.a)
 		else:
 			row_cols[ty] = _biome_ramp(row_march, dirt_stops)
 	# The dressing GEOMETRY comes from one shipped generator (ground_dressing_cards),
@@ -1611,7 +1648,7 @@ func _paint_bg(canvas: Node2D) -> void:
 	for c in ground_dressing_cards(base_iy, march):
 		var cry: int = c[3]
 		dirt_cards.append([Vector2((c[0] as Vector2).x, row_ys[cry] + (c[0] as Vector2).y),
-			c[1], c[2], row_cols[cry]])
+			c[1], c[2], row_cols[cry], row_atlas[cry]])
 	# opt-loop: THREE passes over the same cards (all outer halos, then all inner halos, then
 	# all fills) instead of one interleaved pass — same idiom the sand/grass tile loop above
 	# already uses (see its comment on the batching trap this exact interleave falls into).
@@ -1643,13 +1680,18 @@ func _paint_bg(canvas: Node2D) -> void:
 	# Both are now SOFT patches (ground_dressing_tex): the raw cards were opaque
 	# squares, so this pass painted a hard rotated rectangle over its own feathers.
 	# One atlas per biome, bound once: still a single texture switch for the pass.
-	var dirt_tex := ground_dressing_tex(_ground_biome)
-	for card in dirt_cards:
-		var dirt_col: Color = card[3]
-		canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
-		var psz: Vector2 = card[2] * DIRT_PATCH_SCALE
-		canvas.draw_texture_rect_region(dirt_tex, Rect2(-psz / 2.0, psz),
-			ground_dressing_patch_region(int(card[1] * 100.0) % 4), dirt_col)
+	# Two atlases can be live in one frame at a wet/dry seam, so the fill pass runs once
+	# per atlas (still one texture switch each; a frame with one atlas draws one pass).
+	for atlas in 2:
+		var dirt_tex := ground_dressing_tex(1 if atlas == 1 else 0)
+		for card in dirt_cards:
+			if int(card[4]) != atlas:
+				continue
+			var dirt_col: Color = card[3]
+			canvas.draw_set_transform(card[0], card[1], Vector2.ONE)
+			var psz: Vector2 = card[2] * DIRT_PATCH_SCALE
+			canvas.draw_texture_rect_region(dirt_tex, Rect2(-psz / 2.0, psz),
+				ground_dressing_patch_region(int(card[1] * 100.0) % 4), dirt_col)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	# MACRO MOTTLE (4v: the barren-lawn killer): 2-3 broad, soft value shifts
 	# per screen on a coarse 256px grid — trampled-earth patches, and the
@@ -1704,6 +1746,8 @@ func _paint_bg(canvas: Node2D) -> void:
 					canvas.draw_texture_rect(Art.tex("fx_softspot"),
 						Rect2(Vector2(-msz * 0.75 + float(mh % 60), -msz * 0.6), Vector2.ONE * msz * 1.3),
 						false, Color(mcol.r, mcol.g, mcol.b, mcol.a * 0.5))
+	if _ground_campaign:
+		_paint_ground_structure(canvas, cam_y)
 	# a1-14 SKY LIGHT — last thing the ground pass lays down, so it grades the
 	# base strips, the dirt cards and the mottle as ONE surface (grading them
 	# separately is what makes composited ground read as layers). Two region
@@ -1729,6 +1773,18 @@ func _paint_bg(canvas: Node2D) -> void:
 	var glt := _ground_light()
 	canvas.draw_texture_rect_region(glt, GROUND_LIGHT_RECT, Rect2i(0, 0, 1, GROUND_LIGHT_TEX_H))
 	canvas.draw_texture_rect_region(glt, GROUND_LIGHT_RECT, Rect2i(1, 0, 1, GROUND_LIGHT_TEX_H))
+
+
+## The lane / gate aprons / ford-bank planking, as one GroundStructure plan. Reads sim
+## gates and waters only; `canvas` is the ground layer, so everything draws beneath
+## actors, mines and telegraphs (see GroundStructure's honesty rule).
+func _paint_ground_structure(canvas: Node2D, cam_y: float) -> void:
+	var anc := GroundStructure.anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX)
+	var gys: Array = []
+	for g in sim.gates:
+		gys.append(float(g["y"]) * PX)
+	GroundStructure.paint(canvas, GroundStructure.plan(anc, gys, sim.waters, cam_y,
+		SimWorld.WATER_H * PX, func(b: int) -> int: return SimWorld.ford_half_w(b)))
 
 
 func _process(_delta: float) -> void:
@@ -8625,7 +8681,7 @@ const GROUND_BASE_SLOTS := 8        # 128px dihedral slots per 1024px strip
 # tests/test_assets.gd asserts all of this on the built pixels, not on the table.
 const GROUND_BASE_SLOT_DIHEDRAL := [0, 3, 6, 1, 4, 7, 2, 5]
 static var _sand_strips: Array[Texture2D] = []
-static var _jungle_strips: Array[Texture2D] = []   # a3-28: the CC0 jungle biome's own cache
+static var _biome_strips := {}   # biome id -> Array[Texture2D] (8 variants); jungle + the five owned cards
 static var _dirt_patch_tex: Array[Texture2D] = []   # [desert, jungle] soft dressing-patch atlases
 
 

@@ -26,6 +26,7 @@ and `docs/steam-store/owner-review.md` before release or redistribution.
 | Vehicles + bosses — `tank_{body,barrel}`, `gunship_{body,barrel}`, `colossus_{body,barrel}` | 6 | Generative AI, **service/model/date unrecorded**. No generator produces these and `desert_assets_source.md` does not cover them — regenerate with a recorded pipeline before relying on the ownership claim | Project-owned **unverified** |
 | `assets/ui/intro/` — `keyart.png` (boot-splash key art) + `bigit_sheet.png` | 2 | Generative AI, **service/model/date unrecorded** | Project-owned **unverified**; `keyart.png` also carries the likeness question — see the owner-decision box below |
 | Ground base card — `assets/art/ground/sand_base.png` | 1 | Procedurally generated — `tools/gen_ground.py` (periodic value-noise fBm, isotropic, seamless by construction) | Project-owned (MIT alongside the code) |
+| Biome ground cards — `assets/art/ground/ground_{marsh,deck,gravel,asphalt,slag}.png` | 5 | Procedurally generated — `tools/gen_ground.py` (seeded periodic fBm + wrapped Voronoi cracks + grit, seamless by construction) | Project-owned (MIT alongside the code) |
 | `assets/cc0/` | 26 drawn | Kenney game assets | **CC0** — `assets/cc0/LICENSE-CC0.txt` |
 
 Every procedurally generated sprite is reproducible: each generator's `SIZES`

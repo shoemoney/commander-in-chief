@@ -215,6 +215,12 @@ const TEX := {
 	"jungle_floor": preload("res://assets/cc0_extra/ground/grass-001-deep-forest-floor.png"),
 	"jungle_moss": preload("res://assets/cc0_extra/ground/ground-037-mossy-grass-mix.png"),
 	"jungle_mud": preload("res://assets/cc0_extra/ground/ground-106-wet-mud.png"),
+	# Owned procedural ground cards for sectors 2-6 (tools/gen_ground.py, seeded).
+	"ground_marsh": preload("res://assets/art/ground/ground_marsh.png"),
+	"ground_deck": preload("res://assets/art/ground/ground_deck.png"),
+	"ground_gravel": preload("res://assets/art/ground/ground_gravel.png"),
+	"ground_asphalt": preload("res://assets/art/ground/ground_asphalt.png"),
+	"ground_slag": preload("res://assets/art/ground/ground_slag.png"),
 	# bullet/enemy_bullet/grenade/smoke: Kenney keys RETIRED (files kept) — every
 	# live draw site moved on long ago: player rounds are procedural tracers +
 	# fx_bullettrail streaks, enemy fire is the red-streak orb, thrown frags wear

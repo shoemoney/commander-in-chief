@@ -181,6 +181,109 @@ def to_rgba(card: np.ndarray) -> Image.Image:
     return Image.fromarray(np.concatenate([rgb, alpha], axis=2), "RGBA")
 
 
+# --- biome cards -------------------------------------------------------------
+# Five COLOURED, owned, seamless 128px cards, one per sector after the jungle.
+# Same torus construction as the sand card (so they tile exactly and stay
+# isotropic), but each carries its own hue because the biome strip path paints
+# them with a NEUTRAL multiplier (main.gd keeps the sand ramp for sand only).
+#
+# They are deliberately QUIET: main.gd applies GROUND_CONTRAST_CUT on top, and the
+# test suite pins that the rendered strip is no brighter and no busier than the
+# campaign sand ramp it replaces, so the soldiers stay the loudest thing on screen.
+# Cracks and grit are the structure; they are masks over a wrapped lattice, so the
+# seam cannot fail.
+
+BIOME_SEEDS = {"marsh": 20261101, "deck": 20261102, "gravel": 20261103,
+               "asphalt": 20261104, "slag": 20261105}
+
+# base colour, patch colour (low-frequency stain), crack colour, crack strength,
+# grit count / radius / darkness, fleck count / lightness, patch coverage.
+RECIPES = {
+    "marsh": dict(base=(112, 106, 72), patch=(72, 84, 64), crack=(48, 50, 38), crack_a=0.0,
+                  grit=(150, (1.0, 2.6), 14.0), fleck=(40, 6.0), patch_cov=0.42, spread=7.0),
+    "deck": dict(base=(142, 141, 134), patch=(114, 112, 106), crack=(66, 66, 64), crack_a=0.85,
+                 grit=(70, (1.0, 2.2), 9.0), fleck=(50, 7.0), patch_cov=0.35, spread=5.5),
+    "gravel": dict(base=(130, 119, 102), patch=(106, 97, 84), crack=(80, 72, 62), crack_a=0.0,
+                   grit=(300, (1.0, 2.0), 11.0), fleck=(160, 8.0), patch_cov=0.40, spread=6.0),
+    "asphalt": dict(base=(112, 110, 112), patch=(88, 86, 92), crack=(40, 39, 42), crack_a=0.9,
+                    grit=(80, (1.0, 1.8), 8.0), fleck=(220, 13.0), patch_cov=0.38, spread=4.5),
+    "slag": dict(base=(128, 92, 80), patch=(90, 70, 68), crack=(140, 88, 62), crack_a=0.55,
+                 grit=(130, (1.1, 2.8), 12.0), fleck=(60, 7.0), patch_cov=0.45, spread=5.5),
+}
+
+
+def _crack_mask(size: int, seed: int, cells: int = 9) -> np.ndarray:
+    """Cracked-slab seams: borders of a wrapped Voronoi, thinned by a noise dropout.
+
+    Iso-contours of value noise close into rings, which read as circles; Voronoi
+    borders read as slab joints and fractures. Wrapped by measuring distance over
+    the nine torus offsets, so the card still tiles exactly.
+    """
+    rng = np.random.default_rng(seed * 17 + 5)
+    pts = rng.uniform(0.0, size, (cells, 2))
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float64)
+    # Domain warp so borders meander instead of running as straight bisectors.
+    wx = (_periodic_value_noise(size, 8, seed + 3) - 0.5) * 10.0
+    wy = (_periodic_value_noise(size, 8, seed + 4) - 0.5) * 10.0
+    dists = []
+    for (py, px) in pts:
+        best = None
+        for oy in (-size, 0, size):
+            for ox in (-size, 0, size):
+                d = np.hypot(yy + wy - (py + oy), xx + wx - (px + ox))
+                best = d if best is None else np.minimum(best, d)
+        dists.append(best)
+    d = np.sort(np.stack(dists), axis=0)
+    edge = d[1] - d[0]
+    line = np.clip(1.0 - edge / 1.6, 0.0, 1.0) ** 1.5
+    keep = np.clip((_periodic_value_noise(size, 4, seed + 9) - 0.3) * 4.0, 0.0, 1.0)
+    return line * keep
+
+
+def build_biome_card(name: str, size: int = CARD) -> np.ndarray:
+    r = RECIPES[name]
+    seed = BIOME_SEEDS[name]
+    base = np.array(r["base"], dtype=np.float64)
+    patch = np.array(r["patch"], dtype=np.float64)
+    crack = np.array(r["crack"], dtype=np.float64)
+
+    # Stain field: broad fBm thresholded SOFTLY so patches have feathered edges.
+    f = _fbm(size, seed)
+    f = (f - f.mean()) / (f.std() + 1e-9)
+    thr = np.quantile(f, 1.0 - r["patch_cov"])
+    pm = np.clip((f - thr) / 0.9 + 0.5, 0.0, 1.0)
+    pm = pm * pm * (3.0 - 2.0 * pm)
+    rgb = base[None, None, :] * (1.0 - pm[:, :, None]) + patch[None, None, :] * pm[:, :, None]
+
+    # Mid-frequency luma clumps (isotropic).
+    g = _fbm(size, seed + 7)
+    g = (g - g.mean()) / (g.std() + 1e-9)
+    rgb = rgb + (g * r["spread"])[:, :, None]
+
+    # Grit (dark) and flecks (light) as luma offsets on the torus.
+    lum = np.zeros((size, size), dtype=np.float64)
+    gc, gr, gd = r["grit"]
+    _scatter_grit(lum, gc, seed, gr, -gd / 9.0)   # /9: _scatter_grit stacks its nine torus copies
+    fc, fl = r["fleck"]
+    _scatter_grit(lum, fc, seed + 1, (gr[0], gr[1] * 0.6), fl / 9.0)
+    rgb = rgb + lum[:, :, None]
+
+    if r["crack_a"] > 0.0:
+        m = _crack_mask(size, seed)[:, :, None] * r["crack_a"]
+        rgb = rgb * (1.0 - m) + crack[None, None, :] * m
+    return np.clip(rgb, 0.0, 255.0)
+
+
+def biome_rgba(card: np.ndarray) -> Image.Image:
+    rgb = np.clip(card, 0, 255).astype(np.uint8)
+    alpha = np.full(card.shape[:2] + (1,), 255, dtype=np.uint8)
+    return Image.fromarray(np.concatenate([rgb, alpha], axis=2), "RGBA")
+
+
+def measure_rgb(card: np.ndarray) -> dict:
+    return measure(card.mean(axis=2))
+
+
 # --- verification ------------------------------------------------------------
 
 def measure(card: np.ndarray) -> dict:
@@ -231,6 +334,21 @@ def main() -> int:
               % stats["anisotropy"])
         return 1
 
+    for name in BIOME_SEEDS:
+        bc = build_biome_card(name)
+        bs = measure_rgb(bc)
+        print("biome %-8s mean=%s std=%.2f anis=%.3f seam=%.3f" % (
+            name, np.round(bc.mean(axis=(0, 1)), 1).tolist(), bs["std"], bs["anisotropy"], bs["seam"]))
+        # crack cards run a noisier interior than the sand card, so a single wrap column can
+        # sit a little above 1.5x the mean interior step by chance; the tiling itself is exact.
+        if bs["seam"] > 2.0 or bs["anisotropy"] > 1.25:
+            print("FAIL: biome card %s is seamed or directional" % name)
+            return 1
+        if not args.report:
+            d = Path(args.outdir) / ("art/ground/ground_%s.png" % name)
+            d.parent.mkdir(parents=True, exist_ok=True)
+            biome_rgba(bc).save(d)
+            print("SAVED %s" % d)
     if args.report:
         return 0
 
