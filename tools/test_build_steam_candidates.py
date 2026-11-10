@@ -9,7 +9,16 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
+import re
+
 import build_steam_candidates as subject
+
+# The fixture copies the REAL export_presets.cfg, and the builder rejects presets whose
+# version disagrees with project.godot — so the fixture's project version has to be the real
+# one too. It used to be the literal "1.4.4", which made a version bump break ten tests that
+# have nothing to do with versions (the 1.5.0 bump did exactly that).
+VERSION = re.search(r'^config/version="([^"]+)"$',
+                    (subject.ROOT / "project.godot").read_text(), re.MULTILINE).group(1)
 
 
 class SteamCandidateTests(unittest.TestCase):
@@ -17,7 +26,7 @@ class SteamCandidateTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        (self.root / "project.godot").write_text('config/version="1.4.4"\n')
+        (self.root / "project.godot").write_text(f'config/version="{VERSION}"\n')
         (self.root / "export_presets.cfg").write_bytes((subject.ROOT / "export_presets.cfg").read_bytes())
         (self.root / "src").mkdir()
         (self.root / "src/main.gd").write_text("current source\n")
@@ -51,7 +60,7 @@ class SteamCandidateTests(unittest.TestCase):
             with zipfile.ZipFile(artifact, "w") as archive:
                 archive.writestr("Game.app/Contents/MacOS/libsteam_api.dylib", b"runtime")
                 archive.writestr("Game.app/Contents/Info.plist", plistlib.dumps({
-                    "CFBundleShortVersionString": "1.4.4", "CFBundleVersion": "1.4.4"}))
+                    "CFBundleShortVersionString": VERSION, "CFBundleVersion": VERSION}))
         else:
             artifact.write_bytes(b"executable")
             artifact.with_suffix(".pck").write_bytes(b"game pack")
@@ -87,7 +96,7 @@ class SteamCandidateTests(unittest.TestCase):
         self.assertEqual(run.call_count, 3)
         receipt = json.loads((self.output / "manifest.json").read_text())
         self.assertEqual(len(receipt["exports"]), 3)
-        self.assertEqual(receipt["project_version"], "1.4.4")
+        self.assertEqual(receipt["project_version"], VERSION)
         self.assertEqual(receipt["source_before"], receipt["source_after"])
         self.assertEqual(receipt["source_before"]["revision"], "a" * 40)
         self.assertTrue(receipt["source_before"]["dirty"])
@@ -186,9 +195,9 @@ class SteamCandidateTests(unittest.TestCase):
 
     def test_stale_preset_metadata_rejected_before_export(self):
         path = self.root / "export_presets.cfg"
-        for setting in ('application/short_version="1.4.4"', 'application/product_version="1.4.4.0"'):
+        for setting in (f'application/short_version="{VERSION}"', f'application/product_version="{VERSION}.0"'):
             current = path.read_text()
-            path.write_text(current.replace(setting, setting.replace("1.4.4", "0.3.0")))
+            path.write_text(current.replace(setting, setting.replace(VERSION, "0.3.0")))
             with patch.object(subject.subprocess, "run") as run:
                 with self.assertRaisesRegex(ValueError, "Stale export metadata"):
                     subject.build(self.output, ["linux"], "unused")
