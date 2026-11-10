@@ -8,6 +8,8 @@ Commander In Chief is a deterministic twin-stick vertical run-and-gun (modern *I
 
 Godot lives at `/Applications/Godot.app/Contents/MacOS/Godot` (universal binary, native on Apple Silicon). All commands run headless except the editor and screenshots.
 
+**On the Linux dev box (the primary machine since 2026-11) Godot is plain `godot` on PATH** (`~/.local/bin/godot` → 4.7.2-stable, sha256-checked against `tools/versions.lock`). `tools/run_tests.sh` falls back to it automatically when the macOS bundle is absent. Timings below were measured on Apple Silicon; on the dev box a cold `--import` is ~5 s and the full suite ~97 s. Screenshots need a GL context, which on a headless box is Xvfb + llvmpipe: `SHOT_DIR=/abs xvfb-run -a -s "-screen 0 1280x720x24" godot --path . --rendering-method gl_compatibility --fixed-fps 60 -s res://tools/screenshots.gd`.
+
 ```sh
 # Run the game in the editor
 /Applications/Godot.app/Contents/MacOS/Godot --path .
