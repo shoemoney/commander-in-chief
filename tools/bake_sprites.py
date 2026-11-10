@@ -8,7 +8,13 @@ bake does that shrink once, offline, with an area (BOX) filter, then makes
 the result crisp: hard alpha, a small shared palette, a 1px dark keyline.
 The result is drawn at NET scale 1.0 (Art.SCALE = 1 / call scale).
 
-Usage:  python3 tools/bake_sprites.py            (writes assets/baked/**)
+SUPERSEDED for the infantry art (infantry-redesign): assets/baked/** is now the
+output of tools/gen_infantry.py (sprites DESIGNED at native size, top-down).
+This script bakes the detailed masters down and would OVERWRITE the designed
+sprites, so it refuses to run unless you pass --legacy-masters (kept as the
+fallback / comparison path). Regenerate the shipped set with gen_infantry.py.
+
+Usage:  python3 tools/bake_sprites.py --legacy-masters   (writes assets/baked/**)
 Layout: assets/baked/<set>/<pose>.png, plus base.png (from the 1024 master).
 
 The sizes below are the single source of truth for the on-screen footprint;
@@ -173,6 +179,11 @@ def bake_set(s):
 
 
 def main():
+    if "--legacy-masters" not in sys.argv:
+        print("bake_sprites.py would overwrite the designed sprites in assets/baked/.\n"
+              "Regenerate them with tools/gen_infantry.py, or pass --legacy-masters "
+              "to bake the old shrunk masters on purpose.")
+        return 2
     for s in sets():
         sizes = bake_set(s)
         print(f"{s['name']:18s} t={s['t']:.4f} xs={s['xs']:.2f} -> "
