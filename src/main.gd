@@ -9263,6 +9263,7 @@ func _draw() -> void:
 	_draw_opening_route()
 	_draw_foundry_arena()
 	_draw_vents()
+	_draw_atmosphere_ground()
 	_draw_hazard_telegraphs()
 	_draw_mines()
 	_draw_rocks()
@@ -9350,6 +9351,7 @@ func _draw() -> void:
 	var top_msg := _top_center_priority()
 	_band = _band_rows(top_msg)
 	_draw_fx()
+	_draw_atmosphere_over()
 	_draw_telegraphs()
 	_draw_wheel()   # world-anchored (rings the player) — must ride the shake
 	# The title's live demo is scenery, not the user's run. Keep its battlefield
@@ -14054,6 +14056,26 @@ func _burst(x: int, y: int, kind: String, n: int, spd_lo: float, spd_hi: float, 
 		if col.a > 0.0:
 			entry["col"] = col
 		_fx.append(entry)
+
+
+func _draw_atmosphere_ground() -> void:
+	# Per-sector weather (src/view/atmosphere.gd): cloud shadows + ground-level air.
+	# Laid down BEFORE hazard telegraphs / mines / actors so nothing readable is dimmed.
+	var sec := _atmosphere_sector()
+	var cam := -_to_screen(0, 0).y
+	var fr := int(Engine.get_physics_frames())
+	Atmosphere.draw(self, Atmosphere.plan(sec, fr, _motion, cam, Atmosphere.Layer.UNDER))
+	Atmosphere.draw(self, Atmosphere.plan(sec, fr, _motion, cam, Atmosphere.Layer.MID))
+
+
+func _draw_atmosphere_over() -> void:
+	# A handful of faint foreground specks above the actors, below telegraphs.
+	Atmosphere.draw(self, Atmosphere.plan(_atmosphere_sector(), int(Engine.get_physics_frames()),
+		_motion, -_to_screen(0, 0).y, Atmosphere.Layer.OVER))
+
+
+func _atmosphere_sector() -> int:
+	return Atmosphere.sector_for(_sector_march(), sim.mode == "endless", sim.wave)
 
 
 func _draw_sector_embers() -> void:
