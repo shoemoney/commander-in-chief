@@ -278,3 +278,6 @@ msgstr "火炎放射器 — 近距離で歩兵と土のうを焼く。装甲に�
 
 msgid "ROCKET LAUNCHER — SLOW, CRACKS ARMOR. FIRES WHEN LINED UP"
 msgstr "ロケットランチャー — 低速、装甲を砕く。射線が合うと発射"
+
+msgid "THE GUNSHIP IS STILL ARRIVING — SHOTS BOUNCE OFF UNTIL IT LANDS"
+msgstr "ガンシップはまだ接近中 — 着陸するまで弾は弾かれる"

@@ -2238,8 +2238,7 @@ func _row0_opt(sim: SimWorld, x: float, y: float, shop_row: bool) -> float:
 			var boss_up := not sim.endless_boss.is_empty() and bool(sim.endless_boss.get("alive", false))
 			var remaining: int = alive + sim.wave_pending + (1 if boss_up else 0)
 			# The wave's starting budget (same formula _start_wave uses).
-			var wave_total: int = maxi(1, SimWorld.WAVE_BASE_ENEMIES
-				+ SimWorld.WAVE_ENEMIES_PER_WAVE * (sim.wave - 1) + (1 if boss_up else 0))
+			var wave_total: int = maxi(1, EndlessRoster.wave_budget(sim.wave) + (1 + EndlessRoster.boss_escorts(sim.wave / 5) if boss_up else 0))
 			var htxt := "HOSTILES %d" % remaining
 			# Highest optional priority: the push-or-hold combat dashboard survives a crowded
 			# row while vanity records/streak drop — the stated failure was the reverse.

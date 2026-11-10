@@ -3633,8 +3633,7 @@ func _explode(x: int, y: int, no_coin := false, src := "") -> void:
 		var gbx: int = endless_boss["x"] + int(goff[0])
 		var gby: int = endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1])
 		if _dist_lte(x, y, gbx, gby, GRENADE_RADIUS + BOSS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": gbx, "y": gby})
-			_damage_boss(endless_boss, BOSS_GRENADE_DAMAGE)
+			_hit_endless_boss(gbx, gby, BOSS_GRENADE_DAMAGE)
 	# The Colossus is pure armor: grenades are the only thing it respects.
 	if not colossus.is_empty() and colossus["alive"] \
 			and _dist_lte(x, y, colossus["x"], colossus["y"], GRENADE_RADIUS + COLOSSUS_HIT_RADIUS):
@@ -5161,8 +5160,7 @@ func _rocket_blast(x: int, y: int) -> void:
 		var gbx: int = endless_boss["x"] + int(goff[0])
 		var gby: int = endless_boss["gate_y"] - BOSS_Y_OFFSET + int(goff[1])
 		if _dist_lte(x, y, gbx, gby, rad + BOSS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": gbx, "y": gby})
-			_damage_boss(endless_boss, wt["boss_dmg"])
+			_hit_endless_boss(gbx, gby, wt["boss_dmg"])
 	if not colossus.is_empty() and colossus["alive"] and _dist_lte(x, y, colossus["x"], colossus["y"], rad + COLOSSUS_HIT_RADIUS):
 		_damage_colossus(wt["colossus_dmg"])
 	if not observer.is_empty() and _dist_lte(x, y, observer["x"], camera_top + OBSERVER_Y_OFFSET, rad):
@@ -6761,7 +6759,16 @@ func _step_waves(inputs: Array = []) -> void:
 			# Deliberately reads the PRIMARY slot only: a wave-15+ stacked Blitz
 			# must not veto its partner's theme, or the stack would read as a
 			# downgrade. Blitz-as-primary keeps its shipped "pure bodies" identity.
-			if wave >= 3 and is_elite and wave_mod != 1:
+			# TIERED ROSTER (EndlessRoster): each archetype DEBUTS alone on its own wave at
+			# a fixed slot (any mutator, Blitz included, so the first-sight card is never
+			# skipped) and joins the rotation the wave after; locked rolls fall back to the
+			# already-debuted specials. The roll is still drawn, so the stream is unchanged.
+			var debut_k: String = ""
+			if mode == "endless" and wave >= 3 and is_elite:
+				var dk: String = EndlessRoster.debut_kind(wave)
+				if dk != "" and wave_pending == EndlessRoster.debut_slot(EndlessRoster.wave_budget(wave), elite_every):
+					debut_k = dk
+			if debut_k != "" or (wave >= 3 and is_elite and wave_mod != 1):
 				var roll := rng.range_i(0, 9)
 				# c3 2v per-wave COMPOSITION THEMES: remap the SAME draw (no extra rng)
 				# onto a themed subset so a marksmen/bombardment wave reads as a unit.
@@ -6769,45 +6776,33 @@ func _step_waves(inputs: Array = []) -> void:
 					roll = [1, 4, 5, 1, 4, 5, 1, 4, 5, 4][roll]   # ranged paint, even weights
 				elif has_mod(8):   # BOMBARDMENT: balanced grenadier(0)/sapper(3)
 					roll = [0, 3, 0, 3, 0, 3, 0, 3, 0, 3][roll]   # area denial, 50/50
-				if roll == 0:
-					_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
-				elif roll == 1:
-					_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
-				elif roll == 2:
-					_spawn_special(x, camera_top - 24 * F_ONE, "shield")
-				elif roll == 3:
-					_spawn_special(x, camera_top - 24 * F_ONE, "sapper")
-				elif roll == 4:
+				var spawn_kind: String = debut_k if debut_k != "" else EndlessRoster.kind_for(roll, wave)
+				if spawn_kind == "ghillie":
 					# ROOTED, like the nest and the mast: _step_ghillie writes
 					# neither x nor y on ANY branch (submerged / revealing /
 					# winding up / firing / re-cloaking all return in place), so
 					# it inherits its spawn y forever. At camera_top-24 that is
 					# 40px above the player's _clamp_actor ceiling and 24px above
-					# the drawn viewport — unkillable, and _wave_hostiles_cleared
+					# the drawn viewport - unkillable, and _wave_hostiles_cleared
 					# still counts it, holding the wave open.
 					_spawn_special(x, rooted_y, "ghillie")
-				elif roll == 5:
-					# Tracked-AoE is the hardest special to answer — waves 3-4 teach
-					# the dodge-by-aim shooters first, then the drone layers on at 5
-					# (the same beat the first miniboss lands).
-					_spawn_special(x, camera_top - 24 * F_ONE, "drone" if wave >= 5 else "sniper")
-				elif roll == 6:
+				elif spawn_kind == "mg_nest":
 					_spawn_mg_nest(x, rooted_y)
-				elif roll == 7:
-					_spawn_special(x, camera_top - 24 * F_ONE, "technical")
-				elif roll == 8 and wave >= 7:
-					# Late-debut archetype: deep waves stop being static. Roll 8 fell
-					# to plain-elite before, and still does under wave 7 — the rng
-					# stream is untouched, only the wave-7+ interpretation changes.
+				elif spawn_kind == "broadcast":
 					_spawn_broadcast(x, rooted_y)
-				else:
+				elif spawn_kind == "elite":
 					_spawn_enemy(x, camera_top - 24 * F_ONE, true)
-			elif has_mod(7) and wave_pending % 3 == 0:
+				else:
+					# grenadier / sniper / shield / sapper / drone / technical walk or
+					# fly in from the top edge. Tracked-AoE (drone) is the hardest
+					# special to answer, hence its late debut.
+					_spawn_special(x, camera_top - 24 * F_ONE, spawn_kind)
+			elif has_mod(7) and wave_pending % 3 == 0 and EndlessRoster.unlocked("sniper", wave):
 				# c3-17 r2: ~1/3 of the NON-elite bulk also reads thematic on a themed
 				# wave (deterministic from wave_pending, NO rng draw) so the WHOLE wave
 				# reads as the theme, not only its elites. Endless wave>=3 -> golden-inert.
 				_spawn_special(x, camera_top - 24 * F_ONE, "sniper")
-			elif has_mod(8) and wave_pending % 3 == 0:
+			elif has_mod(8) and wave_pending % 3 == 0 and EndlessRoster.unlocked("grenadier", wave):
 				_spawn_special(x, camera_top - 24 * F_ONE, "grenadier")
 			else:
 				_spawn_enemy(x, camera_top - 24 * F_ONE, is_elite)
@@ -6946,7 +6941,7 @@ func _cover_blocked(bx: int, by: int, recycle: bool) -> bool:
 func _start_wave() -> void:
 	wave += 1
 	wave_start_tick = tick_count
-	wave_pending = WAVE_BASE_ENEMIES + WAVE_ENEMIES_PER_WAVE * (wave - 1)
+	wave_pending = EndlessRoster.wave_budget(wave)   # base + the tiered roster's compensation bodies
 	wave_spawn_cd = 1
 	deaths_this_wave = 0
 	# Dynamic arena geometry (c2 4v): the learned kiting loop goes stale on a
@@ -7474,14 +7469,30 @@ static func boss_spray_interval(tier: int) -> int:
 	return maxi(6, BOSS_SPRAY_INTERVAL_TICKS - 2 * maxi(0, tier - 1))
 
 
+func _spawn_boss_escorts(boss: Dictionary) -> void:
+	## Wardens/Reapers (EndlessRoster.boss_escorts) land with grenadier escorts either
+	## side of the hull. Existing enemy dicts only (nothing new to hash); skipped, not
+	## queued, when the arena is at its enemy cap.
+	var n: int = EndlessRoster.boss_escorts(wave / 5)
+	for i in n:
+		if enemies.size() >= MAX_ENEMIES:
+			return
+		var side: int = -1 if i % 2 == 0 else 1
+		var ex: int = clampi(boss["x"] + side * 90 * F_ONE, 24 * F_ONE, 616 * F_ONE)
+		_spawn_special(ex, camera_top - 24 * F_ONE, "grenadier")
+
+
 func _step_one_boss(boss: Dictionary) -> void:
 	if boss["phase_t"] < 0:
 		# Endless fly-in: the gunship holds its fire during the approach (campaign
-		# bosses start at 0 and never enter this branch). It is NOT invulnerable —
-		# see boss_flyin_offset and the two damage seams. The `endless_boss`
+		# bosses start at 0 and never enter this branch). It is TARGETABLE but not
+		# killable: _hit_endless_boss bounces every shot (armor_block) until it
+		# lands, so the arrival beat always plays. The `endless_boss`
 		# warning is emitted at the SPAWN, in _start_wave: firing it here on
 		# arrival meant the "incoming" card landed 7 s after the thing appeared.
 		boss["phase_t"] = boss["phase_t"] + 1
+		if boss["phase_t"] == 0 and is_same(boss, endless_boss):
+			_spawn_boss_escorts(boss)
 		return
 	boss["phase_t"] = (boss["phase_t"] + 1) % BOSS_CYCLE_TICKS
 	var t: int = boss["phase_t"]
@@ -7510,7 +7521,8 @@ func _step_one_boss(boss: Dictionary) -> void:
 	# wave is 0 in campaign, so tier 0/1 reproduce today's numbers exactly.
 	var tier: int = wave / 5
 	# HP-third act (GunshipPhases): pure function of hp / the spawn-time pool, no new state.
-	var bphase: int = GunshipPhases.phase_of(boss["hp"], boss.get("max_hp", _scaled_boss_hp(BOSS_HP)))
+	# EndlessRoster.boss_act floors it at the tier's OPENING act (wave 10 opens in act 2, ...).
+	var bphase: int = EndlessRoster.boss_act(tier, boss["hp"], boss.get("max_hp", _scaled_boss_hp(BOSS_HP)))
 	# The boss drifts through BOTH halves now (8v: parking during the mortar
 	# volley made the whole phase a stand-still pinata).
 	boss["x"] = boss["x"] + GunshipPhases.speed(bphase, BOSS_SPEED) * boss["dir"]
@@ -7582,17 +7594,16 @@ func _bullet_hits_boss(b: Dictionary, boss_gates: Variant = null) -> bool:
 			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
 			_damage_boss(boss, 1)
 			return true
-	# The miniboss is engageable from the first tick it is DRAWN, at the point it
+	# The miniboss is targetable from the first tick it is DRAWN, at the point it
 	# is drawn: boss_flyin_offset slides the disc down the approach ramp with the
-	# sprite ([0,0] once it lands). It used to refuse every round for the whole
-	# 420-tick fly-in, silently — the last silent damage refusal in this file,
-	# while the screen showed a helicopter absorbing 53 rounds.
+	# sprite ([0,0] once it lands). During the approach the round is consumed and
+	# BOUNCES (armor_block, via _hit_endless_boss): the refusal is audible and visible,
+	# not the old silent eat, and the gunship cannot be killed before it arrives.
 	if not endless_boss.is_empty() and endless_boss["alive"]:
 		var eoff: Array = boss_flyin_offset(endless_boss["phase_t"])
 		if _dist_lte(b["x"], b["y"], endless_boss["x"] + int(eoff[0]),
 				endless_boss["gate_y"] - BOSS_Y_OFFSET + int(eoff[1]), BOSS_HIT_RADIUS):
-			events.append({"t": "boss_hit", "x": b["x"], "y": b["y"]})
-			_damage_boss(endless_boss, 1)
+			_hit_endless_boss(b["x"], b["y"], 1)
 			return true
 	return false
 
@@ -7622,7 +7633,21 @@ func _crack_bridge_span(boss: Dictionary) -> void:
 	rocks.append({"x": rx, "y": span_y + 40 * F_ONE, "kind": 0, "burn_ticks": 0})
 
 
+func _hit_endless_boss(ex: int, ey: int, amount: int) -> void:
+	## One door for every hit on the endless miniboss. While it is still on its
+	## approach (phase_t < 0) shots BOUNCE: it cannot be killed before its arrival beat
+	## lands, and the refusal is LOUD - the same armor_block ricochet every other
+	## deflection uses (the view captions it), never a silent eat. Landed: boss_hit + damage.
+	if endless_boss["phase_t"] < 0:
+		events.append({"t": "armor_block", "x": ex, "y": ey})
+		return
+	events.append({"t": "boss_hit", "x": ex, "y": ey})
+	_damage_boss(endless_boss, amount)
+
+
 func _damage_boss(boss: Dictionary, amount: int) -> void:
+	if boss.get("phase_t", 0) < 0:
+		return   # backstop for any caller that skips _hit_endless_boss: an approaching hull cannot die
 	var old_hp: int = boss["hp"]
 	boss["hp"] = boss["hp"] - amount
 	# c4 5v GUNSHIP ARENA CRACK: unlike the colossus, the gunship never mutated

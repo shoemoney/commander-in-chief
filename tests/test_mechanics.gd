@@ -910,6 +910,7 @@ func test_endless_pilot_is_catchable_from_the_band_bottom() -> void:
 	sim._start_wave()     # wave 5: fields the milestone miniboss (gate_y = camera_top + 90)
 	var boss := sim.endless_boss
 	Runner.T.ok(not boss.is_empty(), "wave 5 fields the endless miniboss")
+	boss["phase_t"] = 0   # landed: an approaching gunship cannot be killed (test_endless_variety)
 	sim._damage_boss(boss, boss["hp"])
 	# This is a pure pilot-speed footrace. Purchased/world sandbags are now
 	# truthful player collision, so remove the authored arena maze just as the

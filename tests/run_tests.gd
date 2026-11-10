@@ -43,6 +43,7 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_gunship_phases.gd",
 	"res://tests/test_lockstep.gd",
 	"res://tests/test_endless.gd",
+	"res://tests/test_endless_variety.gd",
 	"res://tests/test_spawn_cover.gd",
 	"res://tests/test_mutators.gd",
 	"res://tests/test_colossus.gd",

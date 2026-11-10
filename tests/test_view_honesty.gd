@@ -3576,7 +3576,17 @@ func test_endless_boss_is_hittable_wherever_it_is_drawn() -> void:
 		for e in sim.events:
 			if e["t"] == "boss_hit":
 				got_ev = true
-		if hit and got_ev and sim.endless_boss["hp"] == hp0 - 1:
+		# Owner decision 23/25 (endless-variety): while phase_t < 0 the round is consumed and
+		# BOUNCES (armor_block, hp untouched) so the arrival beat always lands; once landed
+		# it damages as before.
+		var bounced := false
+		for e in sim.events:
+			if e["t"] == "armor_block":
+				bounced = true
+		if pt < 0:
+			if hit and bounced and not got_ev and sim.endless_boss["hp"] == hp0:
+				bullet_ok += 1
+		elif hit and got_ev and sim.endless_boss["hp"] == hp0 - 1:
 			bullet_ok += 1
 		# --- explosive family (grenade / airburst / barrel / mine) ---
 		var sim2 := _flyin_boss_sim(pt)
@@ -3584,10 +3594,16 @@ func test_endless_boss_is_hittable_wherever_it_is_drawn() -> void:
 		var at2 := _flyin_drawn_px(sim2)
 		sim2._explode(int(at2.x * Fixed.ONE), int(at2.y * Fixed.ONE))
 		var got2 := false
+		var bounced2 := false
 		for e in sim2.events:
 			if e["t"] == "boss_hit":
 				got2 = true
-		if got2 and sim2.endless_boss["hp"] < hp2:
+			if e["t"] == "armor_block":
+				bounced2 = true
+		if pt < 0:
+			if bounced2 and not got2 and sim2.endless_boss["hp"] == hp2:
+				blast_ok += 1
+		elif got2 and sim2.endless_boss["hp"] < hp2:
 			blast_ok += 1
 	Runner.T.eq(bullet_ok, samples.size(),
 		"a round on the drawn hull damages the miniboss at every sampled tick (%d/%d)"
@@ -3825,6 +3841,12 @@ func test_flyin_death_fx_land_on_the_wreck_not_the_pad() -> void:
 			float(boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(off[1])) * PX)
 		boss["hp"] = 1
 		sim._damage_boss(boss, 1)
+		if pt < 0:
+			# Owner decision 23/25: an approaching gunship cannot die, so there is no
+			# mid-approach wreck to misplace any more (the seam below still guards the
+			# landed samples, where the offset is [0, 0]).
+			Runner.T.ok(boss["alive"] and boss["hp"] == 1, "an approaching hull refuses the killing hit (phase_t %d)" % pt)
+			continue
 		Runner.T.ok(not boss["alive"], "the sampled hit kills the miniboss (phase_t %d)" % pt)
 		var seen := 0
 		for ev in sim.events:

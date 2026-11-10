@@ -3335,6 +3335,25 @@ func _consume_events() -> void:
 								1.0 + float(3 - nh) * 0.3)
 						_hint("nest_crack", "THE NEST CRACKS UNDER FIRE — KEEP SHOOTING, OR GRENADE IT")
 						break
+				# Endless gunship still on its approach: it cannot be killed before it lands,
+				# so the bounce is named (EndlessRoster / _hit_endless_boss) instead of
+				# reading as the wall lecture below.
+				var fly_hit := false
+				if not nest_hit and not sim.endless_boss.is_empty() and sim.endless_boss["alive"] \
+						and sim.endless_boss["phase_t"] < 0:
+					var foff: Array = SimWorld.boss_flyin_offset(sim.endless_boss["phase_t"])
+					if absi(sim.endless_boss["x"] + int(foff[0]) - ev["x"]) <= SimWorld.BOSS_HIT_RADIUS + 8 * Fixed.ONE \
+							and absi(sim.endless_boss["gate_y"] - SimWorld.BOSS_Y_OFFSET + int(foff[1]) - ev["y"]) \
+								<= SimWorld.BOSS_HIT_RADIUS + 8 * Fixed.ONE:
+						fly_hit = true
+						armor_pinged = true
+						_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "tex",
+							"tex": "fx_sparkle", "sz": 7.0, "fade": 1.8, "rate": 0.16,
+							"col": Color(0.75, 0.88, 1.0, 0.95)})
+						if Engine.get_physics_frames() - _vet_ping_frame >= 10:
+							_vet_ping_frame = Engine.get_physics_frames()
+							_sfx.play_at("ping_armor", _to_screen(ev["x"], ev["y"]), -12.0, 1.15)
+						_hint("boss_flyin", "THE GUNSHIP IS STILL ARRIVING — SHOTS BOUNCE OFF UNTIL IT LANDS")
 				# Manned-tank cover: a MANNED hull blocking enemy fire pays
 				# TANK_HIT_FUEL_COST off the clock (sim_world.gd
 				# _step_enemy_bullets) but fired the SAME bare armor_block
@@ -3357,7 +3376,7 @@ func _consume_events() -> void:
 							_fx.append({"x": ev["x"], "y": ev["y"] - 10, "t": 0.0, "kind": "floattext",
 								"rate": 0.02, "text": "-1S", "col": Color(1.0, 0.6, 0.25)})
 							break
-				if not nest_hit and not tank_hit:
+				if not nest_hit and not tank_hit and not fly_hit:
 					# Veteran-armor chip: wave-13+ endless infantry. The split is the
 					# sim's own seam — _wave_armor() > 0 (endless-only, wave 13+)
 					# AND hp set near the block. hp alone is NOT the tell: mg_nest
@@ -12683,7 +12702,7 @@ func _draw_gunships() -> void:
 	if not sim.endless_boss.is_empty() and sim.endless_boss["alive"]:
 		# Endless miniboss wears the attack-heli bake so it reads as its own threat,
 		# not a reskin of the campaign bridge boss (same PI = nose-down convention).
-		_draw_one_gunship(sim.endless_boss, "GUNSHIP", slot, "m_heli_attack2")
+		_draw_one_gunship(sim.endless_boss, EndlessRoster.boss_name(sim.wave / 5), slot, "m_heli_attack2")
 		slot += 1
 		_endless_boss_key = "boss%d" % sim.endless_boss["gate_y"]
 	elif _endless_boss_key != "":
@@ -13388,8 +13407,8 @@ func _boss_bar(boss: Dictionary, label: String, slot: int, pt: int) -> void:
 	var bar_y := HudIcons.BOSS_BAR_TOP + float(slot) * HudIcons.BOSS_BAR_STRIDE
 	# a2-17 HUD#6: name the phase (actionable) instead of "PHASE 1/2"; HUD#1: plate it
 	# so the highest-stakes read has the plate language the rest of the top band has.
-	var gplabel := gunship_phase_label(label, pt, GunshipPhases.phase_of(boss["hp"],
-		boss.get("max_hp", int(_boss_hpmax[bkey]))))
+	var gplabel := gunship_phase_label(label, pt, EndlessRoster.boss_act(sim.wave / 5 if is_same(boss, sim.endless_boss) else 0,
+		boss["hp"], boss.get("max_hp", int(_boss_hpmax[bkey]))))
 	var gpw := Art.tw(gplabel, 10)
 	draw_rect(_label_plate_rect(bar_x, bar_y, gpw), LABEL_PLATE_FILL)
 	Art.text(self, gplabel, Vector2(bar_x, bar_y), 10, Color(1.0, 0.72, 0.45), 0.0, 1)

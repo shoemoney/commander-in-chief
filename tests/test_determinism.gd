@@ -1062,13 +1062,16 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## RE-RECORDED (2026-11-10 — MERGE with the fairness package): the special-weapons note above
 ## was written on a tree where this array's samples 2-5 still held their pre-fairness values;
 ## fairness moved 2-5, weapons moves 1. Both are now in: sample 0 is the only survivor of both.
+## RE-RECORDED (2026-11-10 -- ENDLESS VARIETY): samples 2-5 move (0-1 byte-identical). The torture
+## reaches wave 3, where the tiered roster (EndlessRoster) fields ONE grenadier on a fixed slot and
+## otherwise plain elites, plus compensation bodies in the trickle. No new hashed field.
 const ENDLESS_GOLDEN: Array[int] = [
 	2690452510761397110,
 	7598256093459179475,
-	8326839502317779280,
-	737824360758084112,
-	2173250255464296636,
-	5287323263118098913,
+	6662727244287474993,
+	3184369704061080815,
+	2906951860614421736,
+	2551049773907170239,
 ]
 
 
@@ -1296,7 +1299,7 @@ func test_c3_wave_themes_determinism_and_bias() -> void:
 
 func _themed_wave_run(mod: int) -> Dictionary:
 	var sim := SimWorld.new(SEED, 1, "endless")
-	sim.wave = 3
+	sim.wave = 12   # was 3: wave 13 has no archetype debut, so the theme is the only roster signal
 	sim._start_wave()
 	var kinds := {}
 	for tick in 300:

@@ -3774,6 +3774,13 @@ func test_every_boss_plate_owns_its_reserved_band() -> void:
 	for m in call_re.search_all(src):
 		if not gun_names.has(m.get_string(1)):
 			gun_names.append(m.get_string(1))
+	# The endless call site passes EndlessRoster.boss_name(...) (not a literal), so the
+	# four miniboss names are donated from their one source of truth.
+	Runner.T.ok(src.contains("_draw_one_gunship(sim.endless_boss, EndlessRoster.boss_name("),
+		"the endless plate is named from EndlessRoster.boss_name")
+	for bn in EndlessRoster.BOSS_NAMES:
+		if not gun_names.has(bn):
+			gun_names.append(bn)
 	Runner.T.ok(gun_names.size() >= 2,
 		"scraped every _draw_one_gunship label from source (got %s)" % str(gun_names))
 	var gun_labels: Array[String] = []

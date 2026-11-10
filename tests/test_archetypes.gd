@@ -624,7 +624,7 @@ func test_rooted_spawns_do_not_share_one_row() -> void:
 		for t in 3000:
 			# Pin the wave so composition stays on the band that fields all three
 			# rooted kinds; a drifting wave under-samples them badly (30 births).
-			sim.wave = 12
+			sim.wave = 16   # was 12; broadcast now debuts at 14 (EndlessRoster), so 16 fields all three
 			sim.wave_pending = maxi(sim.wave_pending, 1)
 			sim.step([idle])
 			for e in sim.enemies:

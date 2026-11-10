@@ -13,8 +13,8 @@ func _idle() -> SimInput:
 
 func test_blitz_halves_spawn_interval_and_bars_specials() -> void:
 	var sim := SimWorld.new(11, 1, "endless")
-	sim.wave = 3
-	sim._start_wave()   # -> wave 4
+	sim.wave = 4
+	sim._start_wave()   # -> wave 5 (was 4: a sniper now DEBUTS on wave 4 even through Blitz; by 5 grenadier/sniper are in rotation)
 	sim.wave_mod = 1    # force Blitz
 	sim.wave_pending = 20
 	sim.enemies.clear()
