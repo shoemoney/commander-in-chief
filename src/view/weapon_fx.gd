@@ -8,6 +8,13 @@ extends RefCounted
 
 const PX := 1.0 / Fixed.ONE
 
+## Sim tick of the last REAL 'flame' event per player index, and which sim it belongs to. fire_cd is
+## shared with the machine gun (which writes it on every shot), so it alone cannot say a flame
+## burst happened -- a held special with no target falls through to the MG and fire_cd keeps
+## cycling. View-only state; never read by the sim.
+static var _burst_tick: Dictionary = {}
+static var _burst_sim_id: int = 0
+
 
 static func cone_polygon(origin: Vector2, aim: Vector2, reach: float, tan_half: float, pad: float) -> PackedVector2Array:
 	## The exact region Weapons.in_cone accepts, in screen px: a pad-wide strip behind the muzzle
@@ -44,6 +51,39 @@ static func on_event(ev: Dictionary, fx: Array) -> void:
 			"sz": blast_radius_px(), "grow_px": 0.0, "col": Color(1.0, 0.8, 0.45, 0.8)})
 
 
+static func note_event(ev: Dictionary, sim: SimWorld) -> void:
+	## Record a real flame burst (the sim emits 'flame' only from _flame_burst).
+	if ev["t"] != "flame":
+		return
+	_sync_sim(sim)
+	_burst_tick[int(ev["i"])] = sim.tick_count
+
+
+static func reset() -> void:
+	_burst_tick.clear()
+	_burst_sim_id = 0
+
+
+static func _sync_sim(sim: SimWorld) -> void:
+	var id := sim.get_instance_id()
+	if id != _burst_sim_id:
+		_burst_tick.clear()
+		_burst_sim_id = id
+
+
+static func flame_drawn(sim: SimWorld, pi: int) -> bool:
+	## The cone is drawn only inside the cooldown window of a REAL burst (4 ticks), never merely
+	## because the flame is held and fire_cd is non-zero from MG shots.
+	_sync_sim(sim)
+	var p: Dictionary = sim.players[pi]
+	if not (p["alive"] and p.get("weapon", 0) == Weapons.FLAME and p["fire_cd"] > 0):
+		return false
+	if not _burst_tick.has(pi):
+		return false
+	var age: int = sim.tick_count - int(_burst_tick[pi])
+	return age >= 0 and age < int(Weapons.TABLE[Weapons.FLAME]["cd"])
+
+
 static func _hash01(a: int, b: int) -> float:
 	var h: int = (a * 73856093) ^ (b * 19349663)
 	h = (h >> 5) & 0xFFFF
@@ -54,7 +94,7 @@ static func draw_world(c: CanvasItem, sim: SimWorld, to_screen: Callable, motion
 	var frame := Engine.get_physics_frames()
 	for pi in sim.players.size():
 		var p: Dictionary = sim.players[pi]
-		if p["alive"] and p.get("weapon", 0) == Weapons.FLAME and p["fire_cd"] > 0:
+		if flame_drawn(sim, pi):
 			_draw_flame(c, to_screen.call(p["x"], p["y"]), Vector2(p["aim_x"], p["aim_y"]) * PX, frame, pi, motion,
 				float(sim.flame_reach(p)) * PX)
 	for r in sim.rockets:

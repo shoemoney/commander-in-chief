@@ -2271,6 +2271,7 @@ func _reset() -> void:
 	_flash_alpha = 0.0
 	_flash_col = Color(1, 1, 1)
 	_fx.clear()
+	WeaponFx.reset()
 	_rooted_arrive.clear()   # c4-19: a restart mid-ramp must not inherit the old run's dig-in ages
 	_mote_count = 0
 	_pending_blasts.clear()
@@ -3221,6 +3222,7 @@ func _consume_events() -> void:
 			break
 	for ev in sim.events:
 		var kind: String = ev["t"]
+		WeaponFx.note_event(ev, sim)   # the flame cone is drawn only after a real 'flame' burst
 		if kind == "throw" and not _cue_seen.has(CuePolicy.KEY_THREW) and _menu.mode != GameMenu.Mode.TITLE:
 			_cue_seen[CuePolicy.KEY_THREW] = 1   # the player has found the grenade: the armor re-arm retires
 			_seen_dirty = true

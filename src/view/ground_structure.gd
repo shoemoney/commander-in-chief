@@ -248,6 +248,70 @@ static func _lane_row(anc: Array, wy: float, sy: float, kind: int) -> Dictionary
 		"a": float(lane_tint(kind)[1]), "vx": vx, "vc": vc}
 
 
+## --- lane row cache -----------------------------------------------------------------
+## A lane row is a pure function of (anchors, world y), and world y is quantised to ROW_PX, so
+## scrolling re-asks for the same rows every frame. They are computed once, keyed by world y,
+## and evicted when they leave the viewport. The cache is dropped whenever the anchors change
+## (a new run, a gate or ford appearing), so a restart can never see the old run's track.
+static var cache_enabled := true
+static var rows_computed := 0          # rows built from scratch by the last plan() (work probe)
+static var _row_cache: Dictionary = {}
+static var _row_anc: Array = []
+
+
+static func _sync_row_cache(anc: Array) -> void:
+	if not cache_enabled:
+		_row_cache.clear()
+		return
+	if anc != _row_anc:
+		_row_cache.clear()
+		_row_anc = anc.duplicate()
+
+
+static func _cached_row(anc: Array, wy: float) -> Dictionary:
+	var key := int(round(wy))
+	if cache_enabled and _row_cache.has(key):
+		return _row_cache[key]
+	var row := _lane_row(anc, wy, 0.0, lane_kind(sector_for_y(wy + ROW_PX * 0.5)))
+	rows_computed += 1
+	if cache_enabled:
+		_row_cache[key] = row
+	return row
+
+
+static func _evict_rows(wy_lo: float, wy_hi: float) -> void:
+	if _row_cache.size() <= 96:
+		return
+	for k in _row_cache.keys():
+		if float(k) < wy_lo or float(k) > wy_hi:
+			_row_cache.erase(k)
+
+
+## The triangles of the strip between two lane rows, in WORLD px (the painter shifts the whole
+## strip by one camera offset). Quads that are effectively transparent are dropped exactly as the
+## per-quad painter did, so the picture is unchanged.
+static func _attach_tris(r0: Dictionary, r1: Dictionary) -> void:
+	var x0: PackedFloat32Array = r0["vx"]
+	var x1: PackedFloat32Array = r1["vx"]
+	var c0: PackedColorArray = r0["vc"]
+	var c1: PackedColorArray = r1["vc"]
+	var y0: float = r0["wy"]
+	var y1: float = r1["wy"]
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	for c in LANE_COLS - 1:
+		if c0[c].a + c0[c + 1].a + c1[c].a + c1[c + 1].a < 0.004:
+			continue
+		var a := Vector2(x0[c], y0)
+		var b := Vector2(x0[c + 1], y0)
+		var d := Vector2(x1[c + 1], y1)
+		var e := Vector2(x1[c], y1)
+		pts.append_array(PackedVector2Array([a, b, d, a, d, e]))
+		cols.append_array(PackedColorArray([c0[c], c0[c + 1], c1[c + 1], c0[c], c1[c + 1], c1[c]]))
+	r0["tp"] = pts
+	r0["tc"] = cols
+
+
 static func _line(x0: float, y0: float, x1: float, y1: float, w: float, color: Color) -> Dictionary:
 	return {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "w": w, "color": color}
 
@@ -269,9 +333,20 @@ static func plan(anc: Array, gate_ys: Array, waters: Array, cam_y: float,
 	var details: Array = []
 	var wy_top := floorf(cam_y / ROW_PX) * ROW_PX - ROW_PX
 	var wy := wy_top
+	rows_computed = 0
+	_sync_row_cache(anc)
+	var cached: Array = []
 	while wy - cam_y < 360.0 + ROW_PX * 2.0:
-		lane.append(_lane_row(anc, wy, wy - cam_y, lane_kind(sector_for_y(wy + ROW_PX * 0.5))))
+		cached.append(_cached_row(anc, wy))
 		wy += ROW_PX
+	for i in cached.size():
+		var cr: Dictionary = cached[i]
+		if i + 1 < cached.size() and not cr.has("tp"):
+			_attach_tris(cr, cached[i + 1])
+		var row: Dictionary = cr.duplicate()   # the world-stable parts are shared; only "y" is per frame
+		row["y"] = float(cr["wy"]) - cam_y
+		lane.append(row)
+	_evict_rows(wy_top, wy)
 	_dress_lane(anc, cam_y, ruts, seams, dashes, details)
 	for gy in gate_ys:
 		var sy := float(gy) - cam_y
@@ -484,22 +559,39 @@ static func paint_mud_bank(canvas: CanvasItem, p: Dictionary, origin: Vector2) -
 
 
 ## The track as vertex-coloured quads (one draw_polygon per cell; Gouraud across each).
+static var _tri_idx := PackedInt32Array()
+
+
+## The track as ONE triangle-list draw command (was one draw_polygon per cell, ~730 a frame).
 static func _paint_lane(canvas: CanvasItem, rows: Array) -> void:
+	if rows.size() < 2:
+		return
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
 	for i in rows.size() - 1:
-		var r0: Dictionary = rows[i]
-		var r1: Dictionary = rows[i + 1]
-		var x0: PackedFloat32Array = r0["vx"]
-		var x1: PackedFloat32Array = r1["vx"]
-		var c0: PackedColorArray = r0["vc"]
-		var c1: PackedColorArray = r1["vc"]
-		var y0: float = r0["y"]
-		var y1: float = r1["y"]
-		for c in LANE_COLS - 1:
-			if c0[c].a + c0[c + 1].a + c1[c].a + c1[c + 1].a < 0.004:
-				continue
-			canvas.draw_polygon(
-				PackedVector2Array([Vector2(x0[c], y0), Vector2(x0[c + 1], y0), Vector2(x1[c + 1], y1), Vector2(x1[c], y1)]),
-				PackedColorArray([c0[c], c0[c + 1], c1[c + 1], c1[c]]))
+		var r: Dictionary = rows[i]
+		if not r.has("tp"):
+			_attach_tris(r, rows[i + 1])
+		pts.append_array(r["tp"])
+		cols.append_array(r["tc"])
+	lane_vertex_count = pts.size()
+	lane_commands = 0
+	if pts.is_empty():
+		return
+	lane_commands = 3
+	if _tri_idx.size() < pts.size():
+		_tri_idx.resize(pts.size() + 1024)
+		for k in _tri_idx.size():
+			_tri_idx[k] = k
+	var ci := canvas.get_canvas_item()
+	RenderingServer.canvas_item_add_set_transform(ci,
+		Transform2D(0.0, Vector2(0.0, float(rows[0]["y"]) - float(rows[0]["wy"]))))
+	RenderingServer.canvas_item_add_triangle_array(ci, _tri_idx.slice(0, pts.size()), pts, cols)
+	RenderingServer.canvas_item_add_set_transform(ci, Transform2D.IDENTITY)
+
+
+static var lane_vertex_count := 0
+static var lane_commands := 0   # canvas commands the last _paint_lane issued: the triangle array + its two transforms
 
 
 ## Draw a plan onto `canvas` (the ground layer): the track as vertex-coloured quads, then ruts / joints / fragments as short strokes, then soft blobs.
