@@ -798,13 +798,23 @@ const SEED := 0xDEADBEEF
 ## BYTE-IDENTICAL and 1-5 move. ⚠️ Coverage cost, measured: this torture now wipes at TICK
 ## 2057 (was 3140; 8 knockdowns, 0 gates either way), so samples 3-5 are frozen post-wipe
 ## state (was only 5). SURVIVOR_GOLDEN is still the live-state arm for that back half.
+## RE-RECORDED (2026-11-10 — MERGE of the fairness and special-weapons packages): sample 5
+## ONLY. The weapons package recorded "campaign GOLDEN untouched" on a tree where this
+## torture never got far enough to roll a rare capsule past sector 1; with the fairness
+## changes merged it does. Measured on the merged tree: the first special-weapon capsule
+## lands at TICK 3072 and is in a player's hands at 3073 — 3072 / SAMPLE_EVERY(600) = 5, so
+## sample 5 must move and 0-4 must not. They did exactly that. Control: forcing both weapons'
+## min_sector to 99 reproduces all six pre-merge samples byte-for-byte, so nothing else in
+## the four merged sim packages reaches this stream (bisected too: fairness, economy and
+## gunship are each green against the fairness-recorded values). The run opens 2 gates and
+## still wipes (13 knockdowns); SURVIVOR_GOLDEN remains the live-state arm.
 const GOLDEN: Array[int] = [
 	4777686421406228267,
 	6331385278001629063,
 	5720059147807561410,
 	6422984499686730060,
 	3092976764520280189,
-	5474487727677936237,
+	1667085400203293580,
 ]
 
 
@@ -1049,9 +1059,12 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 ## Fisher-Yates draws a different crate from the same rng stream; later samples reconverge. The
 ## campaign GOLDEN is untouched: every new field is hashed conditionally (weapon held / rocket in
 ## flight / scorched bag), and the rare-capsule roll is byte-identical below sector 2.
+## RE-RECORDED (2026-11-10 — MERGE with the fairness package): the special-weapons note above
+## was written on a tree where this array's samples 2-5 still held their pre-fairness values;
+## fairness moved 2-5, weapons moves 1. Both are now in: sample 0 is the only survivor of both.
 const ENDLESS_GOLDEN: Array[int] = [
 	2690452510761397110,
-	8359227894364836834,
+	7598256093459179475,
 	8326839502317779280,
 	737824360758084112,
 	2173250255464296636,
@@ -1102,13 +1115,25 @@ const SURVIVOR_SEED := 25
 ## a unit the ratchet had just left behind), inside standoff, now walks back up instead of
 ## holding. The arm still does its job, measured: ALIVE at t = 3600 (13 knockdowns, was 11),
 ## but it opens ONE gate now (was 2; score 14661, chest 268). All six samples are live state.
+## RE-RECORDED (2026-11-10 — MERGE of the fairness and special-weapons packages): samples 1
+## and 5. Each package was green alone; together they are not, and neither side's array was
+## right. Cause, by control experiment rather than by argument: forcing both weapons'
+## min_sector to 99 on the merged tree reproduces all six pre-merge survivor samples (and all
+## six campaign GOLDEN samples) byte-for-byte, so every moved sample is the rare-capsule pool
+## growing once a run is past sector 1 (_pick_rare_kind: 10 slots -> 13/16). Measured on the
+## merged tree, this arm NEVER sees a weapon capsule (0 in 3,600 ticks, nobody ever holds
+## one) — what changes is which ordinary rare kind the SAME single rng draw names. One call
+## per roll either way, so the stream is untouched, which is why samples 2-4 stay
+## byte-identical between the two rolls that land near a sample. (That last step is inferred
+## from the reconvergence; the control proves the cause, the per-capsule trace was not run.)
+## The arm still does its job: ALIVE at t = 3600, 3 gates open, 11 knockdowns, sector index 2.
 const SURVIVOR_GOLDEN: Array[int] = [
 	136124877747581649,
-	1354461871501890991,
+	3264801321259842924,
 	428232730071013903,
 	7266587977861809201,
 	2604994738116460987,
-	3924981222138306155,
+	9181879318324887023,
 ]
 
 
