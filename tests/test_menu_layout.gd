@@ -71,6 +71,8 @@ class _StubMain extends Node2D:
 	var _life_runs := 0
 	var _two_players := false
 	var _hard := false
+	var _vet_perks_on := true   # review-fixes: SETUP VET PERKS row reads it (stub parity)
+	func set_vet_perks(on: bool) -> void: _vet_perks_on = on
 	var _motion := 1.0
 	var colorblind := false
 	var _rumble_on := true
@@ -595,6 +597,12 @@ func test_c2_13_daily_lock_rule_is_seed_exact() -> void:
 # start path sets _current_seed to the EXACT daily seed (so midnight banking is well-defined),
 # _record_run persists that seed under daily/done_seed, and a fresh _load_bests reload makes
 # the TITLE menu flag the row disabled + COMPLETED for the rest of today.
+func _ends_with_countdown(badge: String) -> bool:
+	var re := RegEx.new()
+	re.compile("\\d+H\\d\\dM$")
+	return re.search(badge) != null
+
+
 func test_c2_13_daily_done_persists_and_locks_row() -> void:
 	# Stash the real save aside (recover a crashed prior stash first) so the test board is
 	# pristine and the dev's progress is never touched — mirrors the Hall integration test.
@@ -641,7 +649,13 @@ func test_c2_13_daily_done_persists_and_locks_row() -> void:
 	var row: Dictionary = m._menu_items()[_row_index(m, "daily")]
 	Runner.T.ok(row.get("disabled", false), "the reloaded completed daily locks the TITLE row")
 	# front-door: today's banked score (or COMPLETED) leads the badge, followed by the next-board countdown.
-	Runner.T.ok(String(row.get("badge", "")) != "", "...and shows a status badge (score/COMPLETED + countdown)")
+	# review-fixes: pinned to what the badge must SAY, not merely non-empty. The run was banked,
+	# so today's score leads (never COMPLETED) and the next-board countdown closes it.
+	var badge1 := String(row.get("badge", ""))
+	Runner.T.ok(badge1.begins_with(FrontDoor.score_text(main.sim.score)),
+		"...the badge leads with today's banked score (%s): '%s'" % [FrontDoor.score_text(main.sim.score), badge1])
+	Runner.T.ok(not badge1.contains("COMPLETED"), "...a banked score replaces the COMPLETED word")
+	Runner.T.ok(_ends_with_countdown(badge1), "...and ends with the next-board countdown: '%s'" % badge1)
 	m.free()
 	main.free()
 	main2.free()
@@ -731,7 +745,11 @@ func test_daily_attempt_spent_on_any_abandon_path() -> void:
 	var row: Dictionary = m._menu_items()[_row_index(m, "daily")]
 	Runner.T.ok(row.get("disabled", false), "the spent daily locks the TITLE row")
 	# front-door: today's banked score (or COMPLETED) leads the badge, followed by the next-board countdown.
-	Runner.T.ok(String(row.get("badge", "")) != "", "...and shows a status badge (score/COMPLETED + countdown)")
+	# review-fixes: the abandoned daily banked NO score today, so the badge must lead with
+	# COMPLETED and still close with the next-board countdown.
+	var badge2 := String(row.get("badge", ""))
+	Runner.T.ok(badge2.begins_with("COMPLETED"), "...an abandoned daily reads COMPLETED: '%s'" % badge2)
+	Runner.T.ok(_ends_with_countdown(badge2), "...and ends with the next-board countdown: '%s'" % badge2)
 	m.free()
 	main.free()
 	main2.free()

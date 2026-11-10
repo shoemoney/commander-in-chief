@@ -250,7 +250,7 @@ var _items_frame := -1
 # OPENS a dedicated DISPLAY sub-screen (like CONTROLS opens REBIND). On that screen
 # FULLSCREEN is a plain ON/OFF toggle (in this list) and WINDOW SCALE is a 1x..Nx stepper
 # (handled separately, like the volume rows), so the two are never overloaded onto one control.
-const _TOGGLES := ["coop", "hard", "sfx", "music", "motion", "colorblind", "captions", "rumble", "assist", "fullscreen"]
+const _TOGGLES := ["coop", "hard", "vet_perks","sfx", "music", "motion", "colorblind", "captions", "rumble", "assist", "fullscreen"]
 # c1-17: the exact persisted rows Reset Defaults reverts (main._reset_settings ->
 # SETTINGS_DEFAULTS) -- the a11y + audio rows, NOT the coop/hard run-setup toggles,
 # which reset never touches. The bulk confirm halo (_set_pulse_row == -2) lights ONLY
@@ -1132,6 +1132,8 @@ func _rebuild_menu_items() -> Array[Dictionary]:
 			{"id": "modes", "label": "MODES", "destructive": false, "grp": 1, "submenu": true},
 			# endless-meta-retention: VETERAN PERKS spends Veteran Points banked
 			# from Endless runs on permanent Endless starting-loadout perks.
+			# review-fixes: owned perks apply to Campaign/Arcade only while this is ON (Endless always).
+			{"id": "vet_perks", "label": "VET PERKS: %s" % ("ON" if main._vet_perks_on else "OFF"), "destructive": false, "on": main._vet_perks_on, "grp": 1},
 			{"id": "perks", "label": "VETERAN PERKS", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "options", "label": "OPTIONS", "destructive": false, "grp": 1, "submenu": true},
 			{"id": "info", "label": "INFO", "destructive": false, "grp": 1, "submenu": true},
@@ -1722,6 +1724,7 @@ func _row_icon(id: String) -> String:
 		"howto": return "mi_book"
 		"setup": return "mi_settings"   # c2-04: gear cue signals the hub also holds OPTIONS/INFO, not just run config
 		"hard": return "mi_combat"
+		"vet_perks": return "mi_trophy"
 		"coop": return "mi_controller"
 		# c4-01: the row icon flips to the MUTED (slashed-speaker) variant off the SAME
 		# AudioServer.is_bus_mute state the label + bar read, so the silent bus reinforces
@@ -2695,6 +2698,10 @@ const SETTING_HELP := {
 	"textscale": "TEXT SIZE: ENLARGES SMALL ON-SCREEN LABELS AND SUBTITLES. SAVE IN OPTIONS.",
 	"coop": "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN.",
 	"hard": "NG+ HARD: A TOUGHER SPAWN CURVE. CAMPAIGN ONLY. RUNS ARE TAGGED *HARD. APPLIES TO YOUR NEXT RUN.",
+	"vet_perks": "VET PERKS: USE OWNED PERKS IN CAMPAIGN AND ARCADE. ON RUNS RANK *VET, NOT CLEAN. ENDLESS ALWAYS USES THEM.",
+	"perk_vest": "PERKS APPLY IN ENDLESS, CAMPAIGN AND ARCADE. A PERKED CAMPAIGN OR ARCADE RUN RANKS *VET.",
+	"perk_chest": "PERKS APPLY IN ENDLESS, CAMPAIGN AND ARCADE. A PERKED CAMPAIGN OR ARCADE RUN RANKS *VET.",
+	"perk_token": "PERKS APPLY IN ENDLESS, CAMPAIGN AND ARCADE. A PERKED CAMPAIGN OR ARCADE RUN RANKS *VET.",
 	"single_stick_p1": "P1 AUTO AIMS WITH ONE STICK. MANUAL AIM TAKES PRIORITY. SAVE IN OPTIONS.",
 	"single_stick_p2": "P2 AUTO AIMS WITH ONE STICK. MANUAL AIM TAKES PRIORITY. SAVE IN OPTIONS.",
 	"classic_aim_p1": "P1 AIM SNAPS TO 12 DIRECTIONS. SAVE IN OPTIONS.",
@@ -3435,6 +3442,10 @@ func _activate() -> void:
 			"hard":
 				main._hard = not main._hard
 				_flash_setting()
+			"vet_perks":
+				main.set_vet_perks(not main._vet_perks_on)   # persisted at once, like a perk purchase
+				_items_valid = false
+				_flash_setting()
 			"intro":
 				main.replay_intro()
 			"howto":
@@ -3750,7 +3761,7 @@ func _update_seed_preview(delta := 0.0, force := false) -> void:
 # DISPLAY sub-screen's disp_subtitle() above. Factored out of _draw (rather
 # than inlined) so a test can assert the exact string without a render pass.
 func _perk_subtitle_text() -> String:
-	var pk_desc := "PERMANENT ENDLESS UPGRADES"
+	var pk_desc := "PERMANENT UPGRADES FOR ENDLESS, CAMPAIGN, ARCADE"
 	var pk_mi := _menu_items()
 	if sel >= 0 and sel < pk_mi.size():
 		var pk_pd: Dictionary = main.perk_def(pk_mi[sel]["id"])
@@ -5251,19 +5262,12 @@ func _draw_hall() -> void:
 			var col := Color(1.0, 0.9, 0.5) if i == 0 else Color(0.88, 0.9, 0.82)
 			if is_latest:
 				col = Color(1.0, 0.86, 0.5)   # the run you just finished — warm recency tint
-			var tag: String = "  *DAILY" if run.get("daily", false) else ""
-			if run.get("assist", false):
-				tag += "  *ASSIST"   # 2-hit runs compete on the same board — say so
-			if run.get("hard", false):
-				tag += "  *HARD"   # NG+ inflates score; same board as normal — say so
+			# *ASSIST (2-hit aids), *VET (earned perks) and *HARD each say why a run is not the clean board.
+			var tag: String = CampaignMeta.hall_tags(run, false)
 			var streak_s := "x%d%s" % [run.get("streak", 0), tag]
 			if streak_x + f.get_string_size(streak_s, HORIZONTAL_ALIGNMENT_LEFT, -1, HudIcons.TYPE_BODY).x > HALL_CELL_R:
 				# Cell would run off the frame — abbreviate the tags for this row.
-				tag = ("  *D" if run.get("daily", false) else "")
-				if run.get("assist", false):
-					tag += "  *A"
-				if run.get("hard", false):
-					tag += "  *H"
+				tag = CampaignMeta.hall_tags(run, true)
 				streak_s = "x%d%s" % [run.get("streak", 0), tag]
 			var y: float = float(hall_layout["row0"]) + row * float(hall_layout["pitch"])   # derived off HALL_HEADER_Y; the pitch is what keeps row 7's glow band clear of the page buttons
 			if is_latest:
@@ -7206,7 +7210,8 @@ func _draw_title_p2_banner() -> void:
 	var sz := Art.fs(HudIcons.TYPE_MICRO)
 	var tw := Art.font().get_string_size(_p2_banner, HORIZONTAL_ALIGNMENT_LEFT, -1, sz).x
 	var top := LEGEND_Y + LEGEND_H + 2.0
-	_emit_rect(Rect2(CENTER_X - tw / 2.0 - PLATE_PAD_SM, top, tw + PLATE_PAD_SM * 2.0, 14.0), _legend_plate_col(mode, main._motion))
+	var plate_h := maxf(14.0, ceilf(Art.font().get_height(sz)) + 4.0)   # follows TEXT SIZE; 14 px was only right at 100%
+	_emit_rect(Rect2(CENTER_X - tw / 2.0 - PLATE_PAD_SM, top, tw + PLATE_PAD_SM * 2.0, plate_h), _legend_plate_col(mode, main._motion))
 	_center_text(_p2_banner, top + Art.font().get_ascent(sz) + 2.0, sz, Color(1.0, 0.9, 0.4))
 
 

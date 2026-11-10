@@ -226,7 +226,8 @@ func test_perked_campaign_run_is_flagged_so_the_boards_stay_honest() -> void:
 	main._recorder = null
 	main._apply_score_verdict(0, true)
 	Runner.T.ok(main.hall_latest.get("perked", false), "the Hall entry is stamped perked")
-	Runner.T.ok(main.hall_latest.get("assist", false), "...and counted as assisted")
+	# review-fixes: a perked run is filed under its OWN *VET tag, never *ASSIST (an accessibility aid).
+	Runner.T.ok(main.hall_latest.get("vet", false) and not main.hall_latest.get("assist", true), "...filed *VET, not assisted")
 	Runner.T.ok("vest" in main.hall_latest.get("assist_tags", []), "...carrying the assisted-board tag Steam reads")
 	main.free()
 	_restore_save(s)

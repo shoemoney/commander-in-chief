@@ -1406,6 +1406,11 @@ func test_sol_frogman_variant() -> void:
 	Runner.T.eq(ms._frogman_tex(false), "frogman", "surfaced diver shows the RIFLE (sol-12)")
 
 
+## On-screen figure height: opaque-pixel bbox of the served texture times its draw scale.
+func _figure_px(t: Texture2D, draw_scale: float) -> float:
+	return float(t.get_image().get_used_rect().size.y) * draw_scale
+
+
 func test_sie_endless_infantry_family() -> void:
 	# sie-01: the four blurry native-64px the earlier art ENDLESS-roster specialists (GRENADIER/GHILLIE/SAPPER/
 	# SHIELD) are re-baked as authored 1024px cel-shaded infantry, same convention as the sol-08 red-team
@@ -1430,15 +1435,17 @@ func test_sie_endless_infantry_family() -> void:
 		else:
 			Runner.T.ok(not outline.has(k), "%s keeps its baked keyline — out of OUTLINE, no double rim (sie-01)" % k)
 	Runner.T.ok(outline.has("courier"), "courier is untouched — still the native entity bake, still needs its runtime rim (sie-01)")
-	# footprint cross-check (data, not just the constant): the 4 re-baked keys must land on the exact
-	# same imported-canvas x SCALE footprint as an established red-team sibling, not merely "some" 0.5.
-	# The family standard is the LEGACY 128px canvas x 0.5; enemy_assault itself is now a baked,
-	# screen-sized texture (SCALE 1/0.52), so the sibling number is pinned, not read off it.
-	var sib_footprint: float = 128.0 * 0.5
+	# footprint cross-check, LIVE (review-fixes): the sibling's on-screen figure height is MEASURED off
+	# the served enemy_assault texture (alpha bbox x its draw SCALE) and every re-baked key must land
+	# within +-30% of it. A pinned constant (the old 128*0.5) outlived the sibling's own re-bake to a
+	# screen-sized 22x28 canvas at SCALE 1/0.52, so the two families could drift apart unnoticed.
+	# Measured at this base: sibling 44.2px; bombsuit 32, soldier2 39, ghillie 53, sapper 34.
+	var sib_h := _figure_px(tex["enemy_assault"], float(scale["enemy_assault"]))
+	Runner.T.ok(sib_h > 20.0, "the enemy_assault sibling measures a real figure (%.1f px)" % sib_h)
 	for k in key_path:
-		var footprint: float = tex[k].get_size().x * float(scale[k])
-		Runner.T.ok(absf(footprint - sib_footprint) < 0.5,
-			"%s footprint (%.1f) matches the enemy_assault sibling's (%.1f) — same family, not a one-off (sie-01)" % [k, footprint, sib_footprint])
+		var fig_h := _figure_px(tex[k], float(scale[k]))
+		Runner.T.ok(absf(fig_h - sib_h) <= sib_h * 0.30,
+			"%s figure (%.1f px on screen) is within 30%% of the enemy_assault sibling's (%.1f) -- same family, not a one-off (sie-01)" % [k, fig_h, sib_h])
 	var files := {
 		"res://assets/art/mil2/soldier2.png": 128,
 		"res://assets/art/mil2/bombsuit.png": 128,

@@ -2220,8 +2220,12 @@ func test_colossus_screen_bar_opts_out_under_the_result_card() -> void:
 func test_hall_tags_the_score_inflating_hard_toggle() -> void:
 	## *ASSIST and *DAILY already stamp the board. NG+ HARD was the one toggle
 	## that moved score (~1.58x) with no marker.
+	# review-fixes: the tag text moved out of menu.gd into CampaignMeta.hall_tags (one source for the
+	# full and abbreviated forms); the menu must still route the Hall cell through it.
 	var menu_src := FileAccess.get_file_as_string("res://src/view/menu.gd")
-	Runner.T.ok(menu_src.contains("tag += \"  *HARD\""),
+	var meta_src := FileAccess.get_file_as_string("res://src/view/campaign_meta.gd")
+	Runner.T.ok(menu_src.contains("CampaignMeta.hall_tags(run, false)") and meta_src.contains("tag += \"  *D\" if short else \"  *DAILY\"") \
+			and meta_src.contains("\"  *H\" if short else \"  *HARD\""),
 		"the Hall stamps *HARD on NG+ runs the same way it stamps *ASSIST")
 	var rec := _view_src()
 	var arm := rec.find("func _record_run(")

@@ -364,7 +364,9 @@ var _run_rescues := 0            # pilot ransoms this run — the signature mech
 var _run_knockdowns := 0         # times a player went down this run — the continue ledger's count
 var _run_revive_coin := 0        # coin the chest paid to stand them back up (0 for a free broke rally)
 var _run_best_streak := 0
-var _run_perked := false         # retry-meta: this run started with purchased perks (Campaign/Arcade) -> boards flag it assisted
+var _run_perked := false         # retry-meta: this run started with purchased perks (Campaign/Arcade) -> filed under the *VET tag, off the clean board
+var _vet_perks_on := true        # review-fixes: persisted SETUP switch; OFF = Campaign/Arcade start unperked and untagged (Endless is unaffected)
+var _retry_origin := 0           # review-fixes: >0 while the live Arcade run came from RETRY SECTOR k (its debrief offers the way back to a ranked Campaign)
 var _run_vp_gain := 0            # endless-meta-retention: VP this run actually banked (0 unless
                                   # Endless + score-verified) -- shown on the debrief/victory card,
                                   # not just the transient BANKED banner (see _track_bests below)
@@ -2012,6 +2014,7 @@ func start_arcade(chapter: int) -> void:
 	_endless = false
 	_daily = false
 	_boss_rush = false
+	_retry_origin = 0
 	_arcade_chapter = clampi(chapter, 1, SimWorld.FINAL_GATE_INDEX)
 	_reset()
 	_menu.mode = GameMenu.Mode.HIDDEN
@@ -2223,7 +2226,7 @@ func _reset() -> void:
 		for pl in sim.players:
 			pl["vest"] = true
 	_run_perked = false
-	if CampaignMeta.perks_apply(_mode_str, _daily):
+	if CampaignMeta.perks_apply(_mode_str, _daily, _vet_perks_on):
 		# retry-meta: Campaign and Arcade starts take the perks too (never the daily seed).
 		_run_perked = _mode_str != "endless" and (perk_level(PERK_VEST) > 0 \
 			or perk_level(PERK_CHEST) > 0 or perk_level(PERK_TOKEN) > 0)
@@ -2546,6 +2549,11 @@ func _input(event: InputEvent) -> void:
 		else:
 			_reset()
 		get_viewport().set_input_as_handled()
+	if event is InputEventJoypadButton and event.pressed \
+			and event.button_index == CampaignMeta.NEW_CAMPAIGN_PAD_BUTTON \
+			and not _menu.is_active() and _try_new_campaign():
+		if is_inside_tree():
+			get_viewport().set_input_as_handled()
 	# retry-meta: pad Y on the Campaign defeat card = RETRY SECTOR N (Y is otherwise idle there).
 	if event is InputEventJoypadButton and event.pressed \
 			and event.button_index == CampaignMeta.RETRY_PAD_BUTTON \
@@ -2558,8 +2566,19 @@ func _input(event: InputEvent) -> void:
 func _retry_sector() -> int:
 	if not _debrief or _watching or _result_t < 1.0:
 		return 0
+	if _retry_chapter() > 0:   # a retried arcade run offers the same retry again (never after a clear)
+		if sim.victory:
+			return 0
+		return maxi(_retry_chapter(), CampaignMeta.sector_reached(CampaignMeta.opened_gates(sim)))
 	return CampaignMeta.retry_sector(sim.mode, sim.victory, _daily,
 		CampaignMeta.sector_reached(CampaignMeta.opened_gates(sim)))
+
+
+## review-fixes: the sector the live run was retried from, or 0 when it is not a retried Arcade run.
+func _retry_chapter() -> int:
+	if _retry_origin > 0 and sim != null and sim.mode == "arcade" and _arcade_chapter == _retry_origin:
+		return _retry_origin
+	return 0
 
 
 func _try_retry_sector() -> bool:
@@ -2567,7 +2586,21 @@ func _try_retry_sector() -> bool:
 	if k <= 0:
 		return false
 	start_arcade(k)
+	_retry_origin = k   # set AFTER start_arcade (which clears it): this run came from a retry
 	return true
+
+
+## review-fixes: back to a fresh, ranked Campaign from a retried Arcade run's debrief.
+func _try_new_campaign() -> bool:
+	if _retry_chapter() <= 0 or not _debrief or _watching or _result_t < 1.0:
+		return false
+	start_game(false)
+	return true
+
+
+## review-fixes: the label of the default (ENTER / START) row on the defeat card.
+func redeploy_label() -> String:
+	return CampaignMeta.redeploy_text(_retry_chapter())
 
 
 ## retry-meta: the Campaign extras on the end cards -- the VP line (Endless keeps its inline
@@ -2581,8 +2614,14 @@ func _debrief_meta_rows(pulse: float) -> Array:
 		rows.append(medal_row)
 	var k := CampaignMeta.retry_sector(sim.mode, sim.victory, _daily,
 		CampaignMeta.sector_reached(CampaignMeta.opened_gates(sim)))
+	if k <= 0 and _retry_chapter() > 0 and not sim.victory:
+		k = _retry_sector()
 	if k > 0:
 		rows.append(CampaignMeta.retry_row(k, Art.pad_button_label(CampaignMeta.RETRY_PAD_BUTTON), Art.use_pad, pulse))
+	if _retry_chapter() > 0:
+		rows.append(CampaignMeta.new_campaign_row(Art.pad_button_label(CampaignMeta.NEW_CAMPAIGN_PAD_BUTTON), Art.use_pad))
+	if _run_perked:
+		rows.append(CampaignMeta.vet_row())
 	return rows
 
 
@@ -2619,6 +2658,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			else:
 				_reset()
 		elif event.keycode == CampaignMeta.RETRY_KEY and _try_retry_sector():
+			pass
+		elif event.keycode == CampaignMeta.NEW_CAMPAIGN_KEY and _try_new_campaign():
 			pass
 		elif event.keycode == KEY_C and (_debrief or sim.victory):
 			_copy_share_text()
@@ -2746,7 +2787,15 @@ func request_quit() -> void:
 	tree.quit()
 
 
+## review-fixes: TimeFx writes the PROCESS-GLOBAL AudioServer.playback_speed_scale; a scene that
+## goes away mid-beat must hand it back at exactly 1.0 (cancel() is a no-op when no dip is held).
+func _restore_global_audio() -> void:
+	if _time_fx != null:
+		_time_fx.cancel()
+
+
 func _exit_tree() -> void:
+	_restore_global_audio()
 	get_tree().auto_accept_quit = _previous_auto_accept_quit
 	_flush_bests()
 	if _replay_task != -1:
@@ -2769,6 +2818,7 @@ func _notification(what: int) -> void:
 	# instance in the suite. PREDELETE fires BEFORE ~Node frees its children, so in
 	# the shipped game they are still parented and every branch here no-ops.
 	if what == NOTIFICATION_PREDELETE:
+		_restore_global_audio()
 		for n in [_sfx, _hud_icons, _menu]:
 			if is_instance_valid(n) and n.get_parent() == null:
 				n.free()
@@ -5441,6 +5491,18 @@ func buy_perk(id: String) -> bool:
 	return true
 
 
+## review-fixes: the SETUP VET PERKS switch. Persisted at once, like a perk purchase.
+func set_vet_perks(on: bool) -> void:
+	_vet_perks_on = on
+	_persist({"meta": {"vet_perks": on}})
+
+
+## review-fixes: the player-facing tags the live run carries (ASSIST aids + "vet" for a perked run).
+func run_board_tags() -> Array[String]:
+	var assist_only: Array[String] = _recorder.assist_tags if _recorder != null else _run_assist_tags()
+	return CampaignMeta.run_tags(assist_only, _run_perked)
+
+
 # save-integrity: every scalar read in _load_bests goes through these. The target
 # fields are inferred-type (`var best_score := 0`, `var _perk_levels: Dictionary`),
 # so a wrong-typed value from a partially corrupt file throws a runtime error on
@@ -5534,6 +5596,7 @@ func _load_bests() -> void:
 		_daily_done_seed = _cfg_int(cf, "daily", "done_seed", -1)   # c2-13: locks the DAILY RUN row when it equals today's seed
 		vet_points = _cfg_int(cf, "meta", "vp", 0)   # endless-meta-retention: persistent perk currency
 		_perk_levels = _cfg_dict(cf, "meta", "levels")   # perk id -> owned tier
+		_vet_perks_on = bool(cf.get_value("meta", "vet_perks", true)) if cf.get_value("meta", "vet_perks", true) is bool else true   # absent / wrong type -> ON
 		# c1-09: read each key (SETTINGS_DEFAULTS is the fallback source; legacy saves
 		# only carried the mute BOOLS, so map those to a 0 level) into one dict, then
 		# push it through the SAME _apply_settings path fresh-install and RESET use —
@@ -6504,15 +6567,15 @@ func _record_run(score: int) -> void:
 		if g["open"]:
 			opened += 1
 	var rr := _run_rank()   # bank the earned grade/title with the run so the Hall can show it
-	var run_tags := CampaignMeta.board_tags(
-		_recorder.assist_tags if _recorder != null else _run_assist_tags(), _run_perked)
+	var assist_only: Array[String] = _recorder.assist_tags if _recorder != null else _run_assist_tags()
+	var run_tags := CampaignMeta.board_tags(assist_only, _run_perked)   # Steam routing: a perked run keeps the vest bit
 	var entry := {"score": score, "mode": sim.mode, "wave": sim.wave,
 		"sector": mini(opened + 1, SimWorld.FINAL_GATE_INDEX), "dist": -Fixed.to_int(sim.camera_top) / 10,
 		# authored-campaign-and-modes: bosses cleared, meaningful only for a
 		# boss_rush entry (the Hall/menu read it only when mode == "boss_rush").
 		"bosses": mini(opened, SimWorld.BOSS_RUSH_COUNT),
 		"streak": _run_best_streak, "won": sim.victory, "daily": _daily,
-		"assist": not run_tags.is_empty(), "perked": _run_perked,
+		"assist": not assist_only.is_empty(), "perked": _run_perked, "vet": _run_perked,
 		"assist_tags": run_tags,
 		"player_count": sim.players.size(),
 		"hard": sim.hard,
@@ -6585,7 +6648,7 @@ func _record_run(score: int) -> void:
 ## service-record: bank this (already replay-verified) run's medals and best rank into `cf`.
 ## The Hall's own `assist` flag (vest / accessibility assists / purchased perks) gates both.
 func _commit_service_record(cf: ConfigFile, entry: Dictionary, rr: Dictionary) -> void:
-	var assisted: bool = entry.get("assist", false)
+	var assisted: bool = entry.get("assist", false) or entry.get("vet", false)   # a perked run is still not a clean one
 	var key := ServiceRecord.mode_key(str(entry["mode"]), bool(entry["daily"]))
 	var reach := ServiceRecord.reach_value(str(entry["mode"]), int(entry["sector"]),
 		int(entry["bosses"]), int(entry["wave"]), bool(entry["won"]))
@@ -16454,7 +16517,7 @@ func _draw_banners(top_msg: String) -> void:
 		rows.append_array(_debrief_meta_rows(rp))   # retry-meta: Campaign VP line + RETRY SECTOR
 		# Device-branched prompt: the actual button glyph (pad START / ENTER key)
 		# fronts the row via the panel's icon slot.
-		rows.append({"text": "REDEPLOY", "color": Color(1.0, 0.9, 0.4, rp),
+		rows.append({"text": redeploy_label(), "color": Color(1.0, 0.9, 0.4, rp),
 			"icon": Art.glyph_key("start"), "icon_size": 14.0})
 		_draw_result_panel(_defeat_title(sim.last_stand), Color(0.95, 0.4, 0.35), rows, Color(1, 1, 1, 0.96),
 			false, {"band": "CASUALTY REPORT", "band_col": Color(0.95, 0.4, 0.35),
