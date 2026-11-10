@@ -583,6 +583,10 @@ func test_technical_does_not_rev_out_of_charge_range() -> void:
 	# ignore telegraphs. And the tell itself must clear the 24t reaction floor.
 	Runner.T.ok(SimWorld.TECHNICAL_REV_TICKS >= 24,
 		"the rev clears the 24-tick reaction floor the rest of the game pins")
+	Runner.T.ok(SimWorld.RIFLEMAN_WINDUP_TICKS >= 24,
+		"the rifleman's tell -- the most-fired telegraph in the game -- clears the same floor")
+	Runner.T.ok(SimWorld.new(1, 1)._windup_for("rusher") >= 24,
+		"the flashbang re-arm restores the rifleman to a tell that clears the floor")
 	Runner.T.eq(SimWorld.TECHNICAL_CHARGE_RANGE,
 		SimWorld.TECHNICAL_CHARGE_TICKS * SimWorld.TECHNICAL_SPEED,
 		"the gate is the charge's own reach, not a magic number")

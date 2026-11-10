@@ -799,12 +799,12 @@ const SEED := 0xDEADBEEF
 ## 2057 (was 3140; 8 knockdowns, 0 gates either way), so samples 3-5 are frozen post-wipe
 ## state (was only 5). SURVIVOR_GOLDEN is still the live-state arm for that back half.
 const GOLDEN: Array[int] = [
-	4946374995361956892,
-	2882873412615601156,
-	4212473115369938232,
-	8934249832053349751,
-	7419367325045136095,
-	6204860958298409479,
+	4777686421406228267,
+	6331385278001629063,
+	5720059147807561410,
+	6422984499686730060,
+	3092976764520280189,
+	5474487727677936237,
 ]
 
 
@@ -1047,10 +1047,10 @@ static func scripted_input(tick: int, player: int) -> SimInput:
 const ENDLESS_GOLDEN: Array[int] = [
 	2690452510761397110,
 	8359227894364836834,
-	6697781869985125928,
-	2863856926012775250,
-	3072235456289054715,
-	2496037070296672176,
+	8326839502317779280,
+	737824360758084112,
+	2173250255464296636,
+	5287323263118098913,
 ]
 
 
@@ -1079,7 +1079,12 @@ const ENDLESS_GOLDEN: Array[int] = [
 ## (27 and 0xBEEF; median wipe tick 2652 -> 2568). Seed 27 is the one that still OPENS TWO
 ## GATES (11 knockdowns, 76 coin left at t = 3600); 0xBEEF opens one. So all six samples
 ## below are live state again on the new seed.
-const SURVIVOR_SEED := 27
+## RE-RECORDED (2026-11-10, FAIRNESS package): rifleman windup 20 -> 24, riot-shield turn 1/32 -> 1/96
+## rad/tick, rooted guns spawn north of the front-most player, tank cook-off hurts players in the
+## blast, trench camping draws the flush. GOLDEN: all six samples; ENDLESS_GOLDEN: samples 2-5
+## (0-1 byte-identical); SURVIVOR: seed 27 now wipes inside the window, RE-SEEDED to 25 (sweep of
+## seeds 0..39 + 0xBEEF: survivors 24/25/36; 25 opens 2 gates with 11 knockdowns) and re-recorded.
+const SURVIVOR_SEED := 25
 
 ## RE-RECORDED (2026-10-01, sapper mines tagged "hostile" + no_coin): sample 5 ONLY. The
 ## seed-27 window lays 10 sapper mines; a live one sits in mines[] at t = 3600 and the new
@@ -1093,12 +1098,12 @@ const SURVIVOR_SEED := 27
 ## holding. The arm still does its job, measured: ALIVE at t = 3600 (13 knockdowns, was 11),
 ## but it opens ONE gate now (was 2; score 14661, chest 268). All six samples are live state.
 const SURVIVOR_GOLDEN: Array[int] = [
-	5237620441672197736,
-	7033708846459431453,
-	7009908576559667704,
-	7102171874154285119,
-	6036103179099983411,
-	8209868053795792201,
+	136124877747581649,
+	1354461871501890991,
+	428232730071013903,
+	7266587977861809201,
+	2604994738116460987,
+	3924981222138306155,
 ]
 
 

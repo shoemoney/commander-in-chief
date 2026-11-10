@@ -152,7 +152,7 @@ const ELITE_WINDUP_TICKS := 24
 # contain visible incoming fire without producing an unavoidable bullet curtain.
 const RIFLEMAN_STANDOFF := 100 * F_ONE
 const RIFLEMAN_FIRE_CD_TICKS := 132
-const RIFLEMAN_WINDUP_TICKS := 20
+const RIFLEMAN_WINDUP_TICKS := 24   # the project reaction floor (TECHNICAL_REV 24, VENT_WARN 30, ...)
 # Starting value: spread first-shot phases across 0.6s by spawn X. Test:
 # place a three-rifle line and verify no two painted lanes resolve on one tick;
 # if the opening feels too sparse, reduce in 6-tick steps, never to zero.
@@ -175,9 +175,14 @@ const SNIPER_BULLET_SPEED := 6 * F_ONE
 # persistent facing turns toward the target at a capped rate, so a committed lateral move can
 # earn the rear arc while explosives and Rend remain the immediate counters.
 const SHIELD_SPEED := F_ONE
-# Starting value: component approach of ~1/32 unit per tick. Test: one tick can never reverse
-# a shield, while a player circling at safe standoff can get outside the 120-degree block cone.
-const SHIELD_TURN_STEP := F_ONE / 32
+# 1/96 rad per tick (0.6 deg). Measured by tools/probe_shield_flank.gd: a solo player circling at
+# run speed opens an unblocked shot in 16/16 trials at 60-150 px (was 16/16 at 60 px only; 0/16 at
+# 90-150 px with 1/32), while a player who never circles is blocked 40/40. Test: one tick can never
+# reverse a shield, and a deliberate circle at 120 px earns the rear arc.
+const SHIELD_TURN_STEP := F_ONE / 96
+# A round is blocked when dot(bullet dir, facing) < this: cos(120 deg) = the front 120-degree cone.
+# The view's green rear SAFE arc is derived from this same number (main.gd), never retyped.
+const SHIELD_BLOCK_DOT := -(F_ONE / 2)
 # Sapper (both modes — SECTOR_SPECIALS sectors 2/5, Endless wave 3+): advances like a rusher but seeds armed mines behind it,
 # authoring a hazard trail between you and the top edge. Reuses fire_cd as the
 # mine-drop timer — no new hashed field.
@@ -3220,6 +3225,13 @@ func _detonate_tank(tank: Dictionary) -> void:
 	# hashed but dead-unused after death, so it becomes the hulk lifetime.
 	# Zero new fields, zero new entities; behavior change -> golden re-record.
 	tank["burn_ticks"] = HULK_TICKS
+	# FAIRNESS: the BAIL OUT! countdown promises the cook-off hurts whoever is still
+	# on the hull. Same player-hurt rule as _detonate_barrel (roll i-frames and the
+	# bail mercy window dodge it; riders were already ejected or killed by the callers).
+	for p in players:
+		if p["alive"] and _exposed(p) and not p["roll_iframe"] \
+				and _dist_lte(tank["x"], tank["y"], p["x"], p["y"], GRENADE_RADIUS):
+			_hurt_player(p)
 	_explode(tank["x"], tank["y"])
 
 
@@ -4819,7 +4831,7 @@ func _shield_blocks(e: Dictionary, b: Dictionary) -> bool:
 	# dot of unit vectors, in fixed-point; block when < -0.5 (front 120° cone).
 	var dot := Fixed.mul(Fixed.div(fx, flen), Fixed.div(b["vx"], blen)) \
 		+ Fixed.mul(Fixed.div(fy, flen), Fixed.div(b["vy"], blen))
-	return dot < -(F_ONE / 2)
+	return dot < SHIELD_BLOCK_DOT
 
 
 func _turn_shield_toward(e: Dictionary, dx: int, dy: int, dlen: int) -> void:
@@ -4878,6 +4890,8 @@ func _spawn_courier() -> void:
 
 # c4-19: the rooted spawn ROW is a range, not a pixel. See _rooted_spawn_y().
 const ROOTED_SPAWN_Y_MIN := 56    # >= 36dcff1's camera_top+40 plus the kind-0 rock's 12px half-height
+const ROOTED_NORTH_MARGIN := 16 * F_ONE   # a rooted gun is born at least this far north of the front-most player
+const ROOTED_SPAWN_Y_FLOOR := 16  # _clamp_actor's ceiling: the highest row a player can stand on
 const ROOTED_SPAWN_Y_SPAN := 232  # 56..287, wholly inside _clamp_actor's 16 .. CAMERA_BAND_BOTTOM 344
 
 
@@ -4910,7 +4924,25 @@ func _rooted_spawn_y(x: int) -> int:
 	## ENDLESS_GOLDEN. Same house pattern as the checksum-excluded `skin` field.
 	var h: int = ((x / F_ONE) & 1023) * 1103515245 + tick_count * 12345
 	h = (h >> 7) & 0x7FFFFFFF
-	var y := camera_top + (ROOTED_SPAWN_Y_MIN + h % ROOTED_SPAWN_Y_SPAN) * F_ONE
+	var span := ROOTED_SPAWN_Y_SPAN
+	var y := camera_top + (ROOTED_SPAWN_Y_MIN + h % span) * F_ONE
+	## FAIRNESS (owner decision #29): a rooted gun never materialises SOUTH of the
+	## northernmost living player -- a nest born behind your back is an unseen,
+	## unwinnable shot. Shrink the draw range to the rows north of that player's line
+	## (minus a margin) so the rows stay spread, never above the reachable band's
+	## ceiling; a closed gate still wins below.
+	var north := 0
+	var any_alive := false
+	for p in players:
+		if p["alive"] and (not any_alive or p["y"] < north):
+			north = p["y"]
+			any_alive = true
+	if any_alive:
+		var cap_rows: int = (north - ROOTED_NORTH_MARGIN - camera_top) / F_ONE
+		if cap_rows < ROOTED_SPAWN_Y_MIN + ROOTED_SPAWN_Y_SPAN:
+			var lo_rows: int = mini(ROOTED_SPAWN_Y_MIN, maxi(cap_rows, ROOTED_SPAWN_Y_FLOOR))
+			span = maxi(1, cap_rows - lo_rows + 1)
+			y = camera_top + (lo_rows + h % span) * F_ONE
 	for g in gates:
 		if not g["open"] and y < g["y"] + GATE_BLOCK_PAD:
 			y = g["y"] + GATE_BLOCK_PAD
@@ -5148,8 +5180,10 @@ func _step_grass_flush() -> void:
 	## reusing _add_strike, but DELIBERATELY without the _concealed guard (that
 	## omission IS the feature). Keyed on _in_grass, not _concealed, so smoke
 	## keeps full ranged-immunity. Grass streams seg>=2 only -> torture-inert.
+	## FAIRNESS: the trench conceals exactly like grass (_concealed), so it gets the
+	## same flush -- before, a camper in a trench was immune to aimed fire forever.
 	for p in players:
-		if not p["alive"] or p["in_tank"] >= 0 or not _in_grass(p):
+		if not p["alive"] or p["in_tank"] >= 0 or not (_in_grass(p) or _in_trench(p["x"], p["y"])):
 			p["flush_cd"] = 0
 			continue
 		var threat := false

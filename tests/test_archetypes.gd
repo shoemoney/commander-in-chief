@@ -65,7 +65,7 @@ func test_shield_exact_opposite_turn_has_stable_tie_break_and_converges() -> voi
 	sim._turn_shield_toward(e, 0, -50 * Fixed.ONE, 50 * Fixed.ONE)
 	Runner.T.ok(e["face_y"] > 0, "an exact-opposite request still cannot reverse in one tick")
 	Runner.T.ok(e["face_x"] < 0, "the 180-degree tie deterministically starts through -X")
-	for _tick in 110:
+	for _tick in 320:   # pi / (1/96 rad per tick) = 302 ticks; was 110 at 1/32 (fairness: the flank must be earnable at range)
 		sim._turn_shield_toward(e, 0, -50 * Fixed.ONE, 50 * Fixed.ONE)
 	Runner.T.eq(e["face_x"], 0, "the capped turn settles exactly on the antipodal X heading")
 	Runner.T.eq(e["face_y"], -Fixed.ONE, "the capped turn reaches the target behind it")
@@ -85,13 +85,13 @@ func test_shield_ordinary_enemy_steps_leave_a_flank_for_safe_standoff_circle() -
 	var e: Dictionary = sim.enemies[0]
 	var orbit_x := 0
 	var orbit_y := Fixed.ONE
-	# Twice the plate's angular step at a 40px radius is about 2.5px/tick: ordinary
+	# Six times the plate's angular step (1/96 rad; was twice 1/32) at a 40px radius is about 2.5px/tick: ordinary
 	# player running speed, safely four touch-radii away. Keep the shield centered after
 	# each ordinary enemy-AI step so this isolates the promised circling contest from its
 	# unrelated forward translation and holds the measured standoff constant.
 	for _tick in 40:
-		var next_x := orbit_x + Fixed.mul(-orbit_y, SimWorld.SHIELD_TURN_STEP * 2)
-		var next_y := orbit_y + Fixed.mul(orbit_x, SimWorld.SHIELD_TURN_STEP * 2)
+		var next_x := orbit_x + Fixed.mul(-orbit_y, SimWorld.SHIELD_TURN_STEP * 6)
+		var next_y := orbit_y + Fixed.mul(orbit_x, SimWorld.SHIELD_TURN_STEP * 6)
 		var next_len := Fixed.length(next_x, next_y)
 		orbit_x = Fixed.div(next_x, next_len)
 		orbit_y = Fixed.div(next_y, next_len)
@@ -137,7 +137,7 @@ func test_shield_two_player_nearest_target_swap_turns_continuously_then_reblocks
 		"the old teammate's head-on lane remains blocked during the first swap tick")
 	Runner.T.ok(not sim._shield_blocks(e, {"vx": 0, "vy": SimWorld.BULLET_SPEED}),
 		"the new teammate behind the plate has a temporary firing window")
-	for _tick in 110:
+	for _tick in 320:   # half-turn at 1/96 rad per tick (see SHIELD_TURN_STEP); was 110 at 1/32
 		sim._step_enemies()
 	Runner.T.eq(e["face_x"], 0, "continued ordinary steps settle on the new nearest target's axis")
 	Runner.T.eq(e["face_y"], -Fixed.ONE, "continued ordinary steps face the new nearest target")

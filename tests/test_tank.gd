@@ -210,7 +210,13 @@ func test_fuel_out_ignites_and_bail_window() -> void:
 	sim.step([inp])
 	Runner.T.eq(p["in_tank"], -1, "bailed out")
 	Runner.T.ok(p["boost_ticks"] > 0, "bail grants the speed boost")
-	# Window expires → detonation, player already clear survives.
+	# Window expires → detonation, player already clear survives. "Clear" now means it:
+	# the cook-off hurts anyone left inside the blast (fairness package), so the bailed
+	# player runs south on the bail boost instead of idling 24px from the hull.
+	var run := SimInput.new()
+	run.move_y = 256
+	for i in 40:
+		sim.step([run])
 	for i in SimWorld.TANK_BAIL_TICKS:
 		sim.step([_idle()])
 	Runner.T.ok(not tank["alive"], "burning tank detonated after the window")
@@ -416,8 +422,12 @@ func test_burning_tank_crew_is_exposed_to_every_hazard() -> void:
 	bail.interact = true
 	esim.step([bail])
 	Runner.T.eq(ep["in_tank"], -1, "driver bails off a hull lit by a REAL shell")
+	# Fairness package: the cook-off now hurts anyone left in the blast, so "walks the window
+	# out" means running clear on the bail boost, not idling 24px from the hull.
+	var erun := SimInput.new()
+	erun.move_y = 256
 	for i in window:
-		esim.step([_idle()])
+		esim.step([erun if i < 40 else _idle()])
 	Runner.T.ok(ep["alive"] and ep["vest"],
 		"...and walks the full %d-tick window out without paying an unavoidable vest" % window)
 

@@ -11923,6 +11923,13 @@ static func telegraph_dir(sw: SimWorld, e: Dictionary) -> Vector2:
 	return Vector2(float(e.get("aim_lx", 0)), float(e.get("aim_ly", 0)))
 
 
+## Half-width of the riot shield's drawn rear SAFE arc, centred on the heading + PI. It is
+## the complement of the sim's real block cone (SimWorld.SHIELD_BLOCK_DOT), so the green arc
+## covers exactly the bearings from which a round gets through.
+static func shield_safe_half_angle() -> float:
+	return PI - acos(-float(SimWorld.SHIELD_BLOCK_DOT) / float(SimWorld.F_ONE))
+
+
 static func enemy_pose_facing(sw: SimWorld, e: Dictionary, target_face: float,
 		previous_face: float) -> float:
 	var kind: String = e.get("kind", "")
@@ -12378,7 +12385,8 @@ func _draw_enemies() -> void:
 			# flank counter. A faint green arc behind it (opposite the bright front
 			# arc) teaches "get around him" — Art.safe keeps it legible in colorblind.
 			var srear := face + PI
-			Art.arc(self, epos, 13.0, srear - 1.15, srear + 1.15, 14,
+			var ssafe := shield_safe_half_angle()
+			Art.arc(self, epos, 13.0, srear - ssafe, srear + ssafe, 24,
 				Art.safe(Color(0.4, 1.0, 0.5, 0.4)), 2.0)
 		elif e["kind"] == "sapper":
 			# Mine-layer EOD: real sapper bake; the pulsing armed-satchel pip stays —
