@@ -24,10 +24,14 @@ const MEDAL_TEX := {FLAWLESS: "medal_flawless", SWIFT: "medal_swift", HOARDER: "
 const SECTORS := 6
 
 ## SWIFT par per sector, in 60 Hz sim ticks. Anchored to MEASURED clears of the combat bot
-## (god mode, seeds 1-5, tools-style probe): slowest bot clear per sector was
-## 553 / 1024 / 2803 / 3092 / 1860 / 1781 ticks; each par is that x ~1.75, rounded to 100.
+## (main.gd demo_input, GOD MODE ON - god mode restores ammo and stand-ups, so these are
+## bot-with-god-mode times, not a human's). Re-measured 2026-11-10 on the tree WITH the Siege
+## Tank (ParMeasure.bot_sector_clears, seeds 1-5): slowest clear per sector was
+## 553 / 1024 / 2803 / 3092 / 4886 / 1827 ticks; each par is that x 1.75, rounded to 100.
+## (Sector 5 was 1860 on the pre-Siege-Tank tree the first pars were cut from.)
+## tests/test_review2_meta.gd re-measures live and fails if any par drops under 1.4x.
 ## A human who plays the sector at all carefully has a wide margin.
-const PAR_TICKS: Array[int] = [1000, 1800, 4900, 5400, 3300, 3100]
+const PAR_TICKS: Array[int] = [1000, 1800, 4900, 5400, 8600, 3200]
 
 const MODES: Array[String] = ["campaign", "endless", "boss_rush", "arcade", "daily"]
 const MODE_LABELS := {"campaign": "CAMPAIGN", "endless": "ENDLESS", "boss_rush": "BOSS RUSH",

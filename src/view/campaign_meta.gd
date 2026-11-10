@@ -10,6 +10,7 @@ const RETRY_KEY := KEY_T
 const RETRY_PAD_BUTTON := JOY_BUTTON_Y
 const NEW_CAMPAIGN_KEY := KEY_N                 ## on a retried-arcade debrief: back to a fresh ranked CAMPAIGN
 const NEW_CAMPAIGN_PAD_BUTTON := JOY_BUTTON_X
+const COPY_KEY := KEY_C                        ## on any end card: copy the share line (keyboard only; no pad route)
 const VET_TAG := "vet"                         ## earned-progression run tag; never conflated with the ASSIST accessibility tags
 
 
@@ -113,6 +114,11 @@ static func vet_row() -> Dictionary:
 static func new_campaign_row(pad_label: String, use_pad: bool) -> Dictionary:
 	var keycap := pad_label if use_pad else OS.get_keycode_string(NEW_CAMPAIGN_KEY)
 	return {"text": "[%s] NEW RANKED CAMPAIGN  (FROM SECTOR 1)" % keycap, "color": Color(0.7, 0.95, 0.6)}
+
+
+## The keyboard-only C key copies the run's share line; the card used to accept it unadvertised.
+static func copy_result_row() -> Dictionary:
+	return {"text": "[%s] COPY RESULT" % OS.get_keycode_string(COPY_KEY), "color": Color(0.75, 0.8, 0.85)}
 
 
 ## What ENTER / START does on the defeat card. A retried arcade run says so plainly.

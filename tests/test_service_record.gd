@@ -108,8 +108,11 @@ func test_medal_rules_each_earn_and_non_earn() -> void:
 
 
 func test_pars_are_generous_against_measured_bot_clears() -> void:
-	# Slowest god-mode bot clear per sector, seeds 1-5 (see ServiceRecord.PAR_TICKS).
-	var measured := [553, 1024, 2803, 3092, 1860, 1781]
+	# Slowest god-mode bot clear per sector, seeds 1-5 (see ServiceRecord.PAR_TICKS). A recorded
+	# snapshot, kept only for the "still a real time to beat" ceiling: the generosity FLOOR is now
+	# measured live in test_review2_meta.gd. Sectors 5/6 re-measured 2026-11-10 with the Siege Tank
+	# in the tree (S5 was 1860 on the tree that predated its boss).
+	var measured := [553, 1024, 2803, 3092, 4886, 1827]
 	for i in SR.SECTORS:
 		Runner.T.ok(SR.PAR_TICKS[i] >= int(measured[i] * 1.5), "sector %d par leaves >=1.5x the slowest bot clear" % (i + 1))
 		Runner.T.ok(SR.PAR_TICKS[i] <= measured[i] * 2, "sector %d par is still a real time to beat (<=2x)" % (i + 1))

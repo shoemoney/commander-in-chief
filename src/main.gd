@@ -2623,6 +2623,8 @@ func _debrief_meta_rows(pulse: float) -> Array:
 		rows.append(CampaignMeta.new_campaign_row(Art.pad_button_label(CampaignMeta.NEW_CAMPAIGN_PAD_BUTTON), Art.use_pad))
 	if _run_perked:
 		rows.append(CampaignMeta.vet_row())
+	if not Art.use_pad and not _watching:   # review2: the C key works on both end cards, so say so
+		rows.append(CampaignMeta.copy_result_row())
 	return rows
 
 
@@ -2662,7 +2664,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			pass
 		elif event.keycode == CampaignMeta.NEW_CAMPAIGN_KEY and _try_new_campaign():
 			pass
-		elif event.keycode == KEY_C and (_debrief or sim.victory):
+		elif event.keycode == CampaignMeta.COPY_KEY and (_debrief or sim.victory):
 			_copy_share_text()
 		elif (event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER
 				or event.keycode == KEY_SPACE) and (_debrief or sim.victory):
@@ -4817,6 +4819,17 @@ static func _victory_best_text(score: int, best: int) -> String:
 	return "BEST %d" % best + ("   NEW BEST!" if score >= best else "")
 
 
+## review2: the victory card's tail (meta rows, NEW BEST, REDEPLOY). A retried Arcade run's
+## REDEPLOY re-runs the unranked sector, so the row says so (redeploy_label), same as the defeat card.
+func _victory_tail_rows(pulse: float) -> Array:
+	var rows: Array = _debrief_meta_rows(pulse)
+	for vr in _victory_extra_rows(sim.score, best_score, pulse):
+		if vr["text"] == "REDEPLOY":
+			vr["text"] = redeploy_label()
+		rows.append(vr)
+	return rows
+
+
 static func _victory_extra_rows(score: int, best: int, pulse: float) -> Array:
 	# a3-14: the K.I.A.-parity rows the VICTORY card appends — a NEW BEST! flag (shared
 	# predicate) + a REDEPLOY prompt with the START glyph (redeploy input works on victory).
@@ -5620,10 +5633,12 @@ func _load_bests() -> void:
 			# so a chosen scale never survived a restart). Legacy saves lack the key -> ship 2x.
 			"window_scale": cf.get_value("settings", "window_scale", SETTINGS_DEFAULTS["window_scale"]),
 			# audio-identity: captions default ON; a save predating the toggle lands there too.
-			# A save that has a settings section but no captions key predates the toggle, when
-			# captions were always on: that is ALL, not the new-install SMART.
+			# A save that loaded with ANY section predates the toggle, when captions were always
+			# on: that is ALL, not the new-install SMART. ([settings] is written only by OPTIONS
+			# SAVE & co, so a veteran who never opened OPTIONS has [best]/[hall] and no
+			# [settings]: keying on that section silently downgraded them.) An empty file = new.
 			"captions": cf.get_value("settings", "captions",
-				CuePolicy.CAP_ALL if cf.has_section("settings") else SETTINGS_DEFAULTS["captions"]),
+				CuePolicy.CAP_ALL if not cf.get_sections().is_empty() else SETTINGS_DEFAULTS["captions"]),
 			# accessibility: a save predating TEXT SIZE lands at 100% (the shipped sizes).
 			"text_scale": cf.get_value("settings", "text_scale", SETTINGS_DEFAULTS["text_scale"]),
 			"single_stick_p1": cf.get_value("settings", "single_stick_p1", SETTINGS_DEFAULTS["single_stick_p1"]),
@@ -16444,9 +16459,7 @@ func _draw_banners(top_msg: String) -> void:
 		# predicate with the debrief) + a REDEPLOY prompt (redeploy input works on victory too,
 		# but the card never told you so — the death card does).
 		var vrp := 1.0 if _motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.15)
-		vrows.append_array(_debrief_meta_rows(vrp))   # retry-meta: Campaign VP line
-		for vr in _victory_extra_rows(sim.score, best_score, vrp):
-			vrows.append(vr)
+		vrows.append_array(_victory_tail_rows(vrp))   # retry-meta: Campaign VP line + NEW BEST + REDEPLOY
 		_draw_result_panel("V I C T O R Y !", Color(1.0, 0.85 * vpulse, 0.3 * vpulse), vrows,
 			Color(1, 1, 1, 0.96), true,   # a1-11: gold shine sweep
 			{"band": "AFTER-ACTION REPORT", "band_col": Color(1.0, 0.85, 0.3),
