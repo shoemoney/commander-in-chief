@@ -12,35 +12,35 @@ msgstr ""
 # ellipsized instead of wrapped -- keep those reasonably close to the English
 # source's length where you can.
 
-msgid "SFX: LOUDNESS OF WEAPON, HIT, AND EXPLOSION SOUNDS. SAVED AUTOMATICALLY."
-msgstr "SFX：銃声・命中・爆発音の音量。自動保存されます。"
+msgid "SFX: LOUDNESS OF WEAPON, HIT, AND EXPLOSION SOUNDS. SAVE IN OPTIONS."
+msgstr "SFX：銃声・命中・爆発音の音量。オプションで保存してください。"
 
-msgid "MUSIC: LOUDNESS OF THE BACKGROUND SOUNDTRACK. SAVED AUTOMATICALLY."
-msgstr "音楽：背景音楽の音量。自動保存されます。"
+msgid "MUSIC: LOUDNESS OF THE BACKGROUND SOUNDTRACK. SAVE IN OPTIONS."
+msgstr "音楽：背景音楽の音量。オプションで保存してください。"
 
-msgid "RUMBLE: CONTROLLER VIBRATION ON HITS AND EXPLOSIONS. SAVED AUTOMATICALLY."
-msgstr "振動：命中・爆発時のコントローラー振動。自動保存されます。"
+msgid "RUMBLE: CONTROLLER VIBRATION ON HITS AND EXPLOSIONS. SAVE IN OPTIONS."
+msgstr "振動：命中・爆発時のコントローラー振動。オプションで保存してください。"
 
-msgid "REDUCE MOTION: NO SHAKE OR SCROLL, DAMPED FLASH/WARP. SAVED AUTOMATICALLY."
-msgstr "モーション軽減：揺れ・スクロールFXを無くし、フラッシュ・歪みを弱めます。自動保存されます。"
+msgid "REDUCE MOTION: NO SHAKE OR SCROLL, DAMPED FLASH/WARP. SAVE IN OPTIONS."
+msgstr "モーション軽減：揺れ・スクロールFXを無くし、フラッシュ・歪みを弱めます。オプションで保存してください。"
 
-msgid "COLORBLIND: RECOLORS GREEN CUES TO BLUE AND ADDS SHAPES. SAVED AUTOMATICALLY."
-msgstr "色弱者モード：緑のサインを青に再着色し、形状を追加します。自動保存されます。"
+msgid "COLORBLIND: RECOLORS GREEN CUES TO BLUE AND ADDS SHAPES. SAVE IN OPTIONS."
+msgstr "色弱者モード：緑のサインを青に再着色し、形状を追加します。オプションで保存してください。"
 
-msgid "ASSIST: EACH LIFE TAKES TWO HITS, NOT ONE. RUNS ARE TAGGED *ASSIST. SAVED AUTOMATICALLY."
-msgstr "アシスト：各ライフは1発ではなく2発耐えます。記録には*ASSISTが付きます。自動保存されます。"
+msgid "ASSIST: EACH LIFE TAKES TWO HITS, NOT ONE. RUNS ARE TAGGED *ASSIST. SAVE IN OPTIONS."
+msgstr "アシスト：各ライフは1発ではなく2発耐えます。記録には*ASSISTが付きます。オプションで保存してください。"
 
-msgid "CAPTIONS: SUBTITLES FOR COMMANDER/SPOTTER VOICE LINES. SAVED AUTOMATICALLY."
-msgstr "字幕：指揮官・観測兵のボイスに字幕を表示。自動保存されます。"
+msgid "CAPTIONS: SUBTITLES FOR COMMANDER/SPOTTER VOICE LINES. SAVE IN OPTIONS."
+msgstr "字幕：指揮官・観測兵のボイスに字幕を表示。オプションで保存してください。"
 
-msgid "FULLSCREEN: FILL THE WHOLE DISPLAY INSTEAD OF A WINDOW. SAVED AUTOMATICALLY."
-msgstr "フルスクリーン：ウィンドウではなく画面全体を使用。自動保存されます。"
+msgid "FULLSCREEN: FILL THE WHOLE DISPLAY INSTEAD OF A WINDOW. SAVE IN OPTIONS."
+msgstr "フルスクリーン：ウィンドウではなく画面全体を使用。オプションで保存してください。"
 
-msgid "WINDOW SCALE: SIZE OF THE GAME WINDOW WHILE NOT FULLSCREEN. SAVED AUTOMATICALLY."
-msgstr "ウィンドウスケール：フルスクリーン以外のウィンドウサイズ。自動保存されます。"
+msgid "WINDOW SCALE: SIZE OF THE GAME WINDOW WHILE NOT FULLSCREEN. SAVE IN OPTIONS."
+msgstr "ウィンドウスケール：フルスクリーン以外のウィンドウサイズ。オプションで保存してください。"
 
-msgid "TEXT SIZE: ENLARGES SMALL ON-SCREEN LABELS AND SUBTITLES. SAVED AUTOMATICALLY."
-msgstr "文字サイズ：画面上の小さなラベルと字幕を拡大します。自動保存されます。"
+msgid "TEXT SIZE: ENLARGES SMALL ON-SCREEN LABELS AND SUBTITLES. SAVE IN OPTIONS."
+msgstr "文字サイズ：画面上の小さなラベルと字幕を拡大します。オプションで保存してください。"
 
 msgid "CO-OP: ADD A SECOND LOCAL PLAYER. APPLIES TO YOUR NEXT RUN."
 msgstr "協力プレイ：2人目のローカルプレイヤーを追加。次回プレイから適用。"
@@ -202,3 +202,44 @@ msgstr "ベテラン装甲 — 銃弾では削るだけ。手榴弾なら今も�
 
 msgid "YOU'RE STALLING — PUSH NORTH OR MORTARS ZERO IN"
 msgstr "足が止まっている — 北へ押せ、さもなくば迫撃砲に狙われる"
+
+# Accessibility options added with the input/assist integration (1.4.x).
+
+msgid "75% GAME SPEED. RUNS KEEP AN ASSIST TAG. SAVE IN OPTIONS."
+msgstr "ゲーム速度75％。プレイにはアシストの印が残ります。オプションで保存してください。"
+
+msgid "OFF, LOW OR HIGH TARGET ASSIST. SAVE IN OPTIONS."
+msgstr "照準アシスト：オフ・弱・強。オプションで保存してください。"
+
+msgid "P1 AIM SNAPS TO 12 DIRECTIONS. SAVE IN OPTIONS."
+msgstr "P1の照準を12方向に固定します。オプションで保存してください。"
+
+msgid "P1 AUTO AIMS WITH ONE STICK. MANUAL AIM TAKES PRIORITY. SAVE IN OPTIONS."
+msgstr "P1はスティック1本で自動照準。手動照準が優先されます。オプションで保存してください。"
+
+msgid "P2 AIM SNAPS TO 12 DIRECTIONS. SAVE IN OPTIONS."
+msgstr "P2の照準を12方向に固定します。オプションで保存してください。"
+
+msgid "P2 AUTO AIMS WITH ONE STICK. MANUAL AIM TAKES PRIORITY. SAVE IN OPTIONS."
+msgstr "P2はスティック1本で自動照準。手動照準が優先されます。オプションで保存してください。"
+
+msgid "SCREEN FLASH. 0 IS OFF, 10 IS FULL. SAVE IN OPTIONS."
+msgstr "画面フラッシュ。0でオフ、10で最大。オプションで保存してください。"
+
+msgid "SCREEN SHAKE. 0 IS OFF, 10 IS FULL. SAVE IN OPTIONS."
+msgstr "画面の揺れ。0でオフ、10で最大。オプションで保存してください。"
+
+msgid "TOGGLE HOLDS GRENADE UNTIL YOU PRESS AGAIN. MENUS RESET IT. SAVE IN OPTIONS."
+msgstr "トグル：もう一度押すまでグレネードを構え続けます。メニューで解除されます。オプションで保存してください。"
+
+msgid "TOGGLE HOLDS INTERACT UNTIL YOU PRESS AGAIN. MENUS RESET IT. SAVE IN OPTIONS."
+msgstr "トグル：もう一度押すまでインタラクトを保持します。メニューで解除されます。オプションで保存してください。"
+
+msgid "TOGGLE HOLDS REVIVE UNTIL YOU PRESS AGAIN. MENUS RESET IT. SAVE IN OPTIONS."
+msgstr "トグル：もう一度押すまで蘇生を続けます。メニューで解除されます。オプションで保存してください。"
+
+msgid "TOGGLE OPENS THE WHEEL. PRESS AGAIN TO BUY AND CLOSE. MENUS RESET IT. SAVE IN OPTIONS."
+msgstr "トグル：ホイールを開きます。もう一度押すと購入して閉じます。メニューで解除されます。オプションで保存してください。"
+
+msgid "TOGGLE REPEATS ROLL UNTIL YOU PRESS AGAIN. MENUS RESET IT. SAVE IN OPTIONS."
+msgstr "トグル：もう一度押すまでローリングを繰り返します。メニューで解除されます。オプションで保存してください。"
