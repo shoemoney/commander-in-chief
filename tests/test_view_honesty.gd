@@ -3119,13 +3119,14 @@ func test_fan_ammo_tax_is_disclosed_in_the_hint_copy() -> void:
 	inp2.aim_y = -256
 	inp2.fire = true
 	sim2.step([inp2])
-	Runner.T.eq(ammo1 - p2["mg_ammo"], 3, "the stacked 5-round fan costs 3 ammo/pull")
+	# economy pass: the surcharge no longer stacks - the 5-round fan costs the same 2 as a lone fan.
+	Runner.T.eq(ammo1 - p2["mg_ammo"], 2, "the stacked 5-round fan costs 2 ammo/pull (flat, non-compounding)")
 
 	var src := _view_src()
 	Runner.T.ok(src.contains("2 AMMO A PULL"),
 		"the Trench Gun / Triple Shot hint copy must state the real per-pull ammo cost")
-	Runner.T.ok(src.contains("5 FOR 3"),
-		"the stacked-fan hint copy must state the real 3-ammo cost for the 5-way fan")
+	Runner.T.ok(src.contains("5 FOR 2"),
+		"the stacked-fan hint copy must state the real 2-ammo cost for the 5-way fan")
 
 
 # --- R4: getting shot boils a second off the tank, and the only feedback said "safe" ---

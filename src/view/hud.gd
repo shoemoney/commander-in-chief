@@ -1417,7 +1417,7 @@ func _draw() -> void:
 							0, TAU, 16, Color(0.6, 0.8, 1.0, 0.18), 1.5)
 						Art.arc(self, fuel_c, ICON * 0.55,
 							-PI / 2, -PI / 2 + TAU * tfrac, 16, Color(0.6, 0.8, 1.0, 0.75), 1.5)
-			if not driver and _row_fits(px, ICON + 13.0 + _tw("%02d" % p["mg_ammo"]) + MAG_ADV):
+			if not driver and _row_fits(px, ICON + 13.0 + _tw(_ammo_str(p)) + MAG_ADV):
 				# The gunner's trigger IS the on-foot MG, so their row carries the ammo numeral + mag
 				# bar where the driver carries the shell count — through the SAME _mg_ammo_stat tint
 				# helper the on-foot row uses, so the two seats can never drift apart. No grenade or
@@ -3490,6 +3490,13 @@ func _mag_bar(x: float, y: float, ammo: int, maxa: int) -> float:
 ## could drift out of step with the color tiers), so the numeral routes through the coupled
 ## _warn_stat backing exactly when its tint is a warning. The glyph reflects what's actually
 ## chambered: shotgun shells during the Trench Gun window, AP rounds during Piercing, else MG.
+static func _ammo_str(p: Dictionary) -> String:
+	## The numeral, with the sim's per-shot burn appended when a fan upgrade doubles it ("42x2"):
+	## firing is always-on, so the player must be able to SEE what the Trench Gun / Triple costs.
+	var burn := SimWorld.ammo_burn(p)
+	return "%02d" % p["mg_ammo"] + ("x%d" % burn if burn > 1 else "")
+
+
 func _mg_ammo_stat(p: Dictionary, x: float, y: float) -> float:
 	var ammo: int = p["mg_ammo"]
 	var acol := Color(0.95, 0.96, 0.9)
@@ -3507,7 +3514,8 @@ func _mg_ammo_stat(p: Dictionary, x: float, y: float) -> float:
 		acon = "item_bullet_shotgun"
 	elif p["pierce_ticks"] > 0:
 		acon = "item_bullet"
-	return _warn_stat(acon, "%02d" % ammo, x, y, acol) if awarn else _stat(acon, "%02d" % ammo, x, y, acol)
+	var atxt := _ammo_str(p)
+	return _warn_stat(acon, atxt, x, y, acol) if awarn else _stat(acon, atxt, x, y, acol)
 
 
 ## One magazine segment. A seam like every other HUD primitive, so a headless capture subclass can
@@ -3725,7 +3733,7 @@ func _onfoot_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -
 	# the vitals pair is vitals_w(). The vitals lead the list, and plan_chips keeps a strict PREFIX,
 	# so they are the LAST thing this row can lose.
 	var vitals_wdt := vitals_w()
-	var ammo_w := ICON + 13.0 + _tw("%02d" % ammo) + MAG_ADV
+	var ammo_w := ICON + 13.0 + _tw(_ammo_str(p)) + MAG_ADV
 	var gren_w := ICON + 13.0 + _tw("%02d" % p["grenade_ammo"])
 	# The roll chip's slot is the keycap's REAL advance, not ICON + 2.0 — that budget is
 	# 11.9px short of a "Space"-bound roll and the glyph overran the chip after it.

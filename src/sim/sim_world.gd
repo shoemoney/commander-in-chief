@@ -261,6 +261,12 @@ const OPENING_BUNKER_FIRST_SPAWN_TICKS := 180
 const BUNKER_SPAWN_INTERVAL_TICKS := 120
 const MAX_ENEMIES := 64
 const REVIVE_BASE_COST := 50
+## Endless revive price = BASE x min(deaths x (1 + wave/5), CAP). Uncapped it hit 4,400 at wave 15
+## against a 2,100 chest; at 8x a body stays a real decision (400 2P / 200 solo) at any depth.
+const REVIVE_MULT_CAP := 8
+## Kill-streak ladder: [kills, score bonus %]. The old top (20 -> +100%) left a 121-streak
+## unrecognised; 40/80 add diminishing-but-real steps (+50 each, where 5->10->20 doubled).
+const STREAK_TIERS := [[5, 25], [10, 50], [20, 100], [40, 150], [80, 200]]
 # What a stand-up guarantees an empty-handed body: a top-up floor, not a kit.
 # Kept at or under the cheapest revive's shop value at every depth (see _respawn).
 const RESPAWN_MG_FLOOR := 8
@@ -1089,6 +1095,28 @@ static func zone_info(gate_idx: int) -> Dictionary:
 	return ZONE_INFO[clampi(gate_idx, 1, ZONE_INFO.size()) - 1]
 
 
+static func ammo_burn(p: Dictionary) -> int:
+	## Rounds spent per trigger pull: 2 with ANY fan (Trench Gun and/or Triple Shot), else 1.
+	## Flat on purpose: owning both fans used to cost 3, so the dearer buy made the cheaper worse.
+	return 2 if (p["spread_ticks"] > 0 or p["triple"]) else 1
+
+
+static func streak_bonus_pct(streak: int) -> int:
+	var pct := 0
+	for t: Array in STREAK_TIERS:
+		if streak >= t[0]:
+			pct = t[1]
+	return pct
+
+
+static func streak_tier(streak: int) -> int:
+	var tier := 0
+	for t: Array in STREAK_TIERS:
+		if streak >= t[0]:
+			tier = t[0]
+	return tier
+
+
 func is_solo() -> bool:
 	return players.size() == 1
 
@@ -1102,7 +1130,7 @@ func revive_cost(p: Dictionary) -> int:
 		# became unreachable. Here deaths COMPOUND uncapped and the price is
 		# wave-MULTIPLIED, so a fat late chest is one bad patch from zero: keep
 		# clean and the surcharge never touches you, chain deaths and the run ends.
-		cost = REVIVE_BASE_COST * maxi(p["deaths"], 1) * (1 + wave / 5)
+		cost = REVIVE_BASE_COST * mini(maxi(p["deaths"], 1) * (1 + wave / 5), REVIVE_MULT_CAP)
 	else:
 		# Campaign keeps the soft cap at 3 deaths: with checkpoints and a finish
 		# line, a linear ramp against flat kill income is just a death spiral.
@@ -1580,12 +1608,11 @@ func _step_players(inputs: Array) -> void:
 			# free 3-5x DPS multiplier and ammo stopped being a resource at all —
 			# the softest sink in the game. One extra round per pellet PAIR keeps the
 			# upgrade clearly worth taking while making it cost something.
-			# Starting values (+1 for a 3-fan, +2 for a 5-fan); test: time-to-empty
+			# Flat +1 for any fan (ammo_burn): Trench + Triple together used to cost +2. Test: time-to-empty
 			# from 99 should fall to roughly half the base gun's, not stay identical.
 			# If Triple then feels punitive rather than powerful, drop the 5-fan to +1.
 			if p["spread_ticks"] > 0 or p["triple"]:
-				var fan_cost := 2 if (p["spread_ticks"] > 0 and p["triple"]) else 1
-				p["mg_ammo"] = maxi(0, p["mg_ammo"] - fan_cost)
+				p["mg_ammo"] = maxi(0, p["mg_ammo"] - (ammo_burn(p) - 1))
 				# Trench Gun (timed) / Triple Shot (held until death) both spray this one
 				# fan: two extra pellets +/-12 deg off the aim (fixed-point rotate).
 				_spawn_mg_bullet(p, i, Fixed.mul(fax, SPREAD_COS) - Fixed.mul(fay, SPREAD_SIN),
@@ -3697,15 +3724,12 @@ func _kill_enemy(e: Dictionary, no_coin := false, no_score := false, score_pct :
 	if e["kind"] != "mg_nest" and not no_score:
 		kill_streak = kill_streak + 1 if kill_streak_timer > 0 else 1
 		kill_streak_timer = KILL_STREAK_WINDOW_TICKS
-		var streak_bonus_pct := 0
-		if kill_streak >= 20:
-			streak_bonus_pct = 100
-		elif kill_streak >= 10:
-			streak_bonus_pct = 50
-		elif kill_streak >= 5:
-			streak_bonus_pct = 25
-		if streak_bonus_pct > 0:
-			score += (coin * 10 * streak_bonus_pct * score_pct) / 10000
+		var streak_pct := streak_bonus_pct(kill_streak)
+		if streak_pct > 0:
+			score += (coin * 10 * streak_pct * score_pct) / 10000
+		if kill_streak == 40 or kill_streak == 80:
+			# Past the 20-surge the ladder keeps its own beat per tier (view-only, golden-safe).
+			events.append({"t": "streak_tier", "x": e["x"], "y": e["y"], "tier": kill_streak})
 		if kill_streak == 20:
 			# The 20-streak stops being just a number: every alive fighter gets a
 			# ~3s adrenaline surge (reuses the tank-bail speed boost), so the reward

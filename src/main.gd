@@ -3201,8 +3201,8 @@ func _consume_events() -> void:
 				# one-shot hints (persisted) say what each actually DOES.
 				match int(ev["kind"]):
 					4: _hint("pierce", "PIERCING ROUNDS — SHOTS PUNCH THROUGH. AIM DOWN THE COLUMN")
-					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN, 2 AMMO A PULL. ON TRIPLE IT'S 5 FOR 3")
-					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN, 2 AMMO A PULL. STACK SPREAD FOR 5 FOR 3")
+					5: _hint("spread", "TRENCH GUN — 3-ROUND FAN, 2 AMMO A PULL. ON TRIPLE IT'S 5 FOR 2")
+					6: _hint("triple", "TRIPLE SHOT — 3-ROUND FAN, 2 AMMO A PULL. STACK SPREAD FOR 5 FOR 2")
 					7: _hint("rend", "REND ROUNDS — YOUR MG NOW PUNCHES THROUGH RIOT SHIELDS")
 					8: _hint("claymore", TranslationServer.translate("CLAYMORE — PLANT WITH [%s] AWAY FROM TANKS (IT HURTS BOTH SIDES)")
 						% (Art.pad_button_label(pad_bind_for_glyph("interact")) if Art.use_pad else GameMenu.key_label(bind("interact"))))
@@ -3905,6 +3905,11 @@ func _consume_events() -> void:
 					"rate": 0.03, "text": "AVENGED +%d¢" % int(ev.get("coin", 5)),
 					"col": Color(0.7, 0.9, 1.0)})
 				_sfx.play("avenge", -5.0)
+			"streak_tier":
+				# 40 / 80 streaks: pop + receipt fire from the kill event via SimWorld.streak_tier();
+				# this adds the body-blow the 20-surge has, so the new rung is felt as well as read.
+				_trauma = minf(1.0, _trauma + 0.12)
+				_fx.append({"x": ev["x"], "y": ev["y"], "t": 0.0, "kind": "shockwave", "rate": 0.1})
 			"surge":
 				_vo("vo_surge", 0, 900)
 				# The 20-streak adrenaline rush lands as a body-blow of feedback —
@@ -4981,7 +4986,7 @@ func _ev_kill(ev: Dictionary) -> void:
 		_streak_popped = 0
 	# Events arrive after the complete sim step: a multi-kill can cross 5/10/20
 	# without ending on it. Celebrate the highest earned tier once, not equality.
-	var milestone := 20 if sstreak >= 20 else 10 if sstreak >= 10 else 5 if sstreak >= 5 else 0
+	var milestone := SimWorld.streak_tier(sstreak)
 	if milestone > _streak_popped:
 		_streak_popped = milestone
 		_cmd_bark("streak", 60)   # Commander gloats at a kill-streak milestone
@@ -5004,14 +5009,14 @@ func _ev_kill(ev: Dictionary) -> void:
 
 
 func _streak_receipt(x: int, y: int, streak: int) -> void:
-	if not [5, 10, 20].has(streak):
+	if SimWorld.streak_tier(streak) != streak:
 		return
 	# A rapid tier upgrade replaces its older receipt, not unrelated rewards,
 	# loss messages, or warnings. Identity is semantic, never a text match.
 	for i in range(_fx.size() - 1, -1, -1):
 		if _fx[i].get("kind", "") == "floattext" and _fx[i].get("role", "") == "streak":
 			_fx.remove_at(i)
-	var bonus := 25 if streak == 5 else 50 if streak == 10 else 100
+	var bonus := SimWorld.streak_bonus_pct(streak)
 	_fx.append({"x": x, "y": y, "t": 0.0, "kind": "floattext", "role": "streak",
 		"rate": 0.02, "size": 10, "text": "x%d STREAK +%d%%" % [streak, bonus],
 		"col": Color(1.0, 0.92, 0.4)})

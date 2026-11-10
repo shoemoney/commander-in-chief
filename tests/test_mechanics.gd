@@ -117,7 +117,9 @@ func test_revive_cost_endless_compounds_and_wave_multiplies() -> void:
 	sim.wave = 25
 	Runner.T.eq(sim.revive_cost(p), 300, "wave 25 is a 6x multiplier on the base")
 	p["deaths"] = 6
-	Runner.T.eq(sim.revive_cost(p), 1800, "deaths compound past 3 (50 * 6 * 6) — no cap in endless")
+	# economy pass: was 1800 (50 * 6 * 6, uncapped). The combined multiplier now caps at
+	# REVIVE_MULT_CAP (8x), so deaths still compound past 3 but only up to 400.
+	Runner.T.eq(sim.revive_cost(p), 50 * SimWorld.REVIVE_MULT_CAP, "deaths compound past 3 until the 8x cap (was 1800 uncapped)")
 	# Campaign is untouched: the 3-death soft cap still guards the checkpointed run.
 	var camp := SimWorld.new(1, 2, "campaign")
 	var cp := camp.players[0]
@@ -133,7 +135,9 @@ func test_endless_death_spiral_reaches_the_wipe() -> void:
 	sim.wave = 20
 	var p := sim.players[0]
 	p["deaths"] = 5
-	sim.war_chest = 600   # a healthy late chest...
+	# economy pass: the price caps at 8x (solo 200 here, was 600 at wave 20 d5), so the chest
+	# that "cannot cover the body" is now under 200 rather than under 600.
+	sim.war_chest = 150
 	Runner.T.ok(sim.war_chest < sim.revive_cost(p),
 		"...still cannot cover the 6th body at wave 20 (%d)" % sim.revive_cost(p))
 	sim._kill_player(p)
