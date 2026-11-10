@@ -5,7 +5,19 @@ import tempfile
 import unittest
 import zipfile
 
-from verify_export_content import MANIFEST, ROOT, check_archive, check_fontawesome, fontawesome_icons
+from verify_export_content import (MANIFEST, MUSIC_MANIFEST, ROOT, check_archive, check_fontawesome,
+                                   check_music, fontawesome_icons, music_contract)
+
+
+def check_music_empty() -> bool:
+    """An empty contract must be reported, never read as 'nothing to check'."""
+    import io
+    import zipfile as z
+    buffer = io.BytesIO()
+    with z.ZipFile(buffer, "w") as archive:
+        archive.writestr(MUSIC_MANIFEST, b"{}")
+    with z.ZipFile(buffer) as archive:
+        return bool(check_music(archive, (b"{}", [])))
 
 
 class ExportContentTests(unittest.TestCase):
@@ -13,10 +25,13 @@ class ExportContentTests(unittest.TestCase):
         self.icons = fontawesome_icons()
         self.resource = next(iter(self.icons))
         self.texture = ".godot/imported/fixture-" + Path(self.resource).stem + ".ctex"
+        self.music = (b'{"fixture": true}', ["assets/music/fixture_combat.ogg", "assets/music/sting_fixture.ogg"])
 
     def check(self, changes):
         files = {MANIFEST: b"actions", "project.binary": b"settings",
-                 "src/main.tscn.remap": b"scene"}
+                 "src/main.tscn.remap": b"scene", MUSIC_MANIFEST: self.music[0]}
+        for stem in self.music[1]:
+            files[stem + ".import"] = b"[remap]\n"
         for resource in self.icons:
             texture = ".godot/imported/fixture-" + Path(resource).stem + ".ctex"
             files[resource + ".import"] = ('[remap]\npath="res://' + texture + '"\n').encode()
@@ -31,7 +46,7 @@ class ExportContentTests(unittest.TestCase):
             with zipfile.ZipFile(path, "w") as archive:
                 for name, data in files.items():
                     archive.writestr(name, data)
-            return check_archive(path, b"actions", self.icons)
+            return check_archive(path, b"actions", self.icons, self.music)
 
     def test_valid_pack(self):
         self.assertEqual(self.check({}), [])
@@ -40,6 +55,26 @@ class ExportContentTests(unittest.TestCase):
         for data in (None, b"stale"):
             with self.subTest(data=data):
                 self.assertTrue(self.check({MANIFEST: data}))
+
+    def test_missing_or_stale_music_manifest_rejected(self):
+        for data in (None, b"stale"):
+            with self.subTest(data=data):
+                self.assertTrue(self.check({MUSIC_MANIFEST: data}))
+
+    def test_missing_music_stem_rejected(self):
+        for stem in self.music[1]:
+            with self.subTest(stem=stem):
+                self.assertTrue(self.check({stem + ".import": None}))
+
+    def test_empty_music_contract_cannot_bypass_validation(self):
+        self.assertTrue(self.check({}) == [] and check_music_empty())
+
+    def test_shipped_music_contract_names_every_stem_on_disk(self):
+        data, stems = music_contract()
+        self.assertGreaterEqual(len(stems), 24)
+        for stem in stems:
+            self.assertTrue((ROOT / stem).is_file(), stem)
+            self.assertTrue((ROOT / (stem + ".import")).is_file(), stem + ".import")
 
     def test_missing_main_or_settings(self):
         for name in ("project.binary", "src/main.tscn.remap"):
