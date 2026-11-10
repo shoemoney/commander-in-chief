@@ -105,6 +105,7 @@ var _seed_override := -1         # CHALLENGE SEED: one-shot forced seed (-1 = no
 # Feel stack (view-only; the sim never sees any of this).
 var _trauma := 0.0
 var _hitstop_frames := 0
+var _time_fx := TimeFx.new()   # view-only slow-mo beats, hit-stop budget, enemy flinch (src/view/time_fx.gd)
 # #13: a grenade/roll press that starts AND ends entirely inside a hit-stop freeze used
 # to be discarded outright — _gather_inputs() (and therefore sim.step()) never runs while
 # frozen, so the sim's own ROLL_BUFFER_TICKS/GRENADE_BUFFER_TICKS never saw it. Latched
@@ -2211,6 +2212,9 @@ func _reset() -> void:
 	_watch_frame = 0
 	_trauma = 0.0
 	_hitstop_frames = 0
+	_time_fx.cancel()
+	_time_fx.reset_hitstop()
+	_time_fx.flinch_clear_all()
 	_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 	_flash_alpha = 0.0
 	_flash_col = Color(1, 1, 1)
@@ -2846,6 +2850,7 @@ func _physics_process(_delta: float) -> void:
 			# _consume_events can SET it (near demo blasts) — a stuck freeze would
 			# wedge every feel gate (particles/envelopes/camera) forever. Clear it.
 			_hitstop_frames = 0
+			_time_fx.cancel()   # no dilation in attract: nothing here would ever clock it
 			_hs_latch = [{"grenade": false, "roll": false}, {"grenade": false, "roll": false}]
 			_update_feel()
 		else:
@@ -2853,6 +2858,7 @@ func _physics_process(_delta: float) -> void:
 			# square the camera — pausing mid-shake froze the world offset/tilted
 			# behind the overlay.
 			_concussion = 0.0
+			_time_fx.cancel()   # a beat must not hold the pitch dip behind a menu
 			_duck = 0.0
 			_sfx.set_concussion(0.0)
 			# Undo the VO duck too. _drive_audio() (the only caller of duck_sfx_under_vo)
@@ -2892,6 +2898,7 @@ func _physics_process(_delta: float) -> void:
 		return
 	_hud_icons.visible = true
 	if _watching:
+		_time_fx.cancel()   # replays/Watch verify a recorded run 1:1 — never dilated
 		if _watch_replay == null or _watch_frame >= _watch_replay.frames.size() or sim.victory or sim.wiped:
 			_watching = false
 			_menu.open(GameMenu.Mode.TITLE)
@@ -2922,8 +2929,12 @@ func _physics_process(_delta: float) -> void:
 	if buffered_controls:
 		_record_accessibility_change()
 		_accessible_policy.buffer_inputs(_gather_inputs())
-	if _hitstop_frames > 0:
-		_hitstop_frames -= 1
+	# Slow-mo beat: skips sim.step() on a pattern, exactly like a hit-stop frame (so the same
+	# input latch catches taps and no input is dropped or duplicated). Clock holds during hit-stop.
+	var tfx_skip := _time_fx.advance(_hitstop_frames > 0)
+	if _hitstop_frames > 0 or tfx_skip:
+		if _hitstop_frames > 0:
+			_hitstop_frames -= 1
 		if not buffered_controls:
 			# #13: _gather_inputs()/sim.step() are both skipped while frozen, so a grenade/roll
 			# TAP that starts and ends entirely inside the freeze would otherwise never reach the
@@ -4088,6 +4099,7 @@ func _consume_events() -> void:
 				_trauma = minf(1.0, _trauma + 0.6)
 				_flash_alpha = maxf(_flash_alpha, 0.4)
 				_hitstop_frames = maxi(_hitstop_frames, 8)
+				_time_fx.start("wipe", _motion)
 				_buzz(1.0)
 				show_banner("OVERRUN — RUN OVER")
 				_sfx.play("wiped", -2.0)
@@ -4105,7 +4117,21 @@ func _consume_events() -> void:
 					_vo("vo_victoly", 3, 6000)
 	if _kill_blip_pitch > 0.0:
 		_sfx.play("kill", -7.0, _kill_blip_pitch)
+	_blast_beat_check()
 	_check_enemy_hits()
+
+
+func _blast_beat_check() -> void:
+	# A grenade/mortar blast that cuts down 4+ in one tick earns a short slow-mo beat.
+	var blasts := 0
+	var kills := 0
+	for ev in sim.events:
+		if ev["t"] == "kill":
+			kills += 1
+		elif ev["t"] == "explosion" and ev.get("src", "") != "barrel":
+			blasts += 1
+	if blasts > 0 and kills >= 4:
+		_time_fx.start("blast", _motion)
 
 
 func _check_enemy_hits() -> void:
@@ -4118,6 +4144,7 @@ func _check_enemy_hits() -> void:
 	# tick (called once per _consume_events(), i.e. once per sim.step()) so
 	# _draw_enemies() is a pure reader of _enemy_flash.
 	var ecount := sim.enemies.size()
+	_time_fx.flinch_tick()
 	# Prune per-slot view state past the live range — the sim compacts with
 	# remove_at, so an out-of-range key would otherwise leak onto a future
 	# same-kind occupant of that slot. Also moved here (was in _draw_enemies):
@@ -4131,11 +4158,13 @@ func _check_enemy_hits() -> void:
 			_tech_lunge_prev.erase(sk)
 			_enemy_hp_prev.erase(sk)
 			_enemy_flash.erase(sk)
+			_time_fx.flinch_clear(sk)
 	for eidx in ecount:
 		var e: Dictionary = sim.enemies[eidx]
 		if not e["alive"]:
 			_enemy_flash.erase(eidx)
 			_enemy_hp_prev.erase(eidx)
+			_time_fx.flinch_clear(eidx)
 			continue
 		# Slot inherited by a different kind after a kill's compaction: seed the
 		# face fresh and drop the prev-pos/lunge/hp instead of comparing this
@@ -4148,6 +4177,7 @@ func _check_enemy_hits() -> void:
 			_tech_lunge_prev.erase(eidx)
 			_enemy_hp_prev.erase(eidx)
 			_enemy_flash.erase(eidx)
+			_time_fx.flinch_clear(eidx)
 		# Most kinds are one-shot and carry NO "hp" field (only mg_nest/technical/
 		# broadcast track it). Default to a constant so the edge-detect is a no-op
 		# for them (prev==cur -> never flashes; they die in one hit anyway).
@@ -4160,7 +4190,17 @@ func _check_enemy_hits() -> void:
 			# weight either, only a flash and some sparks. `maxi` means a hit that
 			# also kills lands on the kill path's floor instead of stacking two
 			# freezes for one bullet.
-			_hitstop_frames = maxi(_hitstop_frames, 1)
+			_hitstop_frames = maxi(_hitstop_frames, _time_fx.grant_hitstop(sim.tick_count, 1, false))
+			# Flinch away from the shooter: incoming direction = nearest live player -> this enemy.
+			var fdir := Vector2.UP
+			var fbest := INF
+			for fp in sim.players:
+				if fp["alive"]:
+					var fv := Vector2(float(e["x"] - fp["x"]), float(e["y"] - fp["y"]))
+					if fv.length_squared() < fbest:
+						fbest = fv.length_squared()
+						fdir = fv
+			_time_fx.flinch_hit(eidx, fdir)
 			if _motion >= 0.5:   # a2-11 r3: REDUCE MOTION suppresses the pop + sparks (not just the flinch)
 				_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "light", "rate": 0.16, "r": 13.0, "col": Color(1.0, 1.0, 0.95)})
 				# juice pass ("a hit that doesn't sell"): landing REAL damage on the only
@@ -4176,6 +4216,10 @@ func _check_enemy_hits() -> void:
 					var sa := float(sp) * PI / 2.0 + 0.4
 					_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "ember", "rate": 0.1,
 						"vx": cos(sa) * 2.2, "vy": sin(sa) * 2.2})
+				for sp in 3:   # directional burst: embers thrown along the incoming bullet
+					var fa := fdir.normalized().angle() + (float(sp) - 1.0) * 0.35
+					_fx.append({"x": e["x"], "y": e["y"], "t": 0.0, "kind": "ember", "rate": 0.1,
+						"vx": cos(fa) * 3.4, "vy": sin(fa) * 3.4})
 		_enemy_hp_prev[eidx] = ehp
 		var eflash: float = _enemy_flash.get(eidx, 0.0)
 		if eflash > 0.02:
@@ -4832,10 +4876,12 @@ func _ev_kill(ev: Dictionary) -> void:
 	# surge keys off it, the water clock stops and the input latch re-injects any
 	# tap that began and ended inside it. `maxi` so a multi-kill tick still costs
 	# ONE frame, and `big` keeps its 2 — this adds the floor, it takes nothing away.
-	_hitstop_frames = maxi(_hitstop_frames, 1)
-	_punch = maxf(_punch, 0.012)
+	# Rate-limited (TimeFx.grant_hitstop): at MG rate a kill per tick stuttered the run; extra kills
+	# inside the window fold into camera punch instead of more freeze.
+	_hitstop_frames = maxi(_hitstop_frames, _time_fx.grant_hitstop(sim.tick_count, 2 if heavy else 1, heavy))
+	_punch = maxf(_punch, 0.012 + _time_fx.punch_bonus())
 	if heavy:
-		_hitstop_frames = maxi(_hitstop_frames, 2)   # a weighted kill out-hits a trooper's
+		# a weighted kill out-hits a trooper's (2 frames, granted above)
 		_buzz(0.35, -1, true)   # kill confirm: sharp, no single shooter attributed
 		_punch = maxf(_punch, 0.03)
 	# The milestone pop advertises the sim's +25/50/100% bonus, so it reads the
@@ -4978,6 +5024,7 @@ func _boss_death_finale(x: int, y: int) -> void:
 	# Peak screen feel — the one moment that earns a full-strength hit.
 	_trauma = 1.0
 	_hitstop_frames = maxi(_hitstop_frames, 10)
+	_time_fx.start("boss", _motion)   # slow-mo beat begins once the freeze above has played
 	_flash_alpha = maxf(_flash_alpha, 0.5)
 	# Rumble is UNGATED by reduce-motion: haptics have their own toggle
 	# (_rumble_on) and should compensate for damped visuals, not vanish with
@@ -5117,6 +5164,7 @@ func _ev_victory(ev: Dictionary) -> void:
 	_trauma = 1.0
 	_flash_alpha = 0.6
 	_punch = maxf(_punch, 0.18)   # the run's one win-state finally out-hits a common kill
+	_time_fx.start("victory", _motion)
 	_cinematic = 1.0              # letterbox the extraction flyover
 	# The one win-state of the whole run deserves a payoff: a gold
 	# shockwave + light bloom off the wreck and a fountain of gold
@@ -7103,7 +7151,7 @@ func _update_feel() -> void:
 		var fi := 0
 		while fi < _fx.size():
 			var fx := _fx[fi]
-			fx["t"] += fx.get("rate", 0.09)
+			fx["t"] += fx.get("rate", 0.09) * _time_fx.fx_scale()
 			if fx["kind"] == "casing" or fx["kind"] == "gib" or fx["kind"] == "dust" or fx["kind"] == "splash" or fx["kind"] == "ember" or fx.get("move", false):
 				fx["x"] += int(fx["vx"] * Fixed.ONE)
 				fx["y"] += int(fx["vy"] * Fixed.ONE)
@@ -11835,6 +11883,7 @@ func _draw_enemies() -> void:
 		var eflash: float = _enemy_flash.get(eidx, 0.0)
 		if eflash > 0.02:
 			epos.y -= eflash * 1.2 * _motion
+		epos += _time_fx.flinch_offset(eidx, _motion)
 		# gfx-loop opt: every sibling entity array (bunkers/mines/tanks/gates/pickups)
 		# already band-culls off-screen draws — enemies were the one array left out.
 		# Placed AFTER the flash-offset read above (state itself lives in
@@ -11888,6 +11937,9 @@ func _draw_enemies() -> void:
 		# breathes instead of jogging in place.
 		var e_moved := sample_character_motion(_enemy_pos_prev, eidx, e, sim.tick_count).length_squared() > 0.01
 		var enemy_phase := character_anim_phase(sim.tick_count, 7, eidx, _motion)
+		var flinch_sq := _time_fx.flinch_scale(eidx, _motion)
+		if flinch_sq != Vector2.ONE:   # squash about the body's own position, undone at the loop tail
+			draw_set_transform(epos * (Vector2.ONE - flinch_sq), 0.0, flinch_sq)
 		if e["kind"] != "frogman":
 			if e.get("windup", 0) == 0 and e_moved:
 				epos.y += absf(sin(float(sim.tick_count) * 0.35 + float(eidx) * 1.7)) * -1.4 * _motion
@@ -12393,6 +12445,8 @@ func _draw_enemies() -> void:
 						var sa := float(Engine.get_physics_frames()) * 0.12 + sd * TAU / 3.0
 						Art.circle(self, epos + Vector2(0, -10.0) + Vector2.from_angle(sa) * 5.5, 1.0,
 							Color(1.0, 1.0, 0.8, 0.9))
+		if flinch_sq != Vector2.ONE:
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _draw_observer() -> void:

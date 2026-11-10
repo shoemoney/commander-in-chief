@@ -4541,8 +4541,9 @@ func test_a_landed_hit_stops_the_world() -> void:
 			# assertion, so pin the expression itself.
 			Runner.T.ok(heavy_decl != "var heavy: bool = big",
 				"`heavy` is not an alias for the coin gate — that is the exact conflation being fixed")
-			Runner.T.ok("\n".join(klines.slice(heavy_line)).contains(
-					"_hitstop_frames = maxi(_hitstop_frames, 2)"),
+			# time-fx: the freeze is now granted by TimeFx's per-window budget (1 frame ordinary,
+			# 2 for a weighted kill) instead of two bare assignments; the tier still escalates 1 -> 2.
+			Runner.T.ok(kbody.contains("_time_fx.grant_hitstop(sim.tick_count, 2 if heavy else 1, heavy)"),
 				"a weighted kill still escalates to 2 frames — the floor must not flatten the tier")
 			Runner.T.ok("\n".join(klines.slice(heavy_line)).contains("_buzz(0.35, -1, true)"),
 				"a weighted kill still gets the kill-confirm haptic")
@@ -4563,7 +4564,7 @@ func test_a_landed_hit_stops_the_world() -> void:
 			# The assignment has to be INSIDE the edge-detect (that is the whole
 			# point — it is the landed hit) but must use maxi so a hit that also
 			# kills does not stack two freezes on one bullet.
-			Runner.T.ok(cbody.substr(edge).contains("_hitstop_frames = maxi(_hitstop_frames, 1)"),
+			Runner.T.ok(cbody.substr(edge).contains("_hitstop_frames = maxi(_hitstop_frames, _time_fx.grant_hitstop(sim.tick_count, 1, false))"),
 				"landing real damage on a multi-HP target arms hitstop too — this is the hit the "
 				+ "player watched succeed, and it had a flash and no weight")
 	# 3. The freeze must still be CONSUMED the way the rest of the stack expects:

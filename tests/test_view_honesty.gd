@@ -4229,6 +4229,10 @@ const TEXT_XFORM_SCALE_ALLOW := {
 	"Vector2.ONE * fpunch":
 		"main.gd _draw_fx floattext toast. `fpunch = 1.0 + maxf(0.0, (FLOAT_PUNCH_MAX - 1.0) - t * 4.0)`,"
 		+ " so it is 1.0..1.5 — scale-UP only (same measurement: 15 ink rows at 1.5).",
+	"flinch_sq":
+		"main.gd _draw_enemies flinch squash. `TimeFx.flinch_scale` returns Vector2(1+s, 1) or"
+		+ " Vector2(1, 1+s) with s = 0.08 * remaining/6 (0..0.08), else Vector2.ONE, and the transform is"
+		+ " only set when it differs from ONE — scale-UP only, well inside the measured-safe 1.28.",
 }
 const _TEXT_DRAW_CALLS := ["Art.text(", "Art.text_center(", "draw_string(", "draw_string_outline("]
 
