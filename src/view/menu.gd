@@ -4113,8 +4113,23 @@ func _draw_title_header() -> void:
 	# a2-04 AD#3: the largest word was drawn BARE over the live attract firefight (a
 	# red blast muddied the "I"); plate it like its tagline/BEST/CAREER siblings.
 	var ttw := Art.font().get_string_size("COMMANDER IN CHIEF", HORIZONTAL_ALIGNMENT_LEFT, -1, TITLE_WORDMARK_FONT).x
-	_emit_rect(Rect2(CENTER_X - ttw / 2.0 - TITLE_WORDMARK_PAD_H, TITLE_WORDMARK_TOP, ttw + TITLE_WORDMARK_PAD_H * 2.0, TITLE_WORDMARK_H), tplate)   # a2-04 r2: match sibling plate alpha
-	_center_text("COMMANDER IN CHIEF", title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT), TITLE_WORDMARK_FONT, HEADER_ACCENT)
+	# title-polish: composed backdrop + emblem first, then the (now translucent) plate, the
+	# layered wordmark underlay, the face, and the shimmer — all via TitlePolish plans.
+	var pt := _amb_t
+	var pm: float = main._motion
+	var wbase := title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT)
+	var wback := TitlePolish.backdrop(pt, pm, _open_t) + TitlePolish.emblem_plan(pt, pm, _open_t)
+	TitlePolish.paint(self, wback)
+	var wplate := tplate
+	wplate.a *= 0.45
+	_emit_rect(Rect2(CENTER_X - ttw / 2.0 - TITLE_WORDMARK_PAD_H, TITLE_WORDMARK_TOP, ttw + TITLE_WORDMARK_PAD_H * 2.0, TITLE_WORDMARK_H), wplate)   # a2-04 r2: match sibling plate alpha
+	var wunder := TitlePolish.wordmark_under(CENTER_X, wbase, TITLE_WORDMARK_FONT, _open_t)
+	var wover := TitlePolish.wordmark_over(CENTER_X, wbase, TITLE_WORDMARK_FONT, _open_t, pt, pm)
+	TitlePolish.paint(self, wunder)
+	_center_text("COMMANDER IN CHIEF", wbase, TITLE_WORDMARK_FONT, HEADER_ACCENT)
+	if not wover.is_empty():
+		TitlePolish.paint(self, wover)
+	TitlePolish.last_ops = wback + wunder + wover
 	# Studio byline, plated like the tagline below it (small text loses to the live
 	# attract firefight no matter the alpha — the codebase's thrice-cited lesson).
 	var byl := "by BIG IT GAME STUDIOS · a SHOEMONEY company"   # ui-loop taste: middot separator matches the house style (RECORDS · HOW TO PLAY, CAREER — N RUNS · M KILLS), not a lone hyphen
@@ -4130,6 +4145,15 @@ func _draw_title_header() -> void:
 	_emit_rect(Rect2(CENTER_X - tgw / 2.0 - PLATE_PAD_SM, float(stack["tagline_top"]), tgw + PLATE_PAD_SM * 2.0, float(stack["record_h"])),
 		tplate)
 	_center_text(tagline, title_baseline(float(stack["tagline_top"]), float(stack["record_h"]), TITLE_TAGLINE_FONT), TITLE_TAGLINE_FONT, TAGLINE_COL)
+	# title-polish: gold rules flank the tagline, and the footer carries version + copyright.
+	var ty := float(stack["tagline_top"]) + float(stack["record_h"]) / 2.0
+	for sgn: float in [-1.0, 1.0]:
+		var rx := CENTER_X + sgn * (tgw / 2.0 + PLATE_PAD_SM + 6.0)
+		_emit_rect(Rect2(rx if sgn > 0.0 else rx - 26.0, ty, 26.0, 1.0), Color(1.0, 0.85, 0.3, 0.55 * _open_t))
+		_emit_rect(Rect2(rx - 1.0 if sgn < 0.0 else rx - 3.0, ty - 1.0, 4.0, 3.0), Color(1.0, 0.95, 0.62, 0.8 * _open_t))
+	var fsz := int(stack["micro"])
+	for it in TitlePolish.footer_items(fsz):
+		_emit_stamp(String(it["txt"]), Vector2(float(it["x"]), 356.0), Color(0.75, 0.78, 0.68, 0.55 * _open_t), fsz)
 	# Read order: title → tagline → BRIGHT record line → dim CAREER → menu.
 	# c1-02: the record block is a tight two-line stack (BEST then CAREER) abutting the
 	# tagline, freeing height so the button column starts higher and every TITLE state clears

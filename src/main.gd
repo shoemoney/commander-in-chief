@@ -897,6 +897,7 @@ func _draw_splash() -> void:
 	if el > fade_at:
 		veil = clampf(1.0 - (el - fade_at) / (_splash_len - fade_at), 0.0, 1.0)
 	_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(0.04, 0.045, 0.06, veil))
+	TitlePolish.paint(_splash_root, TitlePolish.vignette(veil))   # title-polish: the same framed edge as the title
 	if el < SPLASH_STUDIO_END:
 		_draw_splash_studio(el, veil)
 	elif el < SPLASH_CRAWL_END:
@@ -967,9 +968,10 @@ func _draw_splash_title(et: float, veil: float) -> void:
 	var ta := clampf((et - 0.55) / 0.5, 0.0, 1.0)
 	if ta > 0.001:
 		var rise := (1.0 - ta) * 6.0
-		_splash_center("COMMANDER IN CHIEF", 262.0 + rise, 24, Color(0.96, 0.82, 0.28, ta * veil))
-		var lw := 132.0 * ta
-		_splash_root.draw_rect(Rect2(320.0 - lw, 280.0, lw * 2.0, 2.0), Color(0.85, 0.3, 0.2, ta * veil))
+		# title-polish: the same extruded/outlined/shimmering lockup the title screen wears.
+		var sops := TitlePolish.wordmark_full(320.0, 276.0 + rise, 32, ta * veil, et, _motion)
+		sops.append_array(TitlePolish.rule(320.0, 292.0, 132.0 * ta, ta * veil))
+		TitlePolish.paint(_splash_root, sops)
 
 
 func _draw_splash_hero(ht: float, veil: float) -> void:

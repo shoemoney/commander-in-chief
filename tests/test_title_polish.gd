@@ -1,0 +1,119 @@
+extends RefCounted
+## Title/splash polish: the logo lockup, composed backdrop and footer (src/view/title_polish.gd)
+## are plain-data plans; these tests pin their content and prove the REAL menu header and the
+## REAL main.gd splash source reach them.
+
+const Runner := preload("res://tests/run_tests.gd")
+
+
+class _Main extends Node2D:
+	var _motion := 1.0
+	var best_score := 0
+	var _life_runs := 0
+
+
+class _Menu extends GameMenu:
+	var stamps: Array = []
+	var rects := 0
+	var faces: Array = []
+	func _center_text(txt: String, _y: float, _size: int, _col: Color) -> void:
+		faces.append(txt)
+	func _emit_rect(_r: Rect2, _c: Color) -> void:
+		rects += 1
+	func _emit_stamp(txt: String, pos: Vector2, _c: Color, _size: int) -> void:
+		stamps.append({"txt": txt, "pos": pos})
+
+
+func _title(motion: float) -> _Menu:
+	var m := _Menu.new()
+	var mn := _Main.new()
+	mn._motion = motion
+	m.main = mn
+	m.mode = GameMenu.Mode.TITLE
+	m._open_t = 1.0
+	m._amb_t = 0.5
+	return m
+
+
+func _kinds(ops: Array) -> Dictionary:
+	var d := {}
+	for op in ops:
+		d[op["k"]] = int(d.get(op["k"], 0)) + 1
+	return d
+
+
+func test_real_title_header_reaches_the_polish_module() -> void:
+	TitlePolish.last_ops = []
+	var m := _title(1.0)
+	m._draw_title_header()
+	var k := _kinds(TitlePolish.last_ops)
+	Runner.T.ok(int(k.get("tex", 0)) >= 1, "header plan carries the emblem texture")
+	Runner.T.ok(int(k.get("outline", 0)) >= 1 and int(k.get("text", 0)) >= 4, "header plan carries the outlined/extruded wordmark underlay")
+	Runner.T.ok(int(k.get("tri", 0)) >= 6, "header plan carries vignette + searchlight polygons")
+	Runner.T.ok(int(k.get("circle", 0)) >= 20, "header plan carries drifting smoke")
+	Runner.T.ok("COMMANDER IN CHIEF" in m.faces, "the real wordmark face is still drawn through the text seam")
+	var ver := TitlePolish.version_text()
+	var seen := false
+	for s in m.stamps:
+		if s["txt"] == ver:
+			seen = true
+	Runner.T.ok(seen, "the footer stamps the version %s" % ver)
+	Runner.T.ok(m.stamps.size() >= 2, "footer stamps version and copyright")
+	m.main.free()
+	m.free()
+
+
+func test_footer_stays_on_canvas() -> void:
+	for it in TitlePolish.footer_items(8):
+		var w := Art.tw(String(it["txt"]), 8)
+		Runner.T.ok(float(it["x"]) >= 4.0 and float(it["x"]) + w <= 636.0, "footer '%s' inside the canvas" % it["txt"])
+
+
+func test_version_matches_project_setting() -> void:
+	Runner.T.eq(TitlePolish.version_text(), "V" + str(ProjectSettings.get_setting("application/config/version")), "version text tracks project.godot")
+
+
+func test_reduce_motion_is_static() -> void:
+	Runner.T.eq(TitlePolish.wordmark_over(320.0, 90.0, 32, 1.0, 0.4, 0.0).size(), 0, "no shimmer under reduce motion")
+	Runner.T.eq(TitlePolish.beam_angle(0, 1.0, 0.0), TitlePolish.beam_angle(0, 9.0, 0.0), "beams do not sweep under reduce motion")
+	Runner.T.eq(str(TitlePolish.smoke(1.0, 0.0, 1.0)), str(TitlePolish.smoke(30.0, 0.0, 1.0)), "smoke does not drift under reduce motion")
+	Runner.T.ok(TitlePolish.beam_angle(0, 1.0, 1.0) != TitlePolish.beam_angle(0, 9.0, 1.0), "beams sweep with motion on")
+	Runner.T.ok(str(TitlePolish.smoke(1.0, 1.0, 1.0)) != str(TitlePolish.smoke(30.0, 1.0, 1.0)), "smoke drifts with motion on")
+
+
+func test_shimmer_runs_only_inside_its_window() -> void:
+	Runner.T.ok(TitlePolish.wordmark_over(320.0, 90.0, 32, 1.0, 0.65, 1.0).size() > 0, "shimmer lights letters mid-sweep")
+	Runner.T.eq(TitlePolish.wordmark_over(320.0, 90.0, 32, 1.0, 4.0, 1.0).size(), 0, "shimmer idles between sweeps")
+
+
+func test_emblem_is_a_real_picture() -> void:
+	var img := TitlePolish.build_emblem_image()
+	Runner.T.eq(img.get_width(), TitlePolish.EMBLEM_W, "emblem width")
+	var opaque := 0
+	var gold := 0
+	for y in img.get_height():
+		for x in img.get_width():
+			var c := img.get_pixel(x, y)
+			if c.a > 0.9:
+				opaque += 1
+				if c.r > 0.7 and c.g > 0.5 and c.b < 0.5:
+					gold += 1
+	Runner.T.ok(opaque > 1500, "emblem has solid body (%d px)" % opaque)
+	Runner.T.ok(gold > 400, "emblem carries gold facets/chevrons (%d px)" % gold)
+	Runner.T.ok(img.get_pixel(0, 0).a < 0.01, "emblem corners are transparent")
+
+
+func test_splash_title_beat_uses_the_lockup() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var a := src.find("func _draw_splash_title")
+	var b := src.find("func _draw_splash_hero")
+	Runner.T.ok(a > 0 and b > a and src.substr(a, b - a).contains("TitlePolish.wordmark_full"),
+		"splash title beat paints the shared wordmark lockup")
+	var s := src.find("func _draw_splash()")
+	Runner.T.ok(src.substr(s, 900).contains("TitlePolish.vignette"), "splash frames itself with the shared vignette")
+
+
+func test_wordmark_full_layers_in_order() -> void:
+	var ops := TitlePolish.wordmark_full(320.0, 90.0, 32, 1.0, 0.0, 0.0)
+	Runner.T.eq(String(ops[0]["k"]), "outline", "outline first")
+	Runner.T.ok(ops[ops.size() - 1]["col"].is_equal_approx(Color(TitlePolish.GOLD, 1.0)), "flat gold face last when static")
