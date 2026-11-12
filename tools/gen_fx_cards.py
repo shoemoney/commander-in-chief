@@ -35,6 +35,8 @@ SIZES = {
     "fx_muzzle_fan": 512, "fx_ring_02": 512, "fx_shadow": 512, "fx_shell_01": 512,
     "fx_smoke_01": 200, "fx_soft_spot": 512, "fx_sparkle": 512, "fx_swipe2": 2048,
     "fx_swipe_01": 1024, "fx_wind": 512,
+    # explosions pass: lumpy volumetric cards (alpha = silhouette, rgb = baked shading)
+    "fx_fireball": 256, "fx_billow": 256,
 }
 
 SS = 2  # supersample factor; everything is drawn big then LANCZOS'd down
@@ -244,7 +246,39 @@ def shell(n: int) -> Image.Image:
     return _finish(m, n, blur=0.4, rgb=grad)
 
 
+def cloud(n: int, seed: int, lumps: int, spread: float, core: float, lo: float, hi: float,
+          shade: float) -> Image.Image:
+    """Lumpy blob: summed gaussian lumps -> thresholded alpha. rgb carries baked shading
+    (denser = brighter, lit from the upper left) so a flat tint still reads as a volume."""
+    import numpy as np
+    rng = random.Random(seed)
+    ys, xs = np.mgrid[0:n, 0:n].astype(np.float32)
+    xs = (xs / (n - 1)) * 2.0 - 1.0
+    ys = (ys / (n - 1)) * 2.0 - 1.0
+    dens = np.exp(-((xs ** 2 + ys ** 2) / (core * core)))
+    for _ in range(lumps):
+        a = rng.random() * math.tau
+        d = spread * math.sqrt(rng.random())
+        r = rng.uniform(0.13, 0.30)
+        dens += np.exp(-(((xs - math.cos(a) * d) ** 2 + (ys - math.sin(a) * d) ** 2) / (r * r)))
+    win = np.clip(1.0 - np.hypot(xs, ys) ** 2, 0.0, 1.0)
+    dens = dens * win
+    alpha = np.clip((dens - lo) / (hi - lo), 0.0, 1.0)
+    alpha = alpha * alpha * (3.0 - 2.0 * alpha)
+    gy, gx = np.gradient(dens)
+    light = np.clip(0.5 + (gx + gy) * shade, 0.0, 1.0)
+    lum = np.clip(0.45 + 0.35 * np.clip(dens / max(dens.max(), 1e-6), 0, 1) + 0.35 * (light - 0.5), 0.0, 1.0)
+    rgba = np.zeros((n, n, 4), dtype=np.uint8)
+    rgba[..., 0] = rgba[..., 1] = rgba[..., 2] = (lum * 255).astype(np.uint8)
+    rgba[..., 3] = (alpha * 255).astype(np.uint8)
+    return Image.fromarray(rgba, "RGBA")
+
+
 def build(name: str, n: int) -> Image.Image:
+    if name == "fx_fireball":
+        return cloud(n, 7, 26, 0.62, 0.42, 0.5, 0.85, 14.0)
+    if name == "fx_billow":
+        return cloud(n, 23, 30, 0.64, 0.36, 0.5, 0.8, 14.0)
     if name == "fx_soft_spot":
         return _finish(radial(n, 0.02, 0.98, 2.0), n, blur=2.0)
     if name == "fx_shadow":

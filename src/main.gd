@@ -14565,7 +14565,9 @@ func _draw_sector_embers() -> void:
 ## EARLIER in _draw() to put blast bodies beneath the actors, so classifying inside
 ## _draw_fx() left the under-pass reading the PREVIOUS frame's index lists (empty
 ## on frame 1, so no explosion body would draw at all until frame 2).
+var _explo_polish := ExplosionsPolish.new()   # layered blasts + impact puffs (view-only)
 func _classify_fx() -> void:
+	_explo_polish.ingest(_fx, sim.events, sim.tick_count, _polish_wet)
 	_fx_alpha_idx.clear()
 	_fx_glow_idx.clear()
 	for i in _fx.size():
@@ -14589,18 +14591,14 @@ func _classify_fx() -> void:
 ## Only the BODY moves. The white-hot core, the debris, the smoke and the whole
 ## additive _draw_glow layer (its own _glow_root at z=20) stay above: a flash is
 ## light, light belongs on top, and moving them would cost more than it bought.
+func _polish_wet(x: int, y: int) -> bool:
+	return sim._in_water(x, y)
+
+
 func _draw_fx_under() -> void:
-	for idx in _fx_alpha_idx:
-		var fx := _fx[idx]
-		if fx["kind"] != "explosion":
-			continue
-		var pos := _to_screen(fx["x"], fx["y"])
-		if pos.y < -80.0 or pos.y > 440.0 or pos.x < -80.0 or pos.x > 720.0:
-			continue   # same cull the alpha pass uses — the body is world-anchored
-		var t: float = fx["t"]
-		var frame := mini(3, int(t * 4.0))
-		_spr(_EXPLO_NAMES[frame], pos, t * 2.0, 0.45 + t * 0.5,
-			Color(1, 1, 1, pow(1.0 - t, 1.5)))
+	# The old single explosion-card body is replaced by the layered blast (shockwave, cooling
+	# fireball, flung chunks, rolling smoke) in src/view/explosions_polish.gd.
+	_explo_polish.draw_under(self, _to_screen, sim.tick_count, _motion)
 
 
 func _draw_fx() -> void:
@@ -14901,6 +14899,7 @@ func _draw_glow() -> void:
 	# Vehicle fires: a flickering flame card over burning tanks and fresh wrecks —
 	# additive, so the fire lights the field. Stateless (frame-clock flicker).
 	var flick := 0.82 + 0.18 * sin(float(Engine.get_physics_frames()) * 0.55)
+	_explo_polish.draw_glow(g, _to_screen, sim.tick_count, _motion, _flash_strength())
 	# Hulk smolder (6v panel: the pulsing rect frame read as a debug gizmo):
 	# live cover now smolders DIEGETICALLY — a warm additive bed + hash-
 	# flickering embers along the hull, all fading out over the last 3s so
@@ -15119,8 +15118,21 @@ func _draw_scorch() -> void:
 		draw_set_transform(pos, float(int(s["x"]) % 360) * 0.01745, Vector2.ONE)
 		draw_texture_rect(Art.tex("fx_groundbreak"), Rect2(-gr, -gr, gr * 2.0, gr * 2.0), false, Color(0.16, 0.13, 0.1, a * 1.15))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-		Art.circle(self, pos, s["r"], Color(0.12, 0.1, 0.08, a))
-		Art.circle(self, pos, s["r"] * 0.6, Color(0.05, 0.04, 0.03, a))
+		# Seated IN the ground: a lighter ring of churned earth thrown out around the pit, then
+		# soft irregular char lobes (not hard discs) darkening toward the centre.
+		var sk: int = absi(int(s["x"]) / 3 + int(s["y"]) / 5)
+		var rim_r: float = s["r"] * 1.45
+		draw_texture_rect(Art.tex("fx_ring"), Rect2(pos - Vector2.ONE * rim_r, Vector2.ONE * rim_r * 2.0),
+			false, Color(0.5, 0.4, 0.28, a * 0.9))
+		var soft_t := Art.tex("fx_softspot")
+		for k in 4:
+			var lo: Vector2 = Vector2.from_angle(ExplosionsPolish.hash01(sk, k) * TAU) * s["r"] * 0.3 * ExplosionsPolish.hash01(sk, 9 + k)
+			var lr: float = s["r"] * (0.8 + 0.35 * ExplosionsPolish.hash01(sk, 19 + k))
+			draw_texture_rect(soft_t, Rect2(pos + lo - Vector2.ONE * lr, Vector2.ONE * lr * 2.0),
+				false, Color(0.1, 0.085, 0.07, a * 1.25))
+		var cr2: float = s["r"] * 0.65
+		draw_texture_rect(soft_t, Rect2(pos - Vector2.ONE * cr2, Vector2.ONE * cr2 * 2.0),
+			false, Color(0.04, 0.03, 0.025, a * 1.4))
 		if s.get("crack", false):
 			# Radial fracture lines, stable per-decal via the stored seed.
 			var sd: int = s.get("seed", 0)
