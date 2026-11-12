@@ -116,11 +116,30 @@ func test_reticle_ident_hurt_downed_shapes() -> void:
 
 func test_wired_through_real_main() -> void:
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
-	var body := src.substr(src.find("func _draw_players()"))
+	var body := src.substr(src.find("func _draw_players_under()"))
 	body = body.substr(0, body.find("\nfunc _coin_trail"))
 	for needle in ["_polish.observe(", "_polish.draw_ground(", "_polish.draw_flash(",
 			"PlayerPolish.reticle_segments(", "PlayerPolish.downed_marker(", "PlayerPolish.hurt_look(", "PlayerPolish.marker_segments(", "PlayerPolish.KEYLINE_OFFSETS"]:
-		Runner.T.ok(body.contains(needle), "_draw_players calls " + needle)
+		Runner.T.ok(body.contains(needle), "the player draw passes call " + needle)
 	var m := Main.new()
 	Runner.T.ok(m.get("_polish") is PlayerPolish, "main holds a PlayerPolish")
 	m.free()
+
+
+func test_player_light_and_shade_draw_under_enemy_bullets() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var d := src.substr(src.find("func _draw() -> void:"))
+	d = d.substr(0, d.find("\nfunc ", 10))
+	var i_under := d.find("_draw_players_under()")
+	var i_proj := d.find("_draw_projectiles()")
+	var i_over := d.find("\t_draw_players()")
+	Runner.T.ok(i_under >= 0 and i_under < i_proj, "the under pass runs before _draw_projectiles")
+	Runner.T.ok(i_proj < i_over, "the sprite pass runs after the projectiles")
+	var under := src.substr(src.find("func _draw_players_under()"))
+	under = under.substr(0, under.find("\nfunc _draw_players()"))
+	for needle in ["_polish.draw_ground(", "_polish.draw_flash(", "Vector2(42, 42)", "Vector2(26, 11)"]:
+		Runner.T.ok(under.contains(needle), "under pass owns " + needle)
+	var over := src.substr(src.find("\nfunc _draw_players()"))
+	over = over.substr(0, over.find("\nfunc _coin_trail"))
+	for needle in ["_polish.draw_ground(", "_polish.draw_flash(", "Vector2(42, 42)", "Vector2(26, 11)", "_polish.observe("]:
+		Runner.T.ok(not over.contains(needle), "over pass no longer draws " + needle)

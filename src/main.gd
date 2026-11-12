@@ -9746,6 +9746,7 @@ func _draw() -> void:
 	draw_set_transform_matrix(get_transform().affine_inverse())
 	_draw_field_dim()
 	draw_set_transform_matrix(Transform2D())
+	_draw_players_under()
 	_draw_projectiles()
 	_draw_players()
 	# Deal the top-center message band BEFORE the fx pass: world toasts are held below it
@@ -13939,12 +13940,38 @@ static func _cactus_instance(h2: int) -> Dictionary:
 var _polish := PlayerPolish.new()   # hero presence: muzzle flash, brass, dust, reticle overlay (view-only, see player_polish.gd)
 
 
-func _draw_players() -> void:
+## UNDER pass, drawn BEFORE _draw_projectiles(): everything that is light or shade on the
+## ground around a soldier (dust, brass, muzzle pool, contact shadow, identity glow, flash
+## cone). Enemy bullets are one-hit kills, so nothing of ours may veil them in their last
+## 20-36 px; _draw_players keeps only the keylined sprite, markers and reticle.
+func _draw_players_under() -> void:
 	var pp_water: Array = []
 	for pw in sim.players:
 		pp_water.append(sim._in_water(pw["x"], pw["y"]))
 	_polish.observe(sim.players, sim.tick_count, _motion, pp_water)
 	_polish.draw_ground(self, float(sim.camera_top) * PX, Art.tex("fx_softspot"), sim.players, _flash_strength())
+	for i in sim.players.size():
+		var p := sim.players[i]
+		if p["in_tank"] >= 0 or not p["alive"]:
+			continue
+		var pos := _to_screen(p["x"], p["y"]) + (_recoil[i] if i < _recoil.size() else Vector2.ZERO) + (_hit_flinch[i] if i < _hit_flinch.size() else Vector2.ZERO)
+		var body_a := 1.0
+		if p["roll_ticks"] > 0:
+			body_a = 0.85
+		elif p["hurt_iframes"] > 0:
+			body_a = 0.7 if _motion < 0.5 else (0.4 if _safe_strobe(p["hurt_iframes"]) else 1.0)
+		var da_u: float = _down_anim[i] if i < _down_anim.size() else 0.0
+		if da_u > 0.0:
+			body_a = lerpf(body_a, 0.6, 1.0 - pow(1.0 - da_u, 3.0))
+		var pp_id := _player_ident_color(i, 1.0)
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-13, 1), Vector2(26, 11)), false,
+			Color(0, 0, 0, 0.55 * body_a))
+		draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-21, -19), Vector2(42, 42)), false,
+			Color(pp_id.r, pp_id.g, pp_id.b, 0.6 * body_a))
+		_polish.draw_flash(self, i, pos, _flash_strength())
+
+
+func _draw_players() -> void:
 	for i in sim.players.size():
 		var p := sim.players[i]
 		if p["in_tank"] >= 0:
@@ -14175,18 +14202,13 @@ func _draw_players() -> void:
 			# colorblind-safe ident color) so co-op heroes read apart at a glance — the
 			# ring was the only differentiator; the pale-white bodies were identical.
 			mod = mod * _body_ident_lean(i)
-			# Presence stack under the body: contact shadow, strong identity glow, 1px dark keyline.
+			# 1px dark keyline (contact shadow + identity glow now live in _draw_players_under).
 			var pp_id := _player_ident_color(i, 1.0)
-			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-13, 1), Vector2(26, 11)), false,
-				Color(0, 0, 0, 0.55 * mod.a))
-			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-21, -19), Vector2(42, 42)), false,
-				Color(pp_id.r, pp_id.g, pp_id.b, 0.6 * mod.a))
 			for pk in PlayerPolish.KEYLINE_OFFSETS:
 				_spr_texture(Art.player_anim(anim_state), tex_name, pos - Vector2(0, idle_bob) + pk,
 					angle, 0.58, Color(0, 0, 0, 0.9 * mod.a), 1.0, PLAYER_POSE_X_STRETCH, false)
 			_spr_texture(Art.player_anim(anim_state), tex_name, pos - Vector2(0, idle_bob),
 				angle, 0.58, mod, 1.0, PLAYER_POSE_X_STRETCH)
-			_polish.draw_flash(self, i, pos, _flash_strength())
 			var pp_hurt := PlayerPolish.hurt_look(_polish.hurt_age[i] if i < _polish.hurt_age.size() else -1, _flash_strength())
 			if not pp_hurt.is_empty():
 				Art.arc(self, pos, pp_hurt["r"], 0, TAU, 20, pp_hurt["ring"], 2.0)
