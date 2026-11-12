@@ -4,7 +4,7 @@ render_mode blend_mix;
 // Subtle arcade scanlines for the 640x360 integer-scaled frame: odd rows darken
 // a touch, even rows pass through untouched. No screen reads, fixed math only —
 // renders identically on gl_compatibility (screenshot/movie backend) and Forward+.
-uniform float strength : hint_range(0.0, 0.3) = 0.08;
+uniform float strength : hint_range(0.0, 0.3) = 0.02;
 // Radial vignette folded into the same pass: darkens corners past ~55% of the
 // half-diagonal. max() with the scanline alpha so neither effect stacks double.
 uniform float vignette_strength : hint_range(0.0, 0.5) = 0.18;

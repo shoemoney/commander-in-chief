@@ -27,6 +27,10 @@ uniform vec3 look_lift = vec3(0.0);
 uniform vec3 look_gamma = vec3(1.0);
 uniform vec3 look_gain = vec3(1.0);
 uniform float look_sat : hint_range(0.0, 2.0) = 1.0;
+// Master de-murk (src/view/grade_polish.gd holds the CPU twin and feeds these).
+uniform float black_point : hint_range(0.0, 0.2) = 0.0;
+uniform float contrast : hint_range(0.0, 1.0) = 0.0;
+uniform float sat_boost : hint_range(0.5, 1.6) = 1.0;
 
 void fragment() {
 	vec3 c = texture(screen_tex, SCREEN_UV).rgb;
@@ -39,11 +43,19 @@ void fragment() {
 
 	// (2) A whisper of shared warmth lifted into the SHADOWS only (amber in the darks),
 	// so the whole game feels lit by one warm key — strongest where luma is low.
-	g += vec3(0.030, 0.014, -0.010) * (1.0 - luma);
+	g += vec3(0.006, 0.003, -0.002) * (1.0 - luma);
 
 	// (3) ~6% global desaturation toward luma — pulls the hue-islands a touch closer
 	// to one film. Small on purpose: biome hue contrast must survive.
 	g = mix(g, vec3(luma), 0.06);
+
+	// (3a) De-murk: a real black point (no lifted blacks), an S-curve for midtone
+	// separation, then a saturation boost so colour is richer. Scaled by `grade`.
+	g = max(g - vec3(black_point), vec3(0.0)) / (1.0 - black_point);
+	vec3 sc = g * g * (3.0 - 2.0 * g);
+	g = mix(g, sc, contrast);
+	float gl = dot(g, vec3(0.299, 0.587, 0.114));
+	g = mix(vec3(gl), g, sat_boost);
 
 	// Master scale (grade=0 -> untouched original).
 	c = mix(c, g, grade);

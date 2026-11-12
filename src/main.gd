@@ -1007,6 +1007,7 @@ func _setup_screen_fx() -> void:
 	_grade_mat = ShaderMaterial.new()
 	_grade_mat.shader = load("res://src/view/grade.gdshader")
 	grade_rect.material = _grade_mat
+	GradePolish.push(_grade_mat)
 	fx_layer.add_child(grade_rect)
 	# Always-on subtle scanlines: the frame is explicitly framed as an arcade
 	# cabinet — sell it. Cheap fixed-math shader, no screen reads, both backends.
@@ -9059,7 +9060,7 @@ const DIRT_PATCH_PHASES := [[0.0, 1.3, 2.9], [2.1, 0.4, 4.4], [4.0, 3.1, 0.7], [
 # eye resolves instantly in a frame full of warm browns and white fireballs.
 const LETHAL_BOLT := Color(1.0, 0.22, 0.82)
 const LETHAL_BOLT_TINT := Color(1.15, 0.72, 1.05)
-const SCANLINE_BASE := 0.04
+const SCANLINE_BASE := 0.015
 const SCANLINE_SURGE := 0.12
 const GROUND_SHADE := 0.522
 # The pitch of the opaque sand BASE, in screen px — deliberately NOT 64 and not
