@@ -9821,8 +9821,6 @@ func _draw_field_dim() -> void:
 	# NIGHT OPS mutator: dim the field to a blue dusk so the tracers, muzzle
 	# flashes and threat markers become your eyes. No hit-radius change — the
 	# challenge is visibility, not fairness.
-	if not (sim.mode == "endless" and sim.has_mod(5)):
-		AtmospherePolish.draw_vignette(self, _atmosphere_sector())
 	if sim.mode == "endless" and sim.has_mod(5):
 		# wash-exempt: NIGHT OPS is a LIGHTING state, not a transient wash — dimming the whole
 		# field (centre included) IS the mutator, and it darkens rather than veils.
@@ -14602,6 +14600,12 @@ func _draw_atmosphere_over() -> void:
 	# A handful of faint foreground specks above the actors, below telegraphs.
 	Atmosphere.draw(self, Atmosphere.plan(_atmosphere_sector(), int(Engine.get_physics_frames()),
 		_motion, -_to_screen(0, 0).y, Atmosphere.Layer.OVER))
+	# Sector-tinted edge vignette (~0.06, edge-only card, wash-exempt like the base one). Drawn here,
+	# after every actor and projectile, so it never darkens an enemy more than a bullet or a player.
+	if not (sim.mode == "endless" and sim.has_mod(5)):
+		draw_set_transform_matrix(get_transform().affine_inverse())
+		AtmospherePolish.draw_vignette(self, _atmosphere_sector())
+		draw_set_transform_matrix(Transform2D())
 
 
 func _atmosphere_sector() -> int:
