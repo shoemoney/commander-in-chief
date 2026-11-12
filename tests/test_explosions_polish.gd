@@ -82,3 +82,4 @@ func test_real_main_classify_pass_feeds_the_module() -> void:
 	Runner.T.eq(main._explo_polish.blasts.size(), 1, "main._classify_fx registers the blast once")
 	Runner.T.eq(main._explo_polish.puffs.size(), 1, "main._classify_fx turns the kill event into a death puff")
 	Runner.T.ok(main._fx[0].has("pf"), "the fx entry is flagged as taken")
+	main.free()
