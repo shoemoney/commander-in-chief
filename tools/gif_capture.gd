@@ -11,9 +11,12 @@ extends SceneTree
 ##                mouth instead of grinding from gate 1. This is what makes four clips show four
 ##                LEVELS rather than four takes of sector 1.
 ##   GIF_MODE     "endless" -> start_game(true). Ignored when GIF_CHAPTER is set.
+##                "title" -> start nothing; capture the title screen (wins over GIF_CHAPTER).
 ##   GIF_SKIP     frames to run before capturing, so the clip opens mid-firefight and not on a
 ##                spawn. Too small and you capture a soldier walking: 120 measured score=0.
 ##   GIF_FRAMES   frames to run while capturing.  GIF_EVERY  capture every Nth (2 = 30fps).
+##   GIF_DEADLINE_S  wall-clock abort, default 120. A loaded box under software GL can need far
+##                more for the same frames; the sim is fixed-step, so a slow capture is still exact.
 ##
 ## ⚠️ NEEDS A GL CONTEXT. No --headless, or every frame is black.
 ##
@@ -42,14 +45,15 @@ var shot := 0
 var _last_report_ms := 0
 var _capture_started_ms := 0
 var _finishing := false
+var _deadline_ms := 120000   # wall clock; GIF_DEADLINE_S raises it on a loaded or software-GL box
 
 func _process(_delta: float) -> bool:
 	if not _finishing and main != null:
 		# macOS may suppress the automatic render loop for an occluded window.
 		# Defer until scene processing and queued canvas redraws have completed.
 		_force_capture_draw.call_deferred()
-		if Time.get_ticks_msec() - _capture_started_ms > 120000:
-			push_error("gif_capture: capture exceeded the 120-second deadline")
+		if Time.get_ticks_msec() - _capture_started_ms > _deadline_ms:
+			push_error("gif_capture: capture exceeded the %d-second deadline" % (_deadline_ms / 1000))
 			_finish(1)
 	if OS.get_environment("GIF_DIAGNOSTICS") == "1" and Time.get_ticks_msec() - _last_report_ms >= 2000:
 		_last_report_ms = Time.get_ticks_msec()
@@ -85,6 +89,7 @@ func _initialize() -> void:
 	skip = _env_i("GIF_SKIP", 240)
 	total = _env_i("GIF_FRAMES", 180)
 	every = maxi(1, _env_i("GIF_EVERY", 2))
+	_deadline_ms = maxi(1, _env_i("GIF_DEADLINE_S", 120)) * 1000
 	if skip < 0 or total < every or not DirAccess.dir_exists_absolute(out_dir):
 		push_error("gif_capture: require an existing SHOT_DIR, nonnegative GIF_SKIP and GIF_FRAMES >= GIF_EVERY")
 		quit(1)
@@ -108,11 +113,15 @@ func _run() -> void:
 	await RenderingServer.frame_post_draw
 	_kill_splash()
 	var chapter := _env_i("GIF_CHAPTER", 0)
-	if chapter > 0:
+	var mode := OS.get_environment("GIF_MODE")
+	if mode == "title":
+		pass   # stay on the title screen: the clip is the front door itself
+	elif chapter > 0:
 		main.start_arcade(chapter)
+		main.demo_autoplay = true   # scripted bot: marches north, fires, grenades, boards tanks
 	else:
-		main.start_game(OS.get_environment("GIF_MODE") == "endless")
-	main.demo_autoplay = true   # scripted bot: marches north, fires, grenades, boards tanks
+		main.start_game(mode == "endless")
+		main.demo_autoplay = true
 	var f := 0
 	while f < skip:
 		await process_frame   # re-arm after the preceding post-draw signal has unwound
