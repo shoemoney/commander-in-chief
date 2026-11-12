@@ -13,7 +13,7 @@ and `docs/steam-store/owner-review.md` before release or redistribution.
 
 | Path | Files | Source | License |
 |---|---|---|---|
-| `assets/art/ui/` `hud/` `icons/` | 108 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py` (incl. `ui/menuicons/medal_flawless` + `medal_swift` + `medal_hoarder`, the service-record sector medals; `icons/icon_flame` + `icons/icon_rocket`, the special-weapon chip and capsule art), `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code) |
+| `assets/art/ui/` `hud/` `icons/` | 108 | Procedurally generated — `tools/gen_ui_chrome.py`, `gen_ui_icons.py` (incl. `ui/menuicons/medal_flawless` + `medal_swift` + `medal_hoarder`, the service-record sector medals; `icons/icon_flame` + `icons/icon_rocket`, the special-weapon chip and capsule art), `gen_ui_glyphs.py`, `gen_fx_cards.py` | Project-owned (MIT alongside the code); menu bezel `hud/SPR_HUD_Frame_Lrg` + `_Underlay` re-coloured (brass rail on ink-outlined olive steel, same keyline geometry) by `gen_ui_chrome.py` for the shared menu chrome |
 | `assets/fontawesome/solid/` | 24 SVGs | Official Font Awesome Free 6.7.2, Fonticons, Inc. Sources and hashes in `assets/fontawesome/manifest.json`. Runtime fill changed to white. | Icons CC BY 4.0, retained `assets/fontawesome/LICENSE.txt`; attribution to [Font Awesome](https://fontawesome.com/) |
 | `assets/art/ui/title_logo.png` | 1 | Generative AI, **service/model/date unrecorded** | Project-owned **unverified** |
 | `assets/art/fx/` | 23 | Procedurally generated — `tools/gen_fx_cards.py` (incl. `fx_fireball` + `fx_billow`, the lumpy volumetric blast and smoke cards drawn by `src/view/explosions_polish.gd`; regenerate with `--only`) | Project-owned |

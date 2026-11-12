@@ -10,8 +10,8 @@ const BRASS_HI := Color(1.0, 0.95, 0.72)        # focus ring core / specular
 const BRASS_DIM := Color(0.62, 0.52, 0.28, 0.85)  # resting trim
 const CHROME_TINT := Color(0.70, 0.62, 0.42)    # multiplied into the frame + ambience on EVERY screen
 const PLATE_REST := Color(0.36, 0.43, 0.36, 0.9)  # resting button slab: darker steel-green than the old lime
-const HI_EDGE := Color(1.0, 1.0, 0.92, 0.26)    # bevel light edge
-const LO_EDGE := Color(0.0, 0.0, 0.0, 0.38)     # bevel shade edge
+const HI_EDGE := Color(1.0, 1.0, 0.92, 0.5)    # bevel light edge
+const LO_EDGE := Color(0.0, 0.0, 0.0, 0.6)     # bevel shade edge
 const DROP := Color(0.0, 0.0, 0.0, 0.42)        # 1px contact shadow under a plate
 
 
@@ -51,7 +51,27 @@ static func shadow_rect(b: Rect2, pressed: bool) -> Rect2:
 	return Rect2(b.position.x + 3.0, b.end.y, b.size.x - 6.0, 1.0)
 
 
+## Body shading: a lit upper half and a shaded lower half (flipped when pressed), so a
+## resting plate reads as a domed key at 640x360 and not a flat slab.
+static func body_rects(b: Rect2, pressed: bool, disabled: bool) -> Array:
+	var inner := Rect2(b.position.round(), b.size.round()).grow(-2.0)
+	if inner.size.x < 12.0 or inner.size.y < 8.0:
+		return []
+	var half := floorf(inner.size.y / 2.0)
+	var k := 0.5 if disabled else 1.0
+	var lit := Color(1.0, 1.0, 0.9, 0.13 * k)
+	var dim := Color(0.0, 0.0, 0.0, 0.2 * k)
+	if pressed and not disabled:
+		var t := lit
+		lit = dim
+		dim = t
+	return [{"r": Rect2(inner.position, Vector2(inner.size.x, half)), "c": lit},
+		{"r": Rect2(inner.position.x, inner.position.y + half, inner.size.x, inner.size.y - half), "c": dim}]
+
+
 static func draw_plate_depth(ci: CanvasItem, b: Rect2, selected: bool, pressed: bool, disabled: bool) -> void:
+	for e in body_rects(b, pressed, disabled):
+		ci.draw_rect(e["r"], e["c"])
 	var sh := shadow_rect(b, pressed)
 	if sh.size.x > 0.0:
 		ci.draw_rect(sh, DROP)

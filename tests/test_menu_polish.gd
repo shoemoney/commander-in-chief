@@ -51,3 +51,12 @@ func test_every_framed_screen_wears_the_one_chrome_through_the_real_draw() -> vo
 	stub.free()
 	Runner.T.eq(tints.size(), 1, "every framed screen shares ONE frame tint")
 	Runner.T.ok(rules >= 2, "framed screens draw the shared header rule via the real draw (%d)" % rules)
+
+
+func test_plate_body_is_domed_and_flips_when_pressed() -> void:
+	var b := Rect2(100, 100, 200, 22)
+	var up: Array = MenuPolish.body_rects(b, false, false)
+	var dn: Array = MenuPolish.body_rects(b, true, false)
+	Runner.T.eq(up.size(), 2, "plate body has a lit half and a shaded half")
+	Runner.T.ok(up[0]["c"].a > 0.0 and up[0]["c"].r > up[1]["c"].r, "resting plate is lit on top, shaded below")
+	Runner.T.ok(dn[0]["c"].r < dn[1]["c"].r, "pressed plate swaps to shaded top, lit bottom")

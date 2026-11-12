@@ -3966,9 +3966,11 @@ func _draw_content_frame() -> void:
 	# below still says WHICH screen. MODE_CHROME's per-mode hue no longer drives the paint.
 	var tint: Color = MenuPolish.CHROME_TINT
 	_draw_menu_ambience(border, tint)
+	# The bezel art is authored in its final brass-on-steel colours (gen_ui_chrome.py), so it is
+	# drawn untinted; the underlay is only a quiet dark shadow rail behind it.
 	_draw_frame_nine("ui_frame_lrg_under", content_frame_under_rect(mode),
-		Color(FRAME_UNDER_TINT * tint, FRAME_UNDER_TINT.a * _open_t))
-	_draw_frame_nine("ui_frame_lrg", content_frame_rect(mode), Color(FRAME_TINT * tint, _open_t))
+		Color(1.0, 1.0, 1.0, 0.5 * _open_t))
+	_draw_frame_nine("ui_frame_lrg", content_frame_rect(mode), Color(1.0, 1.0, 1.0, _open_t))
 	# The mode tab: a small dark plate straddling the frame's top keyline,
 	# carrying the screen's codename stencil — the title-plate idiom menus
 	# already speak, so the screen names itself before a word of content reads.
@@ -3985,7 +3987,7 @@ func _draw_content_frame() -> void:
 		_emit_rect(plate, Color(0.05, 0.06, 0.05, 0.92 * _open_t))
 		_emit_stamp(tag, Vector2(320.0 - tw / 2.0, border.position.y + 4.0),
 			Color(MenuPolish.BRASS, _open_t), Art.fs(HudIcons.TYPE_MICRO))
-	if mode != Mode.HALL and mode != Mode.HOWTO:
+	if mode != Mode.HALL and mode != Mode.HOWTO and not mode_is_compact(mode):
 		# One header ornament under the title block, the same on every row-column screen.
 		var ry := mode_header_bottom(mode) + (6.0 if mode_is_compact(mode) else 7.0)
 		for e in MenuPolish.header_rule_rects(320.0, ry, 96.0, MenuPolish.ease_open(_open_t, main._motion if main != null else 1.0), mode_is_compact(mode)):

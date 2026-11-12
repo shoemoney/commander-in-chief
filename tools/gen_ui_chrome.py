@@ -500,7 +500,35 @@ def frame_lrg(w, h):
         ox = cx - (lw * 1.0) * sx
         d.line([(cx, oy), (cx + arm * sx, oy)], fill=255, width=aw)
         d.line([(ox, cy), (ox, cy + arm * sy)], fill=255, width=aw)
-    return _weather(_down(m, w, h, blur=0.25), seed=17)
+    return _bezel_paint(_down(m, w, h, blur=0.25), seed=17)
+
+
+def _bezel_paint(im: Image.Image, seed: int) -> Image.Image:
+    """Designed bezel colour: crisp ink outline, a bright brass rail either side of a
+    dark olive steel core. Colour keys off the pixel's depth inside the stroke (erosion
+    passes), so the keyline, rivets and corner arms all get the same machined channel.
+    Alpha keeps a light grain (the weathering ratchets want it) but colour stays clean."""
+    w, h = im.size
+    a = im.getchannel("A")
+    solid = a.point(lambda v: 255 if v > 110 else 0)
+    depth = [solid]
+    for _ in range(4):
+        depth.append(depth[-1].filter(ImageFilter.MinFilter(3)))
+    dp = [d.load() for d in depth]
+    px = im.load()
+    ink, brass, core, core2 = (22, 20, 12), (236, 196, 96), (112, 112, 78), (86, 88, 60)
+    for y in range(h):
+        for x in range(w):
+            r, g, b, al = px[x, y]
+            if al == 0:
+                continue
+            lvl = sum(1 for i in range(1, 5) if dp[i][x, y] > 0)  # 0 = edge .. 4 = deep
+            n = (((x * 73856093) ^ (y * 19349663) ^ (seed * 83492791)) & 0xFFFF) / 65535.0
+            c = ink if lvl == 0 else brass if lvl == 1 else (core if lvl == 2 else core2)
+            k = 0.92 + 0.16 * n
+            px[x, y] = (min(255, int(c[0] * k)), min(255, int(c[1] * k)),
+                        min(255, int(c[2] * k)), int(al * (1.0 - 0.14 * n)))
+    return im
 
 
 def frame_underlay(w, h):
@@ -514,7 +542,7 @@ def frame_underlay(w, h):
                    (S * 0.05, S * 0.5), (S * 0.95, S * 0.5)):
         d.rectangle([cx - g, cy - g, cx + g, cy + g], fill=0)
     return _weather(_down(m, w, h, blur=0.25), seed=53,
-                    hi=(238, 240, 232), lo=(150, 156, 140), amp=0.20)
+                    hi=(120, 112, 70), lo=(70, 66, 40), amp=0.20)
 
 
 def reticle_bracket(w, h):
