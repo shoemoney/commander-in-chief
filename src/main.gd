@@ -10671,6 +10671,7 @@ func _draw_foundry_arena() -> void:
 	# arc under a dashed hazard arc, which reads over molten orange.
 	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
 		var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
+		BossesPolish.draw_arena_scrim(self, cpos, _motion)
 		var ph: int = sim.colossus_phase()
 		var ir := float(SimWorld.COLOSSUS_RING_INNER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
 		var ra := 0.65 + 0.2 * Art.pulse(0.05)
@@ -11977,6 +11978,7 @@ func _draw_tanks() -> void:
 		# Contact shadow FIRST (footprint-derived — the old hand-tuned r=15.0
 		# ellipse ended 10px ABOVE the hull base, fully buried): it must sit
 		# under the board/crush rings below, not wash over them.
+		BossesPolish.draw_tracks(self, self, ti)
 		_vehicle_contact_shadow(c, "tank_body", Color(0.0, 0.03, 0.0))
 		# Convoy graveyard: a dead hulk slumps beside a PARKED tank (position is
 		# stable only while unoccupied), so the boardable reads as the last
@@ -12013,6 +12015,8 @@ func _draw_tanks() -> void:
 				hull = lerp_angle(hull, dv.angle() + PI / 2, 0.10)
 				_tank_hull[ti] = hull
 			_tank_prev[ti] = Vector2(t["x"], t["y"])
+			if not t["burning"]:
+				BossesPolish.push_track(ti, t["x"], t["y"], hull)
 		_spr("tank_body", c, hull, VEHICLE_CONTACT["tank_body"]["call_scale"], burn_mod)
 		# Barrel follows the driver's aim, eased like everything else that turns
 		# (player 0.35, enemies 0.18, hull 0.10) — raw _aim_angle snapped the
@@ -12030,6 +12034,9 @@ func _draw_tanks() -> void:
 		var br_t := float(t["fire_cd"]) / float(SimWorld.TANK_FIRE_COOLDOWN_TICKS)
 		var brecoil := br_t * br_t * 4.0
 		_spr("tank_barrel", c + Vector2.from_angle(barrel_angle) * (10.0 - brecoil), barrel_angle + PI / 2, 0.62, burn_mod)
+		if t["occupant"] >= 0 and not t["burning"]:
+			BossesPolish.draw_exhaust(self, c, hull, _motion)
+		BossesPolish.draw_damage(self, c, BossesPolish.tank_wound(t), 14.0, _motion, ti)
 		# Low-fuel telegraph: sputter smoke + warning before the ignite, so a
 		# cruising tank doesn't abruptly become 'on fire, 3s to live'.
 		if not t["burning"] and t["occupant"] >= 0 and t["fuel"] < 300:
@@ -13425,6 +13432,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# only if the gunship is ever fought at the hot end (matches the colossus rule).
 	_vehicle_contact_shadow(bpos, body_tex,
 		Color(0.0, 0.03, 0.0).lerp(Color(0.02, 0.02, 0.05), smoothstep(0.6, 1.0, _sector_march())))
+	BossesPolish.draw_heli_shadow(self, bpos, 34.0, _bf * 0.05 + float(slot), _motion)
 	# Mortar-phase warning: the hull flashes red while volleys are near
 	# (act two runs phase_t 120..299 of the 300-tick cycle; see BOSS_STRAFE_TICKS).
 	var pt: int = boss["phase_t"]
@@ -13475,13 +13483,8 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# Chin turret: real bake now (was a 4x4 blank). PI matches the hull so the
 	# muzzle points down-screen at the players, same convention as the colossus.
 	_spr("gunship_barrel", bpos + Vector2(0, 18), PI, 1.3, hull_mod)
-	# Rotor blur.
-	var rt := float(Engine.get_physics_frames()) * 0.9
-	for i in 2:
-		var a := rt + i * PI / 2
-		Art.line(self, bpos - Vector2.from_angle(a) * 42.0, bpos + Vector2.from_angle(a) * 42.0,
-			Color(0.85, 0.85, 0.85, 0.5), 3.0)
-	Art.circle(self, bpos, 5.0, Color(0.3, 0.3, 0.35))
+	# Rotor blur: translucent disc + swept blade fan, hub on top (BossesPolish).
+	BossesPolish.draw_rotor(self, bpos, 42.0, _motion)
 	# a1-01 hit BLOOM: a heavier white flash bloom on _boss_flash — drawn last so
 	# it sits on the full silhouette (hull + chin + rotor), not under the blades.
 	if _boss_flash > 0.01:
@@ -13491,6 +13494,7 @@ func _draw_one_gunship(boss: Dictionary, label: String, slot: int, body_tex := "
 	# exact for any scaling without duplicating the sim's spawn formula.
 	_boss_hpmax[bkey] = maxf(_boss_hpmax.get(bkey, 1.0), float(boss["hp"]))
 	var bfrac := minf(1.0, float(boss["hp"]) / _boss_hpmax[bkey])
+	BossesPolish.draw_damage(self, bpos, 1.0 - bfrac, 30.0, _motion, slot)
 	_boss_wounds(bpos, 1.0 - bfrac, 34.0)   # a3-11: hp-keyed hull damage — the gunship hull/barrel/rotor/core were all drawn above; this overlays on top
 	# Fixed top-center HUD slot (mirrors the colossus's fixed bottom-center
 	# bar, ~1618): the boss's screen pos can sit above the held camera or
@@ -13637,6 +13641,7 @@ func _draw_colossus() -> void:
 	# transform-cancel below flips to screen space (the same fraction the bar uses).
 	_boss_wounds(cbody, 1.0 - float(sim.colossus["hp"]) / float(sim.colossus.get("max_hp", SimWorld.COLOSSUS_HP)), 40.0)
 	# Turret warm-up: barrel tips glow brighter as the next spray approaches.
+	BossesPolish.draw_damage(self, cbody, 1.0 - float(sim.colossus["hp"]) / float(sim.colossus.get("max_hp", SimWorld.COLOSSUS_HP)), 44.0, _motion)
 	var warm := 1.0 - float(sim.colossus["spray_cd"]) / float(SimWorld.COLOSSUS_SPRAY_CD_TICKS)
 	for bx in [-24.0, 24.0]:
 		Art.circle(self, cpos + Vector2(bx, 34.0), 2.0 + warm * 3.5,
@@ -15238,23 +15243,9 @@ func _draw_telegraphs() -> void:
 
 func _draw_bar(rect: Rect2, frac: float, fill := Color(0.85, 0.25, 0.18),
 		ghost := -1.0, ticks := 0) -> void:
-	## Sprite-framed progress bar: dark well, draining ghost chip, colored
-	## fill, phase-threshold ticks, metal frame on top.
-	var inset := Vector2(rect.size.x * 0.06, rect.size.y * 0.22)
-	var well := Rect2(rect.position + inset, rect.size - inset * 2.0)
-	draw_rect(well, Color(0.08, 0.07, 0.06, 0.9))
-	var fw := well.size.x
-	frac = clampf(frac, 0.0, 1.0)
-	# Ghost chip: the recently-lost HP lingers as a pale chunk, then catches up.
-	if ghost > frac:
-		draw_rect(Rect2(well.position + Vector2(fw * frac, 0),
-			Vector2(fw * (ghost - frac), well.size.y)), Color(1.0, 0.9, 0.6, 0.5))
-	draw_rect(Rect2(well.position, Vector2(fw * frac, well.size.y)), fill)
-	# Phase ticks: thirds/halves so the fight's structure is legible.
-	for k in range(1, ticks):
-		var tx := well.position.x + fw * float(k) / float(ticks)
-		Art.line(self, Vector2(tx, well.position.y), Vector2(tx, well.position.y + well.size.y),
-			Color(0.05, 0.04, 0.03, 0.8), 1.0)
+	## Boss/phase bar: dark well, damage-lag ghost chip, heat-shifting gradient fill,
+	## phase pips and gold end caps (BossesPolish.draw_bar), metal frame on top.
+	BossesPolish.draw_bar(self, rect, frac, fill, ghost, ticks, _motion)
 	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false)
 
 

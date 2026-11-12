@@ -47,6 +47,7 @@ static func draw(m, boss: Dictionary, slot: int) -> void:
 	_draw_lane(m, boss)
 	_draw_fan(m, boss)
 	var ang := hull_angle(boss)
+	BossesPolish.draw_tracks(m, m, "siege", 1.6)
 	var face := Vector2(float(boss["fx"]), float(boss["fy"])) * PX
 	m._ground_shadow(c + Vector2(0, 6), 30.0, 0.38)
 	var mod := Color(1.12, 0.92, 0.82)
@@ -63,6 +64,9 @@ static func draw(m, boss: Dictionary, slot: int) -> void:
 	var bkey := "boss%d" % boss["gate_y"]
 	m._boss_hpmax[bkey] = maxf(m._boss_hpmax.get(bkey, 1.0), float(boss["hp"]))
 	var bfrac := minf(1.0, float(boss["hp"]) / m._boss_hpmax[bkey])
+	BossesPolish.push_track("siege", boss["x"], boss["y"], ang)
+	BossesPolish.draw_exhaust(m, c, ang, m._motion, 1.6)
+	BossesPolish.draw_damage(m, c, 1.0 - bfrac, 30.0, m._motion, 3)
 	m._boss_wounds(c, 1.0 - bfrac, 30.0)
 	# pt = -1: no mortar countdown on this boss's bar (the bar names the act via label()).
 	m._boss_chrome.append({"kind": "gunship", "boss": boss, "label": BANNER, "slot": slot, "pt": -1})
