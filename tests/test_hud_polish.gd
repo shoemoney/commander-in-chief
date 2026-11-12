@@ -40,7 +40,7 @@ func _free(h: _PolishHud) -> void:
 
 
 func test_plate_is_a_solid_near_opaque_fill() -> void:
-	Runner.T.ok(HudPolish.PLATE_FILL.a >= 0.9, "plate fill is near-opaque (was a 65% smoke)")
+	Runner.T.ok(HudPolish.PLATE_FILL.a >= 0.68 and HudPolish.PLATE_FILL.a <= 0.80, "plate fill is see-through (0.68-0.80) so enemies entering under it stay visible")
 	var h := _hud()
 	h._draw_plate(40.0)
 	Runner.T.ok(h.solids.size() >= 1, "_draw_plate emits the solid fill through the polish seam")

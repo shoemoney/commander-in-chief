@@ -7,7 +7,7 @@ extends RefCounted
 ## owns the pure geometry/colours for the replacement; hud.gd routes its draw seams through it.
 ## Everything here is immediate-mode friendly: static helpers, no allocation beyond small arrays.
 
-const PLATE_FILL := Color(0.045, 0.06, 0.05, 0.96)    # near-opaque body: contrast by solidity, not by smoke
+const PLATE_FILL := Color(0.045, 0.06, 0.05, 0.74)    # see-through body: enemies entering under the plate stay readable; text keeps its outline/shadow
 const PLATE_GRAIN := Color(1, 1, 1, 0.16)             # the old metal texture, kept only as faint grain
 const EDGE_HI := Color(0.66, 0.74, 0.62, 0.95)        # outer rule
 const EDGE_LO := Color(0.0, 0.0, 0.0, 0.55)           # inner shade just inside the rule
