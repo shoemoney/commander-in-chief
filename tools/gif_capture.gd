@@ -115,7 +115,11 @@ func _run() -> void:
 	var chapter := _env_i("GIF_CHAPTER", 0)
 	var mode := OS.get_environment("GIF_MODE")
 	if mode == "title":
-		pass   # stay on the title screen: the clip is the front door itself
+		# The clip is the front door itself. _kill_splash() above only HIDES the overlay, which
+		# makes _end_splash() a no-op and leaves the menu closed over the attract fight, so
+		# open the title the way _end_splash does.
+		if main._menu.mode == GameMenu.Mode.HIDDEN:
+			main._menu.open(GameMenu.Mode.TITLE)
 	elif chapter > 0:
 		main.start_arcade(chapter)
 		main.demo_autoplay = true   # scripted bot: marches north, fires, grenades, boards tanks

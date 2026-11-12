@@ -32,23 +32,32 @@ a shared coin economy where every kill mints and every revive spends.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/gifs/staging.gif" alt="Sector 1/6 Staging Ground — the dawn bunker line, infantry closing on a commandeered tank"/></td>
-<td width="50%"><img src="docs/media/gifs/bridge.gif" alt="Sector 3/6 Bridge Gunship — the gunship's strafing run over a grenade blast and a sniper's laser"/></td>
+<td width="50%"><img src="docs/media/gifs/title.gif" alt="The title screen — emblem, wordmark and searchlights sweeping a dusk horizon"/></td>
+<td width="50%"><img src="docs/media/gifs/staging.gif" alt="Sector 1/6 Staging Ground — tracers up the worn jungle track past the bunker line, a tank holding the lane"/></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/media/gifs/convoy.gif" alt="Sector 5/6 Crashed Convoy — the Siege Tank shelling its gate at dusk, an eighteen-kill streak running"/></td>
-<td width="50%"><img src="docs/media/gifs/foundry.gif" alt="Sector 6/6 The Foundry Core — the Last Stand against the Foundry Colossus"/></td>
+<td width="50%"><img src="docs/media/gifs/marsh.gif" alt="Sector 2/6 Marsh Basin — a sniper's laser across the approach, then wading the ford with a flamethrower in reach"/></td>
+<td width="50%"><img src="docs/media/gifs/bridge.gif" alt="Sector 3/6 Bridge Gunship — MG-nest lasers and a kill streak climbing to ten under the gunship's strafing run"/></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/media/gifs/convoy.gif" alt="Sector 5/6 Crashed Convoy — the Siege Tank shelling at dusk, mortar rings on the ground and a streak climbing to sixteen"/></td>
+<td width="50%"><img src="docs/media/gifs/foundry.gif" alt="Sector 6/6 The Foundry Core — through the slag field to the Foundry Colossus reveal and the Last Stand"/></td>
 </tr>
 </table>
 
-<sub>☝️ **Four sectors, four real runs.** Reading across, then down: **1/6 Staging Ground** — the
-dawn bunker line, infantry closing on a commandeered tank · **3/6 Bridge Gunship** — its strafing
-run, over a grenade blast and a sniper's laser · **5/6 Crashed Convoy** — the Siege Tank shelling
-its gate at dusk with an ×18 streak running · **6/6 The Foundry Core** — the Last Stand against
-the Foundry Colossus.<br/>
+<sub>☝️ **The front door and five sectors, six real captures.** Reading across, then down: the
+**title screen** — emblem, wordmark and searchlights sweeping a dusk horizon · **1/6 Staging
+Ground** — tracers up the worn jungle track past the bunker line, a tank holding the lane ·
+**2/6 Marsh Basin** — a sniper's laser across the approach, then wading the ford with a FLAMER in
+reach · **3/6 Bridge Gunship** — MG-nest lasers and a streak climbing to ×10 under its strafing
+run · **5/6 Crashed Convoy** — the Siege Tank shelling at dusk, mortar rings on the ground and a
+streak climbing to ×16 · **6/6 The Foundry Core** — through the slag field to the Colossus reveal
+and the Last Stand.<br/>
 Captured by <code>tools/gif_capture.gd</code> straight off the scripted bot playing the real game
-(<code>start_arcade()</code> jumps to each zone), so every number on those HUDs was earned — no
-posed sim states, no mockups, no concept art.</sub>
+(<code>start_arcade()</code> jumps to each zone, <code>GIF_MODE=title</code> holds on the menu), so
+every number on those HUDs was earned — no posed sim states, no mockups, no concept art. All six
+were re-captured from the 1.5 visual pass (<a href="#-the-15-visual-pass--before--after">before →
+after</a>).</sub>
 
 <sub>Stills: <a href="docs/media/gameplay_tank.png">boarding a tank</a> ·
 <a href="docs/media/gameplay_colossus.png">the Colossus last stand</a> ·
@@ -473,11 +482,14 @@ src/view/            art.gd (bake registry/tint/glyphs) · hud.gd · menu.gd · 
                      ground_decor.gd · sector_look.gd · atmosphere.gd · front_door.gd (title) ·
                      campaign_meta.gd (VP, retry, VET) · service_record.gd · time_fx.gd · camera_lead.gd ·
                      player_locator.gd · hud_diet.gd · cue_policy.gd (captions) · teach_truth.gd
+                     *_polish.gd ×15 (the 1.5 visual pass: grade · ground · infantry · player · projectiles ·
+                     explosions · props · water · atmosphere · bosses · hud · banners · title · menu · results)
 src/net/             replay.gd (run recorder, live) · lockstep.gd (design sketch, no callers)
 tests/               Headless runner + one `test_*.gd` file per suite (SUITE=<name> filter, golden checksums)
 tools/               gen_*.py (sprite, ground and infantry generators) · bake_sprites.py (props) ·
                      blender_vehicles.py · compose_music.py · lint_sim.gd/lint_assets.gd · i18n_check.py (CI gates) ·
-                     ci_local.sh (the blocking CI jobs, locally) · screenshots.gd · smoke.gd · validate_replay.gd
+                     ci_local.sh (the blocking CI jobs, locally) · screenshots.gd · gif_capture.gd (README clips) ·
+                     smoke.gd · validate_replay.gd
 docs/PLAN.md         📜 The aspirational P0–P7 master plan
 ```
 
@@ -547,6 +559,84 @@ Each sector has its own colour grade, six looks from dawn to furnace night (`src
 applied by `grade.gdshader`), and its own weather and drifting light: rain, fog, dust, ash and embers
 (`src/view/atmosphere.gd`).
 
+### ✨ The 1.5 visual pass — before → after
+
+The 1.5 branch reworks how the whole game is **drawn** without touching what it **is**: fifteen
+view-only packages, zero bytes changed under `src/sim/`, golden checksums untouched. Left is the
+game before the pass, right is the same staged frame after it (`tools/screenshots.gd`, 640×360,
+no retouching).
+
+<table>
+<tr><td><img src="docs/media/polish/firefight.png" alt="Jungle firefight, before and after the 1.5 visual pass" width="100%"/></td></tr>
+<tr><td align="center"><sub>🌿 <b>Firefight</b> — real blacks, hostiles that pop, tracers you can see, cover that casts a shadow, a worn track instead of grey smudges</sub></td></tr>
+<tr><td><img src="docs/media/polish/title.png" alt="Title screen, before and after the 1.5 visual pass" width="100%"/></td></tr>
+<tr><td align="center"><sub>🎖️ <b>Front door</b> — an emblem and a layered wordmark over a dusk horizon with sweeping searchlights</sub></td></tr>
+<tr><td><img src="docs/media/polish/river.png" alt="River crossing, before and after the 1.5 visual pass" width="100%"/></td></tr>
+<tr><td align="center"><sub>🌊 <b>River</b> — depth, foam on an uneven shoreline, glints and wake rings; the banner no longer runs under the HUD</sub></td></tr>
+<tr><td><img src="docs/media/polish/results.png" alt="Victory after-action report, before and after the 1.5 visual pass" width="100%"/></td></tr>
+<tr><td align="center"><sub>📋 <b>After-action report</b> — a rank seal, an aligned tally and real action buttons instead of a centred text dump</sub></td></tr>
+</table>
+
+| | Package | What changed on screen | Lives in |
+|---|---|---|---|
+| 🎞️ | **Master grade** | Real blacks, midtone separation and richer colour ahead of each sector's look; scanlines stay subtle at rest | `grade_polish.gd` · `grade.gdshader` |
+| 🌿 | **Ground** | A tone field plus grass tufts, pebbles, cracks and grit on a world-anchored grid; an edged worn track | `ground_polish.gd` |
+| 🪖 | **Infantry** | Ink keyline and pale inner rim baked into every soldier; role colours kept clear of the lethal-bolt magenta | `infantry_polish.gd` · `tools/gen_infantry.py` |
+| 🦸 | **Player** | Directional muzzle flash with a light pool, ejected brass, footstep and roll dust, a crisp reticle | `player_polish.gd` |
+| 🔫 | **Projectiles** | Enemy fire gets a dark outline, saturated body, hot core and halo; friendly rounds are streaked tracers | `projectiles_polish.gd` |
+| 💥 | **Explosions** | Cooling fireball, rolling smoke, sparks and a shockwave where there used to be one white star | `explosions_polish.gd` |
+| 🪨 | **Props & cover** | One sun for the whole game: soft south-east shadows, and cover drawn heavier than decoration | `props_polish.gd` |
+| 🌊 | **Water** | Depth gradient, foam along an uneven shoreline, glints and wake rings around waders | `water_polish.gd` · `water.gdshader` |
+| 🌫️ | **Atmosphere** | Pollen glints, feathered canopy light shafts and a barely-there edge vignette | `atmosphere_polish.gd` |
+| 🚁 | **Bosses & vehicles** | Damage states (smoke, then fire), tread marks and exhaust, a legible finale arena, a one-piece boss bar | `bosses_polish.gd` |
+| 📟 | **HUD** | A bordered status plate, icon trays and keycaps you can actually read | `hud_polish.gd` |
+| 🪧 | **Banners & labels** | Backed lettering on notched plates that never slide under the HUD | `banners_polish.gd` |
+| 🎖️ | **Title & splash** | Star-and-chevron emblem, layered wordmark, composed dusk backdrop | `title_polish.gd` |
+| 🧰 | **Menu chrome** | One steel-olive base and one brass accent across every framed screen | `menu_polish.gd` |
+| 📋 | **Results** | Headline treatment, rank stamp, aligned two-column tally with a count-up | `results_polish.gd` |
+
+Every package is a module under `src/view/` plus a suite under `tests/`, hooked into the draw pass
+it serves. The order those passes paint in is the readability contract of a one-hit-kill shooter —
+**nothing of yours that lights or shades the ground is ever painted over enemy fire**; only the
+soldier's own sprite and reticle draw after it:
+
+```mermaid
+flowchart TB
+    G["🌿 Ground layer<br/>tone · tufts · worn track"] --> W["🌊 Water shader<br/>depth · foam · glints"]
+    W --> P["🪨 Props and cover<br/>sun shadows"]
+    P --> FU["💨 FX under<br/>smoke · scorch"]
+    FU --> A["🪖 Vehicles · enemies · bosses"]
+    A --> PU["🦸 Player under-pass<br/>glow · shadow · muzzle light"]
+    PU --> B["🔫 Projectiles<br/>enemy fire on top"]
+    B --> PS["🦸 Player sprite · reticle"]
+    PS --> FO["💥 FX over<br/>fireball · sparks"]
+    FO --> AT["🌫️ Atmosphere<br/>motes · shafts · vignette"]
+    AT --> H["📟 HUD · banners · boss bar"]
+    H --> GR["🎞️ Master grade + CRT<br/>full-screen shaders"]
+```
+
+<details><summary>🔬 <b>How the pass was kept honest</b></summary>
+
+- 🔒 **View only.** `git diff` against the pre-pass commit is empty for `src/sim/`, `src/net/` and
+  `tests/test_determinism.gd`; the sim lint and every golden checksum pass unchanged.
+- 🧪 **122 new test methods** (1,729 → 1,851), every suite registered in the default run, with the
+  shutdown-leak gate at zero.
+- 👀 **Judged on pixels, not on a green suite.** Each package was captured through the real view and
+  compared against the pre-pass frame; a whole-build review then looked at the fifteen together.
+- 🧯 **What that review caught** — each fine alone, wrong together, and fixed on this branch: blasts that froze on the Victory card (they aged on sim ticks, and the sim stops
+  there), a vignette darkening the screen edges, the player's own muzzle glow painted over
+  incoming bullets, a status plate hiding the enemy entry zone, and snipers recoloured into the
+  same pink as lethal fire.
+- ⏱️ **Frame cost was measured, then paid back.** Fifteen packages of extra drawing first cost
+  +78% CPU per frame; a profiling pass over every draw function traced most of it to the ground
+  layer repainting on every camera move, and caching brought it back. On identical pinned-seed
+  runs (1,500 frames of a bot campaign, headless so it counts the sim and every draw call but no
+  GPU raster, four alternating rounds on one desktop): **2.95 ms → 3.12 ms mean, 3.8 → 4.2 ms
+  p95**. Those are one machine's numbers, not a guarantee for yours.
+- 🚧 **Status:** on the `polish/steam-visual-pass` branch, not in a published release yet.
+
+</details>
+
 > ✅ **The history is clean.** The old third-party art was **purged from every commit** on
 > 2026-07-27 — that was the last blocker, and clearing it is what let this repo go public.
 > Generative-AI assets **are** sanctioned (the earlier no-AI policy was dropped — see `CLAUDE.md`),
@@ -593,7 +683,7 @@ flowchart LR
 | ✅ | **Playable start→finish** | 6 gated sectors → Foundry Colossus, with the Bridge Gunship and Siege Tank fights, the flamethrower and rocket launcher, plus Arcade/Chapter Select, Endless War, Boss Rush, Daily Run, replay, local 2P |
 | ✅ | **Owned art + audio** | Every shipped sprite has a recorded source (procedural, or CC0 for the FX base). The score is composed in-house. Voice recordings have provenance notes that are still open. Provenance map in [`ASSETS.md`](ASSETS.md) |
 | ✅ | **Public release** | Clean git history, MIT on the code, binaries for macOS (arm64 + universal) · Linux · Windows. The latest published build is **v1.4.4** |
-| 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame |
+| 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame The **1.5 visual pass** — fifteen view-only packages, see [🎨 Art](#-art) — is on the `polish/steam-visual-pass` branch, reviewed and measured (frame cost within about 6% of the pre-pass build), not yet in a published release |
 | ⬜ | **Online netplay** | `src/net/lockstep.gd` is **~260 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
 | ⬜ | **Steam release** | `SteamBridge` is an offline-first *facade* — it no-ops without the SDK. No store page, no Playtest |
 | ⬜ | **Localization freeze** | 3 languages shipped (`locale/strings.{es,fr,ja}.po`), not the 12-language freeze the plan costs |
