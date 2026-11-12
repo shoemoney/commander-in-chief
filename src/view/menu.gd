@@ -3962,7 +3962,9 @@ func _draw_content_frame() -> void:
 	# screen, but the tint and the codename tab say WHICH screen. A mode with
 	# no row falls back to the shared grey (the layout test fails first).
 	var chrome: Dictionary = MODE_CHROME.get(mode, {})
-	var tint: Color = chrome.get("tint", Color(1, 1, 1))
+	# menu-chrome: ONE shared identity tint for every screen (MenuPolish); the codename tab
+	# below still says WHICH screen. MODE_CHROME's per-mode hue no longer drives the paint.
+	var tint: Color = MenuPolish.CHROME_TINT
 	_draw_menu_ambience(border, tint)
 	_draw_frame_nine("ui_frame_lrg_under", content_frame_under_rect(mode),
 		Color(FRAME_UNDER_TINT * tint, FRAME_UNDER_TINT.a * _open_t))
@@ -3982,7 +3984,12 @@ func _draw_content_frame() -> void:
 		var plate := Rect2(320.0 - tw / 2.0 - 5.0, border.position.y - 5.0, tw + 10.0, 13.0)
 		_emit_rect(plate, Color(0.05, 0.06, 0.05, 0.92 * _open_t))
 		_emit_stamp(tag, Vector2(320.0 - tw / 2.0, border.position.y + 4.0),
-			Color(tint, _open_t), Art.fs(HudIcons.TYPE_MICRO))
+			Color(MenuPolish.BRASS, _open_t), Art.fs(HudIcons.TYPE_MICRO))
+	if mode != Mode.HALL and mode != Mode.HOWTO:
+		# One header ornament under the title block, the same on every row-column screen.
+		var ry := mode_header_bottom(mode) + (6.0 if mode_is_compact(mode) else 7.0)
+		for e in MenuPolish.header_rule_rects(320.0, ry, 96.0, MenuPolish.ease_open(_open_t, main._motion if main != null else 1.0), mode_is_compact(mode)):
+			_emit_rect(e["r"], e["c"])
 
 
 func _draw_frame_nine(key: String, r: Rect2, c: Color) -> void:
@@ -4387,7 +4394,7 @@ func _draw() -> void:
 		# CAMPAIGN / RESUME. The tint is DARK warm on purpose: light warm label text
 		# over it clears an AA-normal (4.5:1) contrast target (a mid warm plate washed the
 		# warm label out — see test_destructive_text_contrast). Arming floods red.
-		var plate := PLATE_SEL if selected else PLATE_UNSEL
+		var plate := PLATE_SEL if selected else MenuPolish.PLATE_REST
 		if destr:
 			if selected:
 				plate = DESTR_ARMED_PLATE_SEL if armed else DESTR_PLATE_SEL
@@ -4396,6 +4403,8 @@ func _draw() -> void:
 		elif disabled:
 			plate = DISABLED_PLATE   # c2-13: dim, so a locked row can't read as actionable even while focused
 		Art.menu_plate(self, r, plate)
+		var pressed_now := selected and not disabled and MenuPolish.is_pressed()
+		MenuPolish.draw_plate_depth(self, r, selected, pressed_now, disabled)
 		if disabled:
 			# c2-13: extra scrim over the plate interior so the icon + label read muted too —
 			# the row is clearly "unavailable", not just a differently-tinted button.
@@ -4758,7 +4767,10 @@ func _draw() -> void:
 			# independent of the glow glide, for keyboard/pad a11y. c2-13: a disabled
 			# row keeps the ring (so focus is still locatable) but dims it so the cue
 			# reads "focused, unavailable" rather than "press me".
-			draw_rect(r, DISABLED_TEXT if disabled else Color(1.0, 0.97, 0.88), false, 1.0)
+			if disabled:
+				draw_rect(r, DISABLED_TEXT, false, 1.0)
+			else:
+				MenuPolish.draw_focus(self, r, 0.0 if main._motion < 0.5 else Art.pulse(0.25), not armed)
 	if mode == Mode.TITLE:
 		# Legend adapts to the last-used device and draws the REAL prompt art
 		# (stick/trigger/mouse glyphs from the registry) beside each verb —
@@ -4927,7 +4939,8 @@ func _draw_back_button() -> void:
 	var r := _back_rect()
 	draw_rect(r.grow(-3), Color(0.07, 0.1, 0.06, 0.85))
 	Art.menu_plate(self, r.grow(3), Color(1.0, 0.9, 0.4, 0.95))
-	draw_rect(r, Color(1.0, 0.97, 0.88), false, 1.0)   # focus ring (only row here)
+	MenuPolish.draw_plate_depth(self, r.grow(3), true, MenuPolish.is_pressed(), false)
+	MenuPolish.draw_focus(self, r, 0.0 if main._motion < 0.5 else Art.pulse(0.25))   # focus ring (only row here)
 	_center_text("BACK", r.position.y + 16.0, HudIcons.TYPE_BODY, Color(1.0, 0.95, 0.75))
 
 
