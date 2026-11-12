@@ -31,11 +31,9 @@ static var _atlas: Texture2D = null
 static var _tone: Texture2D = null
 static var last_stamp_count := 0   # probe: stamps drawn by the last paint()
 static var _patches_installed := false
-static var _anc_key := -1
 static var plan_builds := 0        # probe/test: how many times the cached layer was (re)built
 static var _layer_key: Array = []
 static var _layer: Dictionary = {}
-static var _anc_cache: Array = []
 
 
 static func _h(a: int, b: int) -> int:
@@ -347,11 +345,9 @@ static func tone() -> Texture2D:
 
 ## Lane anchors cached by gate/water counts (they only change when a gate or ford appears).
 static func lane_anchors(gates: Array, waters: Array, water_h_px: float, scale: float) -> Array:
-	var key := gates.size() * 1000 + waters.size()
-	if key != _anc_key or _anc_cache.is_empty():
-		_anc_key = key
-		_anc_cache = GroundStructure.anchors(gates, waters, water_h_px, scale)
-	return _anc_cache
+	# Keyed on gate and ford POSITIONS (GroundStructure's memo), not on counts: a new run that
+	# lays the same number of gates and rivers elsewhere must not inherit the last run's lane.
+	return GroundStructure.cached_anchors(gates, waters, water_h_px, scale)
 
 
 ## One frame's stamps: [screen_pos, kind, variant, biome, scale]. Pure in its arguments.

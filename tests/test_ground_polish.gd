@@ -362,3 +362,16 @@ func test_main_paints_the_structure_through_the_world_cache() -> void:
 	Runner.T.ok(body.contains("GroundStructure.world_plan(") and body.contains("GroundStructure.cached_anchors("),
 		"the ground layer paints the cached world plan and memoised anchors")
 	Runner.T.ok(not body.contains("GroundStructure.plan("), "and no longer rebuilds the screen plan every scroll frame")
+
+
+func test_polish_track_follows_a_relaid_world_with_the_same_counts() -> void:
+	# The polish track once cached its lane on gate/water COUNTS, so a new run with the same
+	# number of rivers drew the worn track down the previous run's ford.
+	var a := _world_inputs(480)
+	var b := _world_inputs(160)
+	var la: Array = GroundPolish.lane_anchors(a["gates"], a["waters"], 80.0, 1.0 / float(_F)).duplicate(true)
+	var lb: Array = GroundPolish.lane_anchors(b["gates"], b["waters"], 80.0, 1.0 / float(_F))
+	Runner.T.eq(a["gates"].size(), b["gates"].size(), "both worlds have the same gate count")
+	Runner.T.eq(a["waters"].size(), b["waters"].size(), "and the same river count")
+	Runner.T.ok(la != lb, "a moved ford moves the polish track's lane")
+	Runner.T.eq(lb, b["anc"], "the polish lane equals a fresh anchors() call for the new world")
