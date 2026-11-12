@@ -13738,6 +13738,7 @@ func _draw_projectiles() -> void:
 		var lp: Array = sim.predict_grenade_landing(g)
 		var land := _to_screen(lp[0], lp[1])
 		var lr := 6.0 if g.get("shell", false) else 4.5
+		ProjectilesPolish.draw_grenade_arc(self, body, land)
 		var lc := Color(1.0, 0.95, 0.7, 0.55)
 		# Blast-radius preview: grenades are the ONLY armor damage, so show the
 		# true kill circle at the landing point — will this throw catch it?
@@ -13806,9 +13807,14 @@ func _draw_projectiles() -> void:
 		var twid := 5.0 if piercing else 4.0
 		var bullet_tex := Art.tex("bullet_piercing" if piercing else "bullet_player")
 		var bullet_mod := Color.WHITE if piercing else Color(1.0, 0.9, 0.72).lerp(Color.WHITE, heat)
+		ProjectilesPolish.draw_player_tracer(self, bpos, dir, tlen * 1.5 + 2.0, heat, piercing)
 		draw_set_transform(bpos, dir.angle(), Vector2.ONE)
 		draw_texture_rect(bullet_tex, Rect2(-tlen, -twid / 2.0, tlen, twid), false, bullet_mod)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	for rk in sim.rockets:
+		var rpos := _to_screen(rk["x"], rk["y"])
+		if rpos.y > -20.0 and rpos.y < 380.0 and rpos.x > -20.0 and rpos.x < 660.0:
+			ProjectilesPolish.draw_rocket_exhaust(self, rpos, Vector2(rk["vx"], rk["vy"]).normalized(), Engine.get_physics_frames(), _motion)
 	WeaponFx.draw_world(self, sim, _to_screen, _motion)
 	for b in sim.enemy_bullets:
 		var bpos := _to_screen(b["x"], b["y"])
@@ -13828,9 +13834,7 @@ func _draw_projectiles() -> void:
 		var etlen := 5.0 + maxf(0.0, espd - 1.0) * 6.0
 		# Glow is a BACKLIGHT, not a veil over the projectile card. Draw it first
 		# so the dark travel keyline and white nose remain crisp over corpse pools.
-		var egr := 4.8 if fast else 4.2
-		draw_texture_rect(Art.tex("fx_softspot"), Rect2(bpos - Vector2.ONE * egr, Vector2.ONE * egr * 2.0),
-			false, Color(1.0, 0.22, 0.12, 0.48 if fast else 0.4))
+		ProjectilesPolish.draw_enemy_halo(self, bpos, espd, Engine.get_physics_frames(), _motion)
 		if edir.length() > 0.5:
 			# Standard and sniper cards share the hostile crimson/white vocabulary;
 			# the fast sniper penetrator is materially longer and slimmer.
@@ -13857,8 +13861,7 @@ func _draw_projectiles() -> void:
 		# thing it must never be mistaken for. Magenta is unused anywhere in this
 		# game: the floor is warm, the units are olive/maroon, the flashes are
 		# white and orange, and the friendly reticle is cyan.
-		Art.circle(self, bpos, 1.35 if fast else 1.1, Color(LETHAL_BOLT.r, LETHAL_BOLT.g,
-			LETHAL_BOLT.b, 0.98))
+		ProjectilesPolish.draw_enemy_body(self, bpos, edir, espd)
 
 
 static func _player_ident_color(slot: int, a := 1.0) -> Color:
