@@ -73,3 +73,65 @@ func test_main_wires_the_polish() -> void:
 	Runner.T.ok(o > 0 and src.substr(o, oend - o).contains("AtmospherePolish.draw_vignette("), "over pass draws the vignette after the actors")
 	var d := src.find("func _draw_field_dim()")
 	Runner.T.ok(d > 0 and not src.substr(d, 600).contains("AtmospherePolish.draw_vignette("), "field-dim pass (before projectiles) no longer draws it")
+
+
+func _sig_ops(ops: Array) -> Array:
+	var out: Array = []
+	for o in ops:
+		out.append([o["tex"], o["r"], o["c"]])
+	return out
+
+
+func test_cached_base_layers_match_atmosphere_plan_exactly() -> void:
+	AtmospherePolish.reset_cache()
+	var bad := 0
+	for s in range(-1, AtmospherePolish.SECTORS + 1):
+		for layer in [Atmosphere.Layer.UNDER, Atmosphere.Layer.MID, Atmosphere.Layer.OVER]:
+			for motion in [0.0, 1.0]:
+				for f in [0, 1, 59, 333, 12345]:
+					for cam in [0.0, 41.5, 900.25]:
+						var rec: Array = []
+						AtmospherePolish.draw_base(null, s, f, motion, cam, layer, rec)
+						if rec != _sig_ops(Atmosphere.plan(s, f, motion, cam, layer)):
+							bad += 1
+	Runner.T.eq(bad, 0, "draw_base paints exactly what Atmosphere.plan plans")
+
+
+func test_cached_air_matches_plan_air_and_follows_the_sector() -> void:
+	AtmospherePolish.reset_cache()
+	var bad := 0
+	for s in AtmospherePolish.SECTORS:
+		for motion in [0.0, 1.0]:
+			for f in [0, 7, 200, 4001]:
+				var rec: Array = []
+				AtmospherePolish.draw_air(null, s, f, motion, 63.0, rec)
+				if rec != _sig_ops(AtmospherePolish.plan_air(s, f, motion, 63.0)):
+					bad += 1
+	Runner.T.eq(bad, 0, "draw_air paints exactly what plan_air plans")
+	var rec0: Array = []
+	var rec1: Array = []
+	AtmospherePolish.draw_air(null, 0, 50, 1.0, 0.0, rec0)
+	AtmospherePolish.draw_air(null, 3, 50, 1.0, 0.0, rec1)
+	AtmospherePolish.draw_air(null, 0, 50, 1.0, 0.0, rec0)
+	Runner.T.ok(rec0.size() > 0 and rec0 != rec1, "a sector change is not served the previous sector's table")
+	var again: Array = []
+	AtmospherePolish.draw_air(null, 0, 50, 1.0, 0.0, again)
+	Runner.T.eq(again, rec0.slice(rec0.size() / 2), "returning to the first sector reproduces it")
+
+
+func test_cached_shafts_match_plan_exactly() -> void:
+	AtmospherePolish.reset_cache()
+	var bad := 0
+	for s in AtmospherePolish.SECTORS:
+		for motion in [0.0, 1.0]:
+			for f in range(0, 60000, 997):
+				var rec: Array = []
+				AtmospherePolish.draw_shafts(null, s, f, motion, rec)
+				var plan := AtmospherePolish.plan_shafts(s, f, motion)
+				if rec.size() != plan.size():
+					bad += 1
+					continue
+				for i in plan.size():
+					if rec[i][0] != plan[i]["pts"] or rec[i][1] != plan[i]["cols"]:
+						bad += 1
+	Runner.T.eq(bad, 0, "draw_shafts builds exactly the planned polygons")

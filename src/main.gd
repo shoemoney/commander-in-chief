@@ -13981,7 +13981,8 @@ func _draw_players_under() -> void:
 	for pw in sim.players:
 		pp_water.append(sim._in_water(pw["x"], pw["y"]))
 	_polish.observe(sim.players, sim.tick_count, _motion, pp_water)
-	_polish.draw_ground(self, float(sim.camera_top) * PX, Art.tex("fx_softspot"), sim.players, _flash_strength())
+	var pu_flash := _flash_strength()
+	_polish.draw_ground(self, float(sim.camera_top) * PX, Art.tex("fx_softspot"), sim.players, pu_flash)
 	for i in sim.players.size():
 		var p := sim.players[i]
 		if p["in_tank"] >= 0 or not p["alive"]:
@@ -14000,7 +14001,7 @@ func _draw_players_under() -> void:
 			Color(0, 0, 0, 0.55 * body_a))
 		draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-21, -19), Vector2(42, 42)), false,
 			Color(pp_id.r, pp_id.g, pp_id.b, 0.6 * body_a))
-		_polish.draw_flash(self, i, pos, _flash_strength())
+		_polish.draw_flash(self, i, pos, pu_flash)
 
 
 func _draw_players() -> void:
@@ -14264,7 +14265,7 @@ func _draw_players() -> void:
 				var dry_pulse: float = 1.0 if _motion < 0.5 else Art.pulse(0.3)
 				if p["fire_cd"] > 0:
 					var dry_frac := clampf(float(p["fire_cd"]) / float(SimWorld.BASH_COOLDOWN_TICKS), 0.0, 1.0)
-					Art.arc(self, pos, 8.0, -PI / 2, -PI / 2 + TAU * dry_frac, 14,
+					PlayerPolish.arc_px(self, pos, 8.0, -PI / 2, -PI / 2 + TAU * dry_frac,
 						Color(0.9, 0.6, 0.3, 0.55 + 0.35 * dry_pulse), 1.5)
 				else:
 					Art.arc(self, pos, 8.0, 0, TAU, 14, Color(1.0, 0.3, 0.25, 0.4 + 0.35 * dry_pulse), 1.5)
@@ -14311,9 +14312,7 @@ func _draw_players() -> void:
 				# vest ring — never as loud as the real thing.
 				var frag_pulse: float = 1.0 if _motion < 0.5 else Art.pulse(0.1)
 				var frag_col := Color(0.55, 0.4, 0.4, 0.15 + 0.12 * frag_pulse)
-				for frag_s in 5:
-					var frag_a0 := frag_s * TAU / 5.0 + 0.15
-					Art.arc(self, pos, 14.0, frag_a0, frag_a0 + TAU / 5.0 - 0.3, 4, frag_col, 1.0)
+				PlayerPolish.gapped_ring_px(self, pos, 14.0, frag_col, 1.0, 5, 0.15, 0.3)
 			# Aim reticle: the gun tells you where it points.
 			var aim := Vector2(p["aim_x"], p["aim_y"]) * PX
 			# HOLD FIRE cue: the reticle warns when the gun is trained on the
@@ -14646,14 +14645,14 @@ func _draw_atmosphere_ground() -> void:
 	var cam := -_to_screen(0, 0).y
 	var fr := int(Engine.get_physics_frames())
 	AtmospherePolish.draw_ground(self, sec, fr, _motion, cam)
-	Atmosphere.draw(self, Atmosphere.plan(sec, fr, _motion, cam, Atmosphere.Layer.UNDER))
-	Atmosphere.draw(self, Atmosphere.plan(sec, fr, _motion, cam, Atmosphere.Layer.MID))
+	AtmospherePolish.draw_base(self, sec, fr, _motion, cam, Atmosphere.Layer.UNDER)
+	AtmospherePolish.draw_base(self, sec, fr, _motion, cam, Atmosphere.Layer.MID)
 
 
 func _draw_atmosphere_over() -> void:
 	# A handful of faint foreground specks above the actors, below telegraphs.
-	Atmosphere.draw(self, Atmosphere.plan(_atmosphere_sector(), int(Engine.get_physics_frames()),
-		_motion, -_to_screen(0, 0).y, Atmosphere.Layer.OVER))
+	AtmospherePolish.draw_base(self, _atmosphere_sector(), int(Engine.get_physics_frames()),
+		_motion, -_to_screen(0, 0).y, Atmosphere.Layer.OVER)
 	# Sector-tinted edge vignette (~0.06, edge-only card, wash-exempt like the base one). Drawn here,
 	# after every actor and projectile, so it never darkens an enemy more than a bullet or a player.
 	if not (sim.mode == "endless" and sim.has_mod(5)):

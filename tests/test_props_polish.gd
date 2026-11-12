@@ -48,3 +48,16 @@ func test_cover_is_legibly_heavier_than_decor() -> void:
 	Runner.T.ok(PropsPolish.COVER_LIP_ALPHA >= 0.85, "cover lip is near-opaque ink")
 	var r := PropsPolish.shadow_rect(Vector2.ZERO, 12.0, PropsPolish.HEIGHT_ROCK)
 	Runner.T.ok(r.size.x >= 40.0, "boulder shadow is long enough to read at 640x360")
+
+
+func test_ellipse_triangulation_is_computed_once_and_valid() -> void:
+	var pts := PropsPolish._unit_ellipse()
+	PropsPolish._ellipse_idx = PackedInt32Array()
+	var n := Node2D.new()
+	PropsPolish._fill_ellipse(n, Color.WHITE)
+	Runner.T.eq(PropsPolish._ellipse_idx, Geometry2D.triangulate_polygon(pts), "cached indices are the engine's own ear-clip")
+	Runner.T.eq(PropsPolish._ellipse_idx.size(), (pts.size() - 2) * 3, "a 14-gon is 12 triangles")
+	var held := PropsPolish._ellipse_idx
+	PropsPolish._fill_ellipse(n, Color.BLACK)
+	Runner.T.eq(PropsPolish._ellipse_idx, held, "a second fill reuses it")
+	n.free()

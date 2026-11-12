@@ -68,14 +68,15 @@ static func hash01(seed_v: int, k: int) -> float:
 	return float(h & 0xFFFF) / 65535.0
 
 
+const _FIRE_STOPS := [Color(1.0, 1.0, 0.92), Color(1.0, 0.86, 0.3), Color(1.0, 0.5, 0.1), Color(0.46, 0.08, 0.04)]
+
+
 ## Fireball temperature ramp: 0 = white-hot, 1 = spent dark red.
 static func fire_color(u: float) -> Color:
 	u = clampf(u, 0.0, 1.0)
-	var stops: Array[Color] = [Color(1.0, 1.0, 0.92), Color(1.0, 0.86, 0.3),
-		Color(1.0, 0.5, 0.1), Color(0.46, 0.08, 0.04)]
 	var f := u * 3.0
 	var i := mini(int(f), 2)
-	return stops[i].lerp(stops[i + 1], f - float(i))
+	return _FIRE_STOPS[i].lerp(_FIRE_STOPS[i + 1], f - float(i))
 
 
 ## The two lumpy volumetric cards from tools/gen_fx_cards.py (fx_fireball, fx_billow).
@@ -151,6 +152,60 @@ static func _on_screen(p: Vector2) -> bool:
 	return p.y > -90.0 and p.y < 450.0 and p.x > -90.0 and p.x < 730.0
 
 
+const _SMOKE_DARK := Color(0.14, 0.12, 0.11)
+const _SMOKE_PALE := Color(0.5, 0.47, 0.44)
+const _SMOKE_HOT := Color(0.5, 0.2, 0.08)
+const _CHUNK_COL := Color(0.24, 0.18, 0.13)
+
+
+## Everything in a blast that depends only on its seed and scale (never on age): hash lookups,
+## direction vectors and size bases. Built once per blast and kept in the blast's own dictionary, so
+## it dies with the blast on prune() / reset() and can never outlive the entry it describes.
+static func blast_statics(b: Dictionary) -> Dictionary:
+	var hit = b.get("pre")
+	if hit != null:
+		return hit
+	var sd: int = b["seed"]
+	var sc: float = b["scale"] * (0.9 + 0.25 * hash01(sd, 0))
+	var fs := FIRE_R * sc
+	var s_dir: Array[Vector2] = []
+	var s_spread := PackedFloat64Array()
+	var s_rad := PackedFloat64Array()
+	var s_rot := PackedFloat64Array()
+	for i in SMOKE_PUFFS:
+		s_dir.append(Vector2.from_angle(hash01(sd, 10 + i) * TAU))
+		s_spread.append((6.0 + 16.0 * hash01(sd, 20 + i)) * sc)
+		s_rad.append((10.0 + 9.0 * hash01(sd, 40 + i)) * sc)
+		s_rot.append(hash01(sd, 50 + i) * TAU)
+	var f_ang := PackedFloat64Array()
+	var f_dist := PackedFloat64Array()
+	var f_lr := PackedFloat64Array()
+	var f_dir: Array[Vector2] = []
+	for k in 5:
+		var ang := hash01(sd, 60 + k) * TAU
+		f_ang.append(ang)
+		f_dir.append(Vector2.from_angle(ang))
+		f_dist.append(fs * 0.38 * hash01(sd, 70 + k))
+		f_lr.append(fs * (0.62 + 0.4 * hash01(sd, 80 + k)))
+	var c_dir: Array[Vector2] = []
+	var c_spd := PackedFloat64Array()
+	var c_vz := PackedFloat64Array()
+	var c_sz := PackedFloat64Array()
+	var c_rot := PackedFloat64Array()
+	for k in CHUNKS:
+		c_dir.append(Vector2.from_angle(hash01(sd, 90 + k) * TAU))
+		c_spd.append((1.6 + 2.2 * hash01(sd, 100 + k)) * sc)
+		c_vz.append(1.4 + 1.8 * hash01(sd, 110 + k))
+		c_sz.append(1.3 + 1.6 * hash01(sd, 120 + k))
+		c_rot.append(hash01(sd, 130 + k) * TAU)
+	var pre := {"sc": sc, "fs": fs, "drift": Vector2(0.05 * (hash01(sd, 30) - 0.3), -0.1),
+		"s_dir": s_dir, "s_spread": s_spread, "s_rad": s_rad, "s_rot": s_rot,
+		"f_ang": f_ang, "f_dir": f_dir, "f_dist": f_dist, "f_lr": f_lr,
+		"c_dir": c_dir, "c_spd": c_spd, "c_vz": c_vz, "c_sz": c_sz, "c_rot": c_rot}
+	b["pre"] = pre
+	return pre
+
+
 ## Drawn UNDER the actors: shockwave, fireball body, flung chunks, rolling smoke, impact dust.
 func draw_under(ci: CanvasItem, to_screen: Callable, tick: int, motion: float) -> void:
 	var live := motion >= 0.5
@@ -165,69 +220,82 @@ func draw_under(ci: CanvasItem, to_screen: Callable, tick: int, motion: float) -
 		var o: Vector2 = to_screen.call(b["x"], b["y"])
 		if not _on_screen(o):
 			continue
-		var sd: int = b["seed"]
-		var sc: float = b["scale"] * (0.9 + 0.25 * hash01(sd, 0))
+		var pre := blast_statics(b)
+		var sc: float = pre["sc"]
 		if live and age < SHOCK_FRAMES:
 			var sp := age / SHOCK_FRAMES
 			var sr := (5.0 + ease_out(sp) * 42.0) * sc
 			ci.draw_texture_rect(Art.tex("fx_ring"), Rect2(o - Vector2.ONE * sr, Vector2.ONE * sr * 2.0),
 				false, Color(0.95, 0.85, 0.7, 0.4 * (1.0 - sp)))
 		# Smoke first (it is the cool, dark layer the fire burns in front of).
+		var s_dir: Array[Vector2] = pre["s_dir"]
+		var s_spread: PackedFloat64Array = pre["s_spread"]
+		var s_rad: PackedFloat64Array = pre["s_rad"]
+		var s_rot: PackedFloat64Array = pre["s_rot"]
+		var drift_unit: Vector2 = pre["drift"]
+		var tilted := false
 		for i in SMOKE_PUFFS:
 			var delay := 3.0 + float(i) * 2.0
 			var a := age - delay
 			if a < 0.0:
 				continue
 			var p := a / float(life)
-			var dir := Vector2.from_angle(hash01(sd, 10 + i) * TAU)
-			var spread := (6.0 + 16.0 * hash01(sd, 20 + i)) * sc
+			var spread: float = s_spread[i]
 			var drift := Vector2.ZERO
 			var grow := 0.8
 			if live:
-				drift = Vector2(0.05 * (hash01(sd, 30) - 0.3), -0.1) * a
+				drift = drift_unit * a
 				grow = 0.5 + 0.7 * ease_out(a / 40.0)
 				spread *= ease_out(a / 30.0)
-			var pos := o + dir * spread + drift
-			var rad := (10.0 + 9.0 * hash01(sd, 40 + i)) * sc * grow
-			var col := Color(0.14, 0.12, 0.11).lerp(Color(0.5, 0.47, 0.44), smoothstep(0.0, 0.5, p))
-			col = col.lerp(Color(0.5, 0.2, 0.08), clampf(1.0 - a / 12.0, 0.0, 1.0) * 0.6)
+			var pos := o + s_dir[i] * spread + drift
+			var rad: float = s_rad[i] * grow
+			var col := _SMOKE_DARK.lerp(_SMOKE_PALE, smoothstep(0.0, 0.5, p))
+			col = col.lerp(_SMOKE_HOT, clampf(1.0 - a / 12.0, 0.0, 1.0) * 0.6)
 			col.a = 0.5 * smoothstep(0.0, 0.08, p) * (1.0 - smoothstep(0.55, 1.0, p))
-			ci.draw_set_transform(pos, hash01(sd, 50 + i) * TAU + (a * 0.012 if live else 0.0), Vector2.ONE)
+			ci.draw_set_transform(pos, s_rot[i] + (a * 0.012 if live else 0.0), Vector2.ONE)
 			ci.draw_texture_rect(smoke_tex, Rect2(-rad, -rad, rad * 2.0, rad * 2.0), false, col)
+			tilted = true
+		if tilted:   # one reset for the whole run of puffs: each one sets its own transform
 			ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			tilted = false
 		# Fireball: five overlapping lobes, each cooling along the colour ramp.
 		if age < FIRE_FRAMES:
+			var fs: float = pre["fs"]
+			var f_ang: PackedFloat64Array = pre["f_ang"]
+			var f_dir: Array[Vector2] = pre["f_dir"]
+			var f_dist: PackedFloat64Array = pre["f_dist"]
+			var f_lr: PackedFloat64Array = pre["f_lr"]
 			var u := age / FIRE_FRAMES
 			var growth := ease_out(age / 10.0) if live else 0.7
 			for k in 5:
-				var ang := hash01(sd, 60 + k) * TAU
-				var dist := FIRE_R * sc * 0.38 * hash01(sd, 70 + k) * growth
-				var lr := FIRE_R * sc * (0.62 + 0.4 * hash01(sd, 80 + k)) * (0.35 + 0.65 * growth)
-				var lc := fire_color(u * 1.15 + (dist / (FIRE_R * sc)) * 0.4)
+				var dist: float = f_dist[k] * growth
+				var lr: float = f_lr[k] * (0.35 + 0.65 * growth)
+				var lc := fire_color(u * 1.15 + (dist / fs) * 0.4)
 				lc.a = 0.95 * pow(1.0 - u, 0.6)
-				var lp := o + Vector2.from_angle(ang) * dist
-				ci.draw_set_transform(lp, ang * 3.0, Vector2.ONE)
+				ci.draw_set_transform(o + f_dir[k] * dist, f_ang[k] * 3.0, Vector2.ONE)
 				ci.draw_texture_rect(fire_tex, Rect2(-lr, -lr, lr * 2.0, lr * 2.0), false, lc)
-				ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 			var cc := fire_color(u * 0.7)
 			cc.a = 0.9 * (1.0 - u)
-			var cr := FIRE_R * sc * 0.45 * (0.5 + 0.5 * growth)
+			var cr := fs * 0.45 * (0.5 + 0.5 * growth)
 			ci.draw_texture_rect(soft, Rect2(o - Vector2.ONE * cr, Vector2.ONE * cr * 2.0), false, cc)
 		# Thrown chunks: ballistic arc, then they sit where they landed and fade.
 		if live and age < CHUNK_FRAMES:
+			var c_dir: Array[Vector2] = pre["c_dir"]
+			var c_spd: PackedFloat64Array = pre["c_spd"]
+			var c_vz: PackedFloat64Array = pre["c_vz"]
+			var c_sz: PackedFloat64Array = pre["c_sz"]
+			var c_rot: PackedFloat64Array = pre["c_rot"]
+			var pw := 1.0 - pow(0.9, minf(age, 24.0))
+			var ca := 1.0 - smoothstep(0.65, 1.0, age / CHUNK_FRAMES)
+			var ccol := Color(_CHUNK_COL.r, _CHUNK_COL.g, _CHUNK_COL.b, ca)
 			for k in CHUNKS:
-				var cd := Vector2.from_angle(hash01(sd, 90 + k) * TAU)
-				var spd := (1.6 + 2.2 * hash01(sd, 100 + k)) * sc
-				var vz := 1.4 + 1.8 * hash01(sd, 110 + k)
-				var travel := spd * (1.0 - pow(0.9, minf(age, 24.0))) * 10.0
-				var lift := maxf(0.0, vz * age - 0.06 * age * age)
-				var cp := o + cd * travel + Vector2(0.0, -lift)
-				var csz := 1.3 + 1.6 * hash01(sd, 120 + k)
-				var ca := 1.0 - smoothstep(0.65, 1.0, age / CHUNK_FRAMES)
-				ci.draw_set_transform(cp, hash01(sd, 130 + k) * TAU + age * 0.35, Vector2.ONE)
-				ci.draw_rect(Rect2(-csz, -csz * 0.55, csz * 2.0, csz * 1.1),
-					Color(0.24, 0.18, 0.13, ca))
-				ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+				var travel: float = c_spd[k] * pw * 10.0
+				var lift := maxf(0.0, c_vz[k] * age - 0.06 * age * age)
+				var csz: float = c_sz[k]
+				ci.draw_set_transform(o + c_dir[k] * travel + Vector2(0.0, -lift), c_rot[k] + age * 0.35, Vector2.ONE)
+				ci.draw_rect(Rect2(-csz, -csz * 0.55, csz * 2.0, csz * 1.1), ccol)
+			ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if not live:
 		return
 	for pf in puffs:

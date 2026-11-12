@@ -254,7 +254,23 @@ static func light_pool(age: int, strength: float) -> Dictionary:
 
 ## Reticle overlay: crisp corner ticks + centre pip, each as {a: Vector2, b: Vector2, w: float,
 ## col: Color} line segments around the origin; dark keylines come first.
+static var _reticle_memo := {}
+
+
+## Memoised on the exact (col, ident, grow) it was built from; see marker_segments().
 static func reticle_segments(col: Color, ident: Color, grow: float) -> Array:
+	var key := Vector3i(col.to_rgba32() & 0x7fffffff, ident.to_rgba32() & 0x7fffffff, roundi(grow * 8.0))
+	var hit = _reticle_memo.get(key)
+	if hit != null and hit[0] == col and hit[1] == ident and hit[2] == grow:
+		return hit[3]
+	var built := _build_reticle_segments(col, ident, grow)
+	if _reticle_memo.size() >= 64:
+		_reticle_memo.clear()
+	_reticle_memo[key] = [col, ident, grow, built]
+	return built
+
+
+static func _build_reticle_segments(col: Color, ident: Color, grow: float) -> Array:
 	var out: Array = []
 	var inner := 7.0 + grow
 	var outer := 11.0 + grow
@@ -273,7 +289,22 @@ static func reticle_segments(col: Color, ident: Color, grow: float) -> Array:
 ## Identity pips floating above the head in co-op: P1 one diamond, P2 two. {c, r, col}.
 ## Always-on identity marker above the head: a keylined down-chevron (solo) with 1 / 2 pip
 ## bars in co-op. Returned as draw_segments() lines around the origin (dark keyline first).
+static var _marker_memo := {}
+
+
+## Memoised: the segments are a pure function of (ident, coop, slot) and are only read by the
+## draw, so a slot's result is rebuilt only when its inputs actually change.
 static func marker_segments(ident: Color, coop: bool, slot: int) -> Array:
+	var key := Vector3i(slot, 1 if coop else 0, 0)
+	var hit = _marker_memo.get(key)
+	if hit != null and hit[0] == ident:
+		return hit[1]
+	var built := _build_marker_segments(ident, coop, slot)
+	_marker_memo[key] = [ident, built]
+	return built
+
+
+static func _build_marker_segments(ident: Color, coop: bool, slot: int) -> Array:
 	var out: Array = []
 	var col := Color(ident.r, ident.g, ident.b, 1.0)
 	var dark := Color(0, 0, 0, 0.9)
@@ -335,16 +366,23 @@ func draw_ground(ci: CanvasItem, cam_top_px: float, softspot: Texture2D, players
 		var s := _scr(d["p"], cam_top_px)
 		ci.draw_texture_rect(softspot, Rect2(s - Vector2(r, r), Vector2(r, r) * 2.0), false,
 			Color(0.82, 0.74, 0.58, d["a"] * (1.0 - t) * (1.0 - t * 0.4)))
+	var tilted := false   # a casing's rotation is still set on the canvas
 	for c in casings:
 		var life_left := 1.0 - maxf(0.0, float(c["age"] - (CASING_LIFE - 20))) / 20.0
-		var s := _scr(c["p"], cam_top_px) - Vector2(0, c["z"])
-		var sh := _scr(c["p"], cam_top_px)
-		if c["z"] > 0.5:
+		var wp: Vector2 = c["p"]
+		var z: float = c["z"]
+		var sh := Vector2(roundf(wp.x), roundf(wp.y - cam_top_px))
+		if z > 0.5:
+			if tilted:
+				ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+				tilted = false
 			ci.draw_rect(Rect2(sh + Vector2(-1, 0), Vector2(2, 1)), Color(0, 0, 0, 0.3 * life_left))
-		ci.draw_set_transform(s, c["rot"], Vector2.ONE)
+		ci.draw_set_transform(sh - Vector2(0, z), c["rot"], Vector2.ONE)
+		tilted = true
 		ci.draw_rect(Rect2(-2.5, -1.5, 5, 3), Color(CASING_DARK.r, CASING_DARK.g, CASING_DARK.b, 0.75 * life_left))
 		ci.draw_rect(Rect2(-2.0, -1.0, 4, 2), Color(CASING_BRASS.r, CASING_BRASS.g, CASING_BRASS.b, life_left))
 		ci.draw_rect(Rect2(-2.0, -1.0, 4, 1), Color(CASING_HI.r, CASING_HI.g, CASING_HI.b, 0.85 * life_left))
+	if tilted:
 		ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	for i in mini(flash_age.size(), players.size()):
 		var lp := light_pool(flash_age[i], strength)
@@ -361,14 +399,127 @@ func draw_ground(ci: CanvasItem, cam_top_px: float, softspot: Texture2D, players
 func draw_flash(ci: CanvasItem, slot: int, pos: Vector2, strength: float) -> void:
 	if slot >= flash_age.size():
 		return
-	var layers := flash_layers(flash_age[slot], strength)
+	var layers := _flash_cached(flash_age[slot], strength)
 	if layers.is_empty():
 		return
 	var dir := flash_dir[slot]
 	ci.draw_set_transform((pos + dir * MUZZLE_OFF).round(), dir.angle(), Vector2.ONE)
+	var item := ci.get_canvas_item()
 	for l in layers:
-		ci.draw_colored_polygon(l["pts"], l["col"])
+		RenderingServer.canvas_item_add_triangle_array(item, l["idx"], l["pts"], PackedColorArray([l["col"]]))
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+static var _flash_memo := {}
+
+
+## flash_layers() with each polygon's triangulation attached ("idx"): draw_colored_polygon re-runs
+## the ear clip on every call, but the layers only depend on (age, strength), a handful of values.
+static func _flash_cached(age: int, strength: float) -> Array:
+	if age < 0 or age > FLASH_TICKS or strength <= 0.0:
+		return []
+	var key := Vector2i(age, roundi(strength * 1000.0))
+	var hit = _flash_memo.get(key)
+	if hit != null and hit[0] == strength:
+		return hit[1]
+	var layers := flash_layers(age, strength)
+	for l in layers:
+		l["idx"] = Geometry2D.triangulate_polygon(l["pts"])
+	if _flash_memo.size() >= 64:
+		_flash_memo.clear()
+	_flash_memo[key] = [strength, layers]
+	return layers
+
+
+static var _arc_cache := {}
+
+
+## Art.arc for a partial sweep as ONE textured quad: the ring's one-pixel stamps are baked once per
+## (radius, width, window) into a white-pixel texture (nearest filter, drawn 1:1 on the pixel grid,
+## so colour and blending match the per-pixel rects). Full sweeps and tiny radii defer to Art.arc.
+static func arc_px(ci: CanvasItem, center: Vector2, radius: float, start_angle: float, end_angle: float,
+		color: Color, width := 1.0) -> void:
+	var r := roundi(radius)
+	if r <= 0 or absf(end_angle - start_angle) >= TAU - 0.001:
+		Art.arc(ci, center, radius, start_angle, end_angle, 0, color, width)
+		return
+	var w := maxi(1, roundi(width))
+	var key := Vector4(r, w, start_angle, end_angle)
+	var e = _arc_cache.get(key)
+	if e == null:
+		e = [null, 0, null, 0.0, 0.0, 0.0, 0.0]
+		ProjectilesPolish._promote_rects(e, _build_arc_runs(r, w, start_angle, end_angle), 3)
+		if _arc_cache.size() >= 256:
+			_arc_cache.clear()
+		_arc_cache[key] = e
+	if e[2] == null:
+		return   # the window held no pixels
+	var c := center.round()
+	ci.draw_texture_rect(e[2], Rect2(c.x + e[3], c.y + e[4], e[5], e[6]), false, color)
+
+
+static var _ring_gap_cache := {}
+
+
+## `count` evenly spaced arcs of one ring, each starting at s*TAU/count + phase and stopping `gap`
+## radians short of the next (the broken no-vest ring). Their pixels are disjoint, so the lot is
+## baked into one texture and drawn in a single call.
+static func gapped_ring_px(ci: CanvasItem, center: Vector2, radius: float, color: Color, width: float,
+		count: int, phase: float, gap: float) -> void:
+	var r := roundi(radius)
+	var w := maxi(1, roundi(width))
+	if r <= 0:
+		for si in count:
+			var a0 := si * TAU / float(count) + phase
+			Art.arc(ci, center, radius, a0, a0 + TAU / float(count) - gap, 0, color, width)
+		return
+	var key := Vector4(r * 64 + w, count, phase, gap)
+	var e = _ring_gap_cache.get(key)
+	if e == null:
+		var runs := PackedFloat32Array()
+		for si in count:
+			var b0 := si * TAU / float(count) + phase
+			runs.append_array(_build_arc_runs(r, w, b0, b0 + TAU / float(count) - gap))
+		e = [null, 0, null, 0.0, 0.0, 0.0, 0.0]
+		ProjectilesPolish._promote_rects(e, runs, 3)
+		if _ring_gap_cache.size() >= 64:
+			_ring_gap_cache.clear()
+		_ring_gap_cache[key] = e
+	if e[2] == null:
+		return
+	var c := center.round()
+	ci.draw_texture_rect(e[2], Rect2(c.x + e[3], c.y + e[4], e[5], e[6]), false, color)
+
+
+static func _build_arc_runs(r: int, w: int, start_angle: float, end_angle: float) -> PackedFloat32Array:
+	var entry: Dictionary = Art._ring_entry(r, w, false)
+	var span := end_angle - start_angle
+	var lo := start_angle
+	if span < 0.0:
+		lo = end_angle
+		span = -span
+	var offs: PackedVector2Array = entry["offsets"]
+	var win: Vector3i = Art._arc_span(entry["angles"], lo, span)
+	var rows := {}
+	for i in range(win.x, win.y):
+		rows.get_or_add(int(offs[i].y), []).append(int(offs[i].x))
+	for i in win.z:
+		rows.get_or_add(int(offs[i].y), []).append(int(offs[i].x))
+	var out := PackedFloat32Array()
+	for y in rows:
+		var xs: Array = rows[y]
+		xs.sort()
+		var run_x: int = xs[0]
+		var run_n := 1
+		for j in range(1, xs.size()):
+			if xs[j] == run_x + run_n:
+				run_n += 1
+			else:
+				out.append_array(PackedFloat32Array([run_x, y, run_n]))
+				run_x = xs[j]
+				run_n = 1
+		out.append_array(PackedFloat32Array([run_x, y, run_n]))
+	return out
 
 
 static func draw_segments(ci: CanvasItem, origin: Vector2, segs: Array) -> void:

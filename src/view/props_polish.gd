@@ -39,11 +39,22 @@ static func cast_shadow(canvas: CanvasItem, pos: Vector2, hw: float, h: float, a
 	canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-r.size * 0.6, r.size * 1.2), false,
 		Color(0.02, 0.03, 0.01, alpha * 0.9))
 	canvas.draw_set_transform(centre.round(), SHADOW_ANGLE, r.size * 0.5 * 0.82)
-	canvas.draw_colored_polygon(_unit_ellipse(), Color(0.02, 0.03, 0.01, alpha * 0.55))
+	_fill_ellipse(canvas, Color(0.02, 0.03, 0.01, alpha * 0.55))
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 static var _ellipse := PackedVector2Array()
+static var _ellipse_idx := PackedInt32Array()
+
+
+## draw_colored_polygon(_unit_ellipse(), col) minus the per-call ear-clip: the engine triangulates
+## the polygon on every call, so the same triangulation is computed once and replayed.
+static func _fill_ellipse(canvas: CanvasItem, col: Color) -> void:
+	var pts := _unit_ellipse()
+	if _ellipse_idx.is_empty():
+		_ellipse_idx = Geometry2D.triangulate_polygon(pts)
+	RenderingServer.canvas_item_add_triangle_array(canvas.get_canvas_item(), _ellipse_idx, pts,
+		PackedColorArray([col]))
 
 
 static func _unit_ellipse() -> PackedVector2Array:
@@ -69,7 +80,7 @@ static func cover_base_rect(canvas: CanvasItem, rect: Rect2, fade := 1.0, frame 
 	if not frame:
 		var c := rect.get_center() + Vector2(1.0, rect.size.y * 0.35)
 		canvas.draw_set_transform(c, 0.0, Vector2(rect.size.x * 0.58, rect.size.y * 0.55))
-		canvas.draw_colored_polygon(_unit_ellipse(), Color(INK.r, INK.g, INK.b, 0.62 * fade))
+		_fill_ellipse(canvas, Color(INK.r, INK.g, INK.b, 0.62 * fade))
 		canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		return
 	canvas.draw_rect(Rect2(rect.position + Vector2(-2.0, rect.size.y - 2.0), Vector2(rect.size.x + 4.0, 5.0)), lip)

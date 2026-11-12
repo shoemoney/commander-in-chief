@@ -143,3 +143,107 @@ func test_player_light_and_shade_draw_under_enemy_bullets() -> void:
 	over = over.substr(0, over.find("\nfunc _coin_trail"))
 	for needle in ["_polish.draw_ground(", "_polish.draw_flash(", "Vector2(42, 42)", "Vector2(26, 11)", "_polish.observe("]:
 		Runner.T.ok(not over.contains(needle), "over pass no longer draws " + needle)
+
+
+func test_memoised_segments_track_their_inputs() -> void:
+	var a := PlayerPolish.marker_segments(Color.GREEN, false, 0)
+	Runner.T.ok(PlayerPolish.marker_segments(Color.GREEN, false, 0) == a, "same inputs, same segments")
+	var gold := PlayerPolish.marker_segments(Color.GOLD, false, 0)
+	Runner.T.eq(gold[2]["col"], Color(Color.GOLD.r, Color.GOLD.g, Color.GOLD.b, 1.0), "a new identity colour is not served the old memo")
+	Runner.T.eq(PlayerPolish.marker_segments(Color.GREEN, false, 0), PlayerPolish._build_marker_segments(Color.GREEN, false, 0), "memo equals a fresh build")
+	Runner.T.eq(PlayerPolish.marker_segments(Color.GREEN, true, 1).size(), PlayerPolish._build_marker_segments(Color.GREEN, true, 1).size(), "co-op slot 1 keeps its extra bars")
+	Runner.T.ok(PlayerPolish.marker_segments(Color.GREEN, true, 1).size() > PlayerPolish.marker_segments(Color.GREEN, false, 1).size(), "coop flag is part of the key")
+	var r0 := PlayerPolish.reticle_segments(Color.WHITE, Color.GREEN, 0.0)
+	var r2 := PlayerPolish.reticle_segments(Color.WHITE, Color.GREEN, 2.0)
+	Runner.T.ok(r0[0]["a"] != r2[0]["a"], "reticle grow is part of the key")
+	Runner.T.eq(PlayerPolish.reticle_segments(Color.WHITE, Color.GREEN, 2.0), PlayerPolish._build_reticle_segments(Color.WHITE, Color.GREEN, 2.0), "reticle memo equals a fresh build")
+	var r_col := PlayerPolish.reticle_segments(Color.RED, Color.GREEN, 2.0)
+	Runner.T.eq(r_col[4]["col"], Color(1.0, 0.0, 0.0, 1.0), "reticle colour is part of the key")
+
+
+func test_flash_triangulation_cache_matches_the_layers() -> void:
+	for age in range(0, 7):
+		for st in [1.0, 0.4]:
+			var cached := PlayerPolish._flash_cached(age, st)
+			var fresh := PlayerPolish.flash_layers(age, st)
+			Runner.T.eq(cached.size(), fresh.size(), "age %d strength %s layer count" % [age, st])
+			for i in fresh.size():
+				Runner.T.eq(cached[i]["pts"], fresh[i]["pts"], "flash points")
+				Runner.T.eq(cached[i]["idx"], Geometry2D.triangulate_polygon(fresh[i]["pts"]), "flash indices")
+	Runner.T.ok(PlayerPolish._flash_cached(9, 1.0).is_empty() and PlayerPolish._flash_cached(2, 0.0).is_empty(), "no flash past its life or with flashes off")
+
+
+func test_arc_px_runs_cover_the_pixels_art_arc_stamps() -> void:
+	var bad := 0
+	for r in [4, 8, 14]:
+		for w in [1, 2]:
+			for a0 in [0.15, 1.7, -1.5707963267948966, 4.0]:
+				for span in [0.3, 1.2, 2.5, 5.0]:
+					var entry: Dictionary = Art._ring_entry(r, w, false)
+					var win: Vector3i = Art._arc_span(entry["angles"], a0, span)
+					var ref := {}
+					for i in range(win.x, win.y):
+						ref[Vector2i(entry["offsets"][i])] = true
+					for i in win.z:
+						ref[Vector2i(entry["offsets"][i])] = true
+					var runs := PlayerPolish._build_arc_runs(r, w, a0, a0 + span)
+					var got := {}
+					var k := 0
+					while k < runs.size():
+						for xx in int(runs[k + 2]):
+							got[Vector2i(int(runs[k]) + xx, int(runs[k + 1]))] = true
+						k += 3
+					if got != ref:
+						bad += 1
+	Runner.T.eq(bad, 0, "arc_px stamps exactly the pixels Art.arc does")
+
+
+func test_arc_texture_holds_exactly_the_arc_pixels() -> void:
+	var bad := 0
+	for a0 in [0.15, 2.0, -1.5707963267948966]:
+		var runs := PlayerPolish._build_arc_runs(8, 2, a0, a0 + 1.4)
+		var e: Array = [null, 0, null, 0.0, 0.0, 0.0, 0.0]
+		ProjectilesPolish._promote_rects(e, runs, 3)
+		var img: Image = e[2].get_image()
+		var want := {}
+		var k := 0
+		while k < runs.size():
+			for xx in int(runs[k + 2]):
+				want[Vector2i(int(runs[k]) + xx, int(runs[k + 1]))] = true
+			k += 3
+		var got := {}
+		for yy in img.get_height():
+			for xx in img.get_width():
+				if img.get_pixel(xx, yy).a > 0.0:
+					got[Vector2i(xx + int(e[3]), yy + int(e[4]))] = true
+		if got != want:
+			bad += 1
+	Runner.T.eq(bad, 0, "the baked arc texture matches the stamped pixels")
+
+
+func test_gapped_ring_bakes_the_five_arcs_it_replaced() -> void:
+	var want := {}
+	for si in 5:
+		var a0 := si * TAU / 5.0 + 0.15
+		var entry: Dictionary = Art._ring_entry(14, 1, false)
+		var win: Vector3i = Art._arc_span(entry["angles"], a0, TAU / 5.0 - 0.3)
+		for i in range(win.x, win.y):
+			want[Vector2i(entry["offsets"][i])] = true
+		for i in win.z:
+			want[Vector2i(entry["offsets"][i])] = true
+	var runs := PackedFloat32Array()
+	for si in 5:
+		var b0 := si * TAU / 5.0 + 0.15
+		runs.append_array(PlayerPolish._build_arc_runs(14, 1, b0, b0 + TAU / 5.0 - 0.3))
+	var got := {}
+	var k := 0
+	var dup := 0
+	while k < runs.size():
+		for xx in int(runs[k + 2]):
+			var key := Vector2i(int(runs[k]) + xx, int(runs[k + 1]))
+			if got.has(key):
+				dup += 1
+			got[key] = true
+		k += 3
+	Runner.T.eq(got, want, "the merged ring has the pixels of the five Art.arc calls")
+	Runner.T.eq(dup, 0, "the five windows never share a pixel (so one draw blends the same)")

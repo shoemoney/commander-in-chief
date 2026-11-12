@@ -126,3 +126,24 @@ func test_reset_clears_polish_state_through_the_real_main() -> void:
 	Runner.T.ok(main._polish.hurt_age.is_empty(), "_reset clears the player polish state")
 	Runner.T.ok(BossesPolish._trails.is_empty(), "_reset clears the tank trails")
 	main.free()
+
+
+func test_blast_statics_follow_the_blast_and_die_with_it() -> void:
+	var p := ExplosionsPolish.new()
+	p.add_blast(5000, 6000, 10)
+	p.add_blast(5000, 6000, 10, 2.0)
+	var a: Dictionary = ExplosionsPolish.blast_statics(p.blasts[0])
+	var b: Dictionary = ExplosionsPolish.blast_statics(p.blasts[1])
+	Runner.T.ok(a != b and b["fs"] > a["fs"], "a bigger blast gets its own, larger statics")
+	var sd: int = p.blasts[0]["seed"]
+	var sc: float = a["sc"]
+	Runner.T.eq(a["s_spread"][3], (6.0 + 16.0 * ExplosionsPolish.hash01(sd, 23)) * sc, "smoke spread is the hashed value it replaced")
+	Runner.T.eq(a["f_dist"][2], ExplosionsPolish.FIRE_R * sc * 0.38 * ExplosionsPolish.hash01(sd, 72), "lobe offset matches")
+	Runner.T.eq(a["c_sz"][4], 1.3 + 1.6 * ExplosionsPolish.hash01(sd, 124), "chunk size matches")
+	Runner.T.ok(ExplosionsPolish.blast_statics(p.blasts[0]) == a and p.blasts[0].has("pre"), "built once, held on the blast")
+	p.reset()
+	Runner.T.eq(p.blasts.size(), 0, "reset drops the blasts and their statics with them")
+	p.add_blast(5000, 6000, 20)
+	Runner.T.ok(not p.blasts[0].has("pre"), "a blast added after a reset starts without cached statics")
+	Runner.T.eq(ExplosionsPolish.fire_color(0.0), Color(1.0, 1.0, 0.92), "ramp start unchanged")
+	Runner.T.ok(ExplosionsPolish.fire_color(1.0).is_equal_approx(Color(0.46, 0.08, 0.04)), "ramp end unchanged")
