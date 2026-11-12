@@ -10859,7 +10859,7 @@ func _draw_rocks() -> void:
 			_:
 				PropsPolish.cast_shadow(self, pos, 12.0, PropsPolish.HEIGHT_ROCK, 0.40 * fade)
 				_ground_shadow(pos, 12.0, 0.42 * fade)
-				PropsPolish.cover_base_round(self, pos, 13.0, fade)
+				PropsPolish.cover_base_round(self, pos, 13.0 if rh3 % 3 != 2 else 8.0, fade, rh3 % 3 != 2)
 				var rtex: String = ["rock1", "rock2", "cactus_dead2"][rh3 % 3]   # dead cactus is REAL cover too
 				var rcol := Color(0.78, 0.8, 0.78) if rtex != "cactus_dead2" else Color(0.7, 0.62, 0.5)
 				# Weathering: no two boulders share a size or a value — a fixed
@@ -10967,13 +10967,13 @@ func _draw_sandbags() -> void:
 			# modular segment too so the visible barrier tells the same truth.
 			PropsPolish.cast_shadow(self, pos, 8.0, PropsPolish.HEIGHT_BAG, 0.36 * _bottom_fade(pos.y))
 			_ground_shadow(pos, 6.0, 0.42 * _bottom_fade(pos.y))
-			PropsPolish.cover_base_rect(self, Rect2(pos + Vector2(-6.0, -17.0), Vector2(12.0, 34.0)), _bottom_fade(pos.y))
+			PropsPolish.cover_base_rect(self, Rect2(pos + Vector2(-6.0, -17.0), Vector2(12.0, 34.0)), _bottom_fade(pos.y), false)
 			_spr("wall_sandbag_end", pos, PI / 2.0, 0.62,
 				Color(1.02, 0.98, 0.74, _bottom_fade(pos.y)))
 			continue
 		# c2 2v: cover fades off the player's back near the bottom of the ratchet view.
 		PropsPolish.cast_shadow(self, pos + Vector2(0, 2), 17.0, PropsPolish.HEIGHT_BAG, 0.38 * _bottom_fade(pos.y))
-		PropsPolish.cover_base_rect(self, Rect2(pos + Vector2(-18.0, -6.0), Vector2(36.0, 12.0)), _bottom_fade(pos.y))
+		PropsPolish.cover_base_rect(self, Rect2(pos + Vector2(-18.0, -6.0), Vector2(36.0, 12.0)), _bottom_fade(pos.y), false)
 		_wall_seg(pos, 0.62, Color(1.02, 0.98, 0.74), sb["x"] / 65536, sb["y"] / 65536,
 			cap_flags(bxs, bys, i), _bottom_fade(pos.y))
 

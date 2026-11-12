@@ -41,3 +41,10 @@ func test_draw_functions_are_wired_to_module() -> void:
 	var b := src.find("for bk in sim.bunkers:")
 	Runner.T.ok(b >= 0 and src.substr(b, 3500).contains("PropsPolish.cover_base_rect"), "bunker loop calls PropsPolish")
 
+
+
+func test_cover_is_legibly_heavier_than_decor() -> void:
+	Runner.T.ok(PropsPolish.SHADOW_GAIN >= 1.5 and PropsPolish.LEN_GAIN >= 1.25, "shadows are store-screenshot strong")
+	Runner.T.ok(PropsPolish.COVER_LIP_ALPHA >= 0.85, "cover lip is near-opaque ink")
+	var r := PropsPolish.shadow_rect(Vector2.ZERO, 12.0, PropsPolish.HEIGHT_ROCK)
+	Runner.T.ok(r.size.x >= 40.0, "boulder shadow is long enough to read at 640x360")

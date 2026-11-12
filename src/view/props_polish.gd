@@ -10,7 +10,9 @@ const SUN_FROM := Vector2(-0.70710678, -0.70710678)
 const SHADOW_DIR := Vector2(0.70710678, 0.70710678)
 const SHADOW_ANGLE := PI / 4.0
 const INK := Color(0.05, 0.04, 0.03)
-const COVER_LIP_ALPHA := 0.62
+const COVER_LIP_ALPHA := 0.92
+const SHADOW_GAIN := 1.9
+const LEN_GAIN := 1.35
 const HEIGHT_ROCK := 13.0
 const HEIGHT_SLAB := 9.0
 const HEIGHT_WRECK := 20.0
@@ -22,15 +24,16 @@ const HEIGHT_CRATE := 6.0
 
 ## Centre and size of the cast-shadow card for a prop of half-width `hw` and height `h`.
 static func shadow_rect(pos: Vector2, hw: float, h: float) -> Rect2:
-	var length := hw * 1.4 + h * 1.7
+	var length := (hw * 1.4 + h * 1.7) * LEN_GAIN
 	var width := maxf(hw * 1.1, 4.0)
-	var centre := pos + Vector2(0.0, hw * 0.15) + SHADOW_DIR * (h * 0.8)
+	var centre := pos + Vector2(0.0, hw * 0.15) + SHADOW_DIR * (h * 1.1 + length * 0.12)
 	return Rect2(centre - Vector2(length, width) * 0.5, Vector2(length, width))
 
 
 ## Soft directional cast shadow: a soft spot rotated onto the sun bearing.
 static func cast_shadow(canvas: CanvasItem, pos: Vector2, hw: float, h: float, alpha := 0.40) -> void:
 	var r := shadow_rect(pos, hw, h)
+	alpha = minf(alpha * SHADOW_GAIN, 0.85)
 	var centre := r.position + r.size * 0.5
 	canvas.draw_set_transform(centre.round(), SHADOW_ANGLE, Vector2.ONE)
 	canvas.draw_texture_rect(Art.tex("fx_softspot"), Rect2(-r.size * 0.6, r.size * 1.2), false,
@@ -52,19 +55,32 @@ static func _unit_ellipse() -> PackedVector2Array:
 
 
 ## COVER marker, drawn under the sprite: dark contact core + heavy base lip.
-static func cover_base_round(canvas: CanvasItem, pos: Vector2, r: float, fade := 1.0) -> void:
-	Art.circle(canvas, pos + Vector2(0.0, r * 0.28), r * 0.82, Color(INK.r, INK.g, INK.b, 0.30 * fade))
-	Art.arc(canvas, pos + Vector2(0.0, 1.0), r, 0.05 * PI, 0.95 * PI, 14,
-		Color(INK.r, INK.g, INK.b, 0.85 * fade), 3.0)
+static func cover_base_round(canvas: CanvasItem, pos: Vector2, r: float, fade := 1.0, heavy := true) -> void:
+	var w := 5.0 if heavy else 2.0
+	Art.circle(canvas, pos + Vector2(0.0, r * 0.30), r * 0.95, Color(INK.r, INK.g, INK.b, 0.50 * fade))
+	Art.arc(canvas, pos + Vector2(0.0, 1.5), r + 1.0, 0.02 * PI, 0.98 * PI, 16,
+		Color(INK.r, INK.g, INK.b, 0.95 * fade), w)
+	Art.arc(canvas, pos + Vector2(0.0, -0.5), r + 3.0, 0.15 * PI, 0.85 * PI, 12,
+		Color(INK.r, INK.g, INK.b, 0.40 * fade), 2.0)
 
 
-static func cover_base_rect(canvas: CanvasItem, rect: Rect2, fade := 1.0) -> void:
+static func cover_base_rect(canvas: CanvasItem, rect: Rect2, fade := 1.0, frame := true) -> void:
 	var lip := Color(INK.r, INK.g, INK.b, COVER_LIP_ALPHA * fade)
-	canvas.draw_rect(Rect2(rect.position + Vector2(-1.0, rect.size.y - 1.0), Vector2(rect.size.x + 2.0, 3.0)), lip)
-	canvas.draw_rect(Rect2(rect.position + Vector2(rect.size.x - 1.0, 1.0), Vector2(2.0, rect.size.y)),
-		Color(INK.r, INK.g, INK.b, 0.4 * fade))
+	if not frame:
+		var c := rect.get_center() + Vector2(1.0, rect.size.y * 0.35)
+		canvas.draw_set_transform(c, 0.0, Vector2(rect.size.x * 0.58, rect.size.y * 0.55))
+		canvas.draw_colored_polygon(_unit_ellipse(), Color(INK.r, INK.g, INK.b, 0.62 * fade))
+		canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		return
+	canvas.draw_rect(Rect2(rect.position + Vector2(-2.0, rect.size.y - 2.0), Vector2(rect.size.x + 4.0, 5.0)), lip)
+	canvas.draw_rect(Rect2(rect.position + Vector2(rect.size.x - 1.0, 0.0), Vector2(3.0, rect.size.y + 2.0)),
+		Color(INK.r, INK.g, INK.b, 0.7 * fade))
+	canvas.draw_rect(Rect2(rect.position + Vector2(-2.0, 0.0), Vector2(2.0, rect.size.y + 2.0)),
+		Color(INK.r, INK.g, INK.b, 0.45 * fade))
+	canvas.draw_rect(Rect2(rect.position + Vector2(-1.0, -2.0), Vector2(rect.size.x + 1.0, 2.0)),
+		Color(INK.r, INK.g, INK.b, 0.45 * fade))
 	canvas.draw_rect(Rect2(rect.position + Vector2(0.0, -1.0), Vector2(rect.size.x, 1.0)),
-		Color(0.98, 0.95, 0.82, 0.25 * fade))
+		Color(0.98, 0.95, 0.82, 0.35 * fade))
 
 
 ## Per-instance value/warmth multiplier so repeats are never identical (alpha stays 1).
