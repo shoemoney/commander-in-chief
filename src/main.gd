@@ -10228,6 +10228,13 @@ func _draw_terrain() -> void:
 		if w["y"] <= whi and w["y"] + SimWorld.WATER_H >= wlo:
 			wbands.append([w["y"], w["y"] + SimWorld.WATER_H,
 				w["ford_x"] - SimWorld.FORD_HALF_W, w["ford_x"] + SimWorld.FORD_HALF_W])
+	# ground-polish: structured tone field + per-biome micro-detail (tufts, pebbles, cracks),
+	# under every prop below. Water cells are skipped with the same snapshot the decor uses.
+	GroundPolish.paint(self, cam_y, GroundPolish.plan(cam_y,
+		func(wy: float) -> int: return GroundStructure.biome_at(_ground_campaign and not _ground_biome_map.is_empty(),
+			ground_biome(sim.current_sector()), wy, _ground_biome_map),
+		func(sx: float, sy: float) -> bool: return _in_wbands(wbands, int(sx / PX), sim.camera_top + int(sy / PX)),
+		GroundPolish.lane_anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX)), _ground_biome)
 	# Low scrub understory scattered through the field (hash decorrelated from
 	# the cactus grid so scrub and cacti don't stack on the same cell).
 	# Each decor grid anchors to ITS OWN spacing modulus — the shared 64px grass

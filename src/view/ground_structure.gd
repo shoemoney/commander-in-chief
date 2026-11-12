@@ -104,12 +104,12 @@ static func lane_kind(sector: int) -> int:
 ## Both colours stay inside the biome's own palette; alpha is capped well under 0.4.
 static func lane_tint(kind: int) -> Array:
 	match kind:
-		LaneKind.DIRT: return [Color(0.40, 0.32, 0.21), 0.30, Color(0.70, 0.60, 0.42)]
-		LaneKind.MUD: return [Color(0.29, 0.28, 0.21), 0.32, Color(0.50, 0.47, 0.35)]
-		LaneKind.PLANK: return [Color(0.26, 0.25, 0.23), 0.28, Color(0.62, 0.60, 0.56)]
-		LaneKind.GRAVEL: return [Color(0.38, 0.34, 0.28), 0.30, Color(0.64, 0.58, 0.48)]
-		LaneKind.ROAD: return [Color(0.05, 0.05, 0.07), 0.30, Color(0.34, 0.34, 0.38)]
-		_: return [Color(0.24, 0.13, 0.11), 0.32, Color(0.44, 0.27, 0.22)]
+		LaneKind.DIRT: return [Color(0.40, 0.32, 0.21), 0.36, Color(0.72, 0.62, 0.44)]
+		LaneKind.MUD: return [Color(0.29, 0.28, 0.21), 0.36, Color(0.52, 0.49, 0.36)]
+		LaneKind.PLANK: return [Color(0.26, 0.25, 0.23), 0.34, Color(0.64, 0.62, 0.58)]
+		LaneKind.GRAVEL: return [Color(0.38, 0.34, 0.28), 0.36, Color(0.66, 0.60, 0.50)]
+		LaneKind.ROAD: return [Color(0.05, 0.05, 0.07), 0.34, Color(0.34, 0.34, 0.38)]
+		_: return [Color(0.24, 0.13, 0.11), 0.36, Color(0.46, 0.28, 0.22)]
 
 
 ## Soft-blob colour of the churned ground in front of a gate, per lane kind.
@@ -347,6 +347,7 @@ static func plan(anc: Array, gate_ys: Array, waters: Array, cam_y: float,
 		row["y"] = float(cr["wy"]) - cam_y
 		lane.append(row)
 	_evict_rows(wy_top, wy)
+	var edges := _lane_edges(lane)
 	_dress_lane(anc, cam_y, ruts, seams, dashes, details)
 	for gy in gate_ys:
 		var sy := float(gy) - cam_y
@@ -363,7 +364,38 @@ static func plan(anc: Array, gate_ys: Array, waters: Array, cam_y: float,
 		var fx := float(w["ford_x"]) * (1.0 / float(Fixed.ONE))
 		_planks(planks, fx, hw, wsy, water_h_px, int(wwy), lane_kind(sector_for_y(wwy)))
 	return {"lane": lane, "ruts": ruts, "seams": seams, "dashes": dashes,
-		"aprons": aprons, "planks": planks, "details": details}
+		"aprons": aprons, "planks": planks, "details": details, "edges": edges}
+
+
+## The worn track's EDGE: per side, a dark ragged rim at the outer shore and a pale lip just
+## inside it, as two polylines with noise-varied alpha, so the track reads as a trodden strip
+## with a shoulder instead of a smear. Flat 1-2px paint, alpha <= 0.3 (the honesty rule).
+## Returns [{pts, cols, w}] in screen space; four polylines, four draw calls.
+static func _lane_edges(lane: Array) -> Array:
+	var out: Array = []
+	if lane.size() < 2:
+		return out
+	for side: float in [-1.0, 1.0]:
+		for ring in 2:
+			var pts := PackedVector2Array()
+			var cols := PackedColorArray()
+			for r in lane:
+				var wy: float = r["wy"]
+				var hw: float = float(r["hwl"]) if side < 0.0 else float(r["hwr"])
+				var u := 0.93 if ring == 0 else 0.80
+				var x := float(r["cx"]) + side * hw * u + 1.6 * _vn(wy, 23.0, 31 + ring) + 0.8 * _vn(wy, 7.0, 33)
+				pts.append(Vector2(x, float(r["y"])))
+				var n := 0.5 + 0.5 * _vn(wy, 41.0, 35 + ring)
+				var kind: int = r["kind"]
+				var tint := lane_tint(kind)
+				if ring == 0:
+					var dk: Color = tint[0]
+					cols.append(Color(dk.r * 0.45, dk.g * 0.45, dk.b * 0.45, 0.10 + 0.20 * n))
+				else:
+					var lt: Color = tint[2]
+					cols.append(Color(lt.r, lt.g, lt.b, 0.04 + 0.12 * n))
+			out.append({"pts": pts, "cols": cols, "w": 2.0 if ring == 0 else 1.0})
+	return out
 
 
 ## Ruts (broken, uneven dashes), joints, centre-line fragments, puddles, potholes,
@@ -600,6 +632,8 @@ static func paint(canvas: CanvasItem, p: Dictionary) -> void:
 	for a in p["aprons"]:
 		_paint_blobs(canvas, a["blobs"], Vector2.ZERO)
 	_paint_lane(canvas, p["lane"])
+	for e in p.get("edges", []):
+		canvas.draw_polyline_colors(e["pts"], e["cols"], e["w"])
 	_paint_blobs(canvas, p["details"], Vector2.ZERO)
 	for r in p["ruts"]:
 		canvas.draw_line(Vector2(r["x0"], r["y0"]), Vector2(r["x1"], r["y1"]), r["color"], r["w"])
