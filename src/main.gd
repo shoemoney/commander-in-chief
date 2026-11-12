@@ -16780,6 +16780,7 @@ static func victory_trophy_rect(vpulse: float) -> Rect2:
 	return Rect2(Vector2(196.0 - tsz / 2.0, RESULT_PANEL_TOP - tsz), Vector2(tsz, tsz))
 
 
+var _rp := ResultsPolish.new()   # results-polish: count-up clock + row/stamp painter
 func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Color, shine := false,
 		doc := {}) -> void:
 	## doc: optional DOCUMENT identity — {"band", "band_col"?, "form"} turns the
@@ -16808,7 +16809,7 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		if not String(row.get("icon", "")).is_empty():
 			rw += row.get("icon_size", 14.0) + 6.0
 		max_w = maxf(max_w, rw)
-	var panel_w := clampf(max_w + 44.0, 300.0, 620.0)
+	var panel_w := clampf(max_w + 64.0, 300.0, 620.0)
 	var panel_x := 320.0 - panel_w / 2.0
 	# Entrance: the run's final beat RISES into place over ~12 frames and fades up,
 	# instead of teleporting onto the screen. It used to SCALE in from 0.92 — see
@@ -16839,7 +16840,12 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 		Art.text_center(self, doc["band"], 320, panel_top + 15.0, 8,
 			Color(0.06, 0.06, 0.05, accent.a))
 		draw_rect(result_doc_rule_rect(panel_x, panel_w), Color(band_col, 0.4 * accent.a))
-	Art.text_center(self, title, 320, title_y, 24, title_col)
+	# results-polish: the lit table inset, then the outlined headline with its flanks.
+	var table_top := row_start_y - 14.0
+	var table_bot := row_start_y + float(maxi(rows.size(), 1) - 1) * row_h + 8.0
+	_rp.update(title, _result_t, _motion, Engine.get_frames_drawn(), ResultsPolish.skip_pressed())
+	ResultsPolish.draw_table_bg(self, panel_x, panel_w, table_top, table_bot, title_col, ea)
+	ResultsPolish.draw_headline(self, title, title_y, title_col, panel_x, panel_w, panel_top, shine, ea, _motion)
 	if shine and _motion >= 0.5:
 		# a1-11 VFX#10: a soft warm glint sweeps across the title on a slow loop (with
 		# a pause) so the run's payoff title catches the light like polished metal.
@@ -16850,27 +16856,11 @@ func _draw_result_panel(title: String, title_col: Color, rows: Array, accent: Co
 				false, Color(1.0, 0.95, 0.7, 0.5 * sin(sw * PI) * ea))
 			draw_set_transform_matrix(base_x)   # RESTORE the entrance matrix, not identity
 	for i in rows.size():
-		var row: Dictionary = rows[i]
-		var row_text: String = row["text"]
-		var col: Color = row["color"]
-		col.a *= ea                      # rows arrive with the plate, not ahead of it
-		var row_size: int = row.get("size", 11)
-		var icon: String = row.get("icon", "")
-		var icon_size: float = row.get("icon_size", 14.0)
-		var y := row_start_y + i * row_h
-		var text_w := Art.tw(row_text, row_size)
-		var gap := 6.0
-		var total_w := text_w + (icon_size + gap if not icon.is_empty() else 0.0)
-		var x := 320.0 - total_w / 2.0
-		if not icon.is_empty():
-			# icon_col tints white-with-alpha menu-icon art (mi_medal_* grades);
-			# untinted rows keep drawing as-authored.
-			var icon_col: Color = row.get("icon_col", Color.WHITE)
-			icon_col.a *= ea
-			draw_texture_rect(Art.tex(icon), Rect2(x, y - icon_size + 3.0, icon_size, icon_size),
-				false, icon_col)
-			x += icon_size + gap
-		Art.text(self, row_text, Vector2(x, y), row_size, col)   # shadowed like every other HUD string
+		_rp.draw_row(self, rows[i], i, row_start_y + i * row_h, row_h,
+			panel_x + ResultsPolish.TABLE_PAD, panel_x + panel_w - ResultsPolish.TABLE_PAD, ea)
+	# The rank seal lands on the plate's top-right corner once the tally has counted up.
+	ResultsPolish.draw_stamp(self, Vector2(panel_x + panel_w - 38.0, panel_top - 4.0),
+		ResultsPolish.rank_grade(rows), ResultsPolish.rank_color(rows), _rp.stamp_age(rows.size()), ea, _motion)
 	if not doc.is_empty():
 		# The form number files the card as a document, not a stats dump —
 		# microline seated at the plate's bottom edge, dimmer than the rows.
