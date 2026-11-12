@@ -16,8 +16,9 @@ const TRAIL_STEP := 5.0     # world px between samples
 const FILL_HOT := Color(0.98, 0.42, 0.12)
 const FILL_BASE := Color(0.85, 0.25, 0.18)
 const GOLD := Color(0.95, 0.78, 0.35)
-const SCRIM_COL := Color(0.03, 0.04, 0.07, 0.78)   # arena wash-crush: must beat the red decor
-const ROTOR_DISC_ALPHA := 0.34
+const SCRIM_COL := Color(0.03, 0.04, 0.07, 0.38)   # arena disc scrim: calms the red decor under the fight, never the whole frame
+const SCRIM_EDGE_LOAD := 0.06   # what the disc's feathered rim may add to the border wash budget (main folds it into _wash_load)
+const ROTOR_DISC_ALPHA := 0.14
 const SHADOW_ALPHA := 0.62
 
 static var _trails := {}   # key -> Array[Vector3] (world x, world y, hull angle)
@@ -52,7 +53,7 @@ static func fire_count(wound: float) -> int:
 
 static func draw_damage(ci: CanvasItem, center: Vector2, wound: float, r: float, motion: float, seed_i := 0) -> void:
 	## Smoke columns from stage 1, licking flames from stage 2. `r` is the hull radius.
-	## Smoke is LIGHT grey with a dark core so it reads against dark hulls and dark floors alike.
+	## Smoke is dark, small and starts behind the hull so it trails off it instead of veiling the airframe.
 	var stage := damage_stage(wound)
 	if stage == 0:
 		return
@@ -66,14 +67,14 @@ static func draw_damage(ci: CanvasItem, center: Vector2, wound: float, r: float,
 		if anim == 0.0:
 			ph = fposmod(float(i) / float(n) + 0.15, 1.0)
 		var sx := center.x + sin(float(i) * 2.3 + float(seed_i)) * r * 0.55 + ph * 10.0 * k
-		var sy := center.y - r * 0.1 - ph * (r * 1.5 + 14.0)
-		var sr := (4.0 + ph * 9.0) * k
+		var sy := center.y - r * 0.45 - ph * (r * 1.5 + 14.0)
+		var sr := (3.0 + ph * 6.0) * k
 		var al := minf(0.9, (1.0 - ph) * 1.3)
-		var g := 0.30 + 0.12 * float(i % 3)
+		var g := 0.14 + 0.05 * float(i % 3)
 		ci.draw_texture_rect(soft, Rect2(sx - sr * 1.5, sy - sr * 1.5, sr * 3.0, sr * 3.0), false,
-			Color(g * 0.3, g * 0.3, g * 0.32, al * 0.6))
-		ci.draw_circle(Vector2(sx, sy), sr, Color(g, g, g * 1.04, al * 0.85))
-		ci.draw_circle(Vector2(sx - sr * 0.3, sy - sr * 0.3), sr * 0.55, Color(g + 0.2, g + 0.2, g + 0.2, al * 0.7))
+			Color(g * 0.3, g * 0.3, g * 0.32, al * 0.4))
+		ci.draw_circle(Vector2(sx, sy), sr, Color(g, g, g * 1.04, al * 0.7))
+		ci.draw_circle(Vector2(sx - sr * 0.3, sy - sr * 0.3), sr * 0.55, Color(g + 0.1, g + 0.1, g + 0.1, al * 0.45))
 	for i in fire_count(wound):
 		var ang := 0.7 + float(i) * 1.7 + float(seed_i)
 		var base := center + Vector2(cos(ang) * r * 0.85, sin(ang) * r * 0.5 + r * 0.1)
@@ -178,14 +179,14 @@ static func draw_rotor(ci: CanvasItem, pos: Vector2, radius: float, motion: floa
 	var soft: Texture2D = Art.tex("fx_softspot")
 	ci.draw_texture_rect(soft, Rect2(pos.x - radius * 1.1, pos.y - radius * 1.1, radius * 2.2, radius * 2.2), false,
 		Color(0.85, 0.9, 0.95, ROTOR_DISC_ALPHA))
-	ci.draw_arc(pos, radius, 0.0, TAU, 40, Color(0.95, 0.97, 1.0, 0.55), 1.5)
+	ci.draw_arc(pos, radius, 0.0, TAU, 40, Color(0.95, 0.97, 1.0, 0.22), 1.0)
 	var base := 0.0 if motion < 0.5 else t * 0.9
 	for blade in 2:
 		for k in 6:
 			var a := base + float(blade) * PI + float(k) * -0.16
-			var al := 0.8 - float(k) * 0.12
+			var al := 0.34 - float(k) * 0.05
 			var v := Vector2.from_angle(a) * radius
-			ci.draw_line(pos, pos + v, Color(0.96, 0.97, 1.0, al), 4.5 - float(k) * 0.6)
+			ci.draw_line(pos, pos + v, Color(0.96, 0.97, 1.0, al), 3.0 - float(k) * 0.4)
 	ci.draw_circle(pos, 6.0, Color(0.2, 0.2, 0.25))
 	ci.draw_circle(pos, 3.0, Color(0.8, 0.82, 0.88))
 
@@ -231,7 +232,7 @@ static func draw_bar(ci: CanvasItem, rect: Rect2, frac: float, fill: Color, ghos
 	ci.draw_rect(well, Color(0.1, 0.03, 0.03, 1.0))
 	if ghost > frac:
 		ci.draw_rect(Rect2(well.position + Vector2(fw * frac, 0), Vector2(fw * (ghost - frac), well.size.y)),
-			Color(1.0, 0.95, 0.7, 0.95))
+			fill.lerp(Color(1.0, 0.9, 0.7), 0.35).darkened(0.25))
 	if frac > 0.0:
 		var fc := fill_color(frac, fill)
 		var fr := Rect2(well.position, Vector2(fw * frac, well.size.y))
@@ -262,12 +263,12 @@ static func draw_bar(ci: CanvasItem, rect: Rect2, frac: float, fill: Color, ghos
 # ------------------------------------------------------------------- arena
 
 static func draw_arena_scrim(ci: CanvasItem, center: Vector2, motion: float) -> void:
-	## The finale floor is red-brown on red-brown. Crush the whole frame toward a cool
-	## charcoal (the swirl decor, scorch and red wash all sit under this), then lift a
-	## dim steel-grey stage under the fight so the boss, rings and bullets own the frame.
+	## The finale floor is red-brown on red-brown. Tone the ARENA DISC toward a cool charcoal
+	## (feathered, so the screen border and the cover/players outside it keep baseline light),
+	## then lift a dim steel-grey stage under the fight so the boss, rings and bullets own it.
 	var soft: Texture2D = Art.tex("fx_softspot")
-	ci.draw_rect(Rect2(-40.0, -40.0, 720.0, 440.0), SCRIM_COL)
+	ci.draw_texture_rect(soft, Rect2(center.x - 300.0, center.y - 190.0, 600.0, 380.0), false, SCRIM_COL)
 	ci.draw_texture_rect(soft, Rect2(center.x - 250.0, center.y - 150.0, 500.0, 330.0), false,
-		Color(0.34, 0.36, 0.40, 0.55))
+		Color(0.34, 0.36, 0.40, 0.30))
 	ci.draw_texture_rect(soft, Rect2(center.x - 120.0, center.y - 90.0, 240.0, 180.0), false,
-		Color(0.42, 0.40, 0.38, 0.35))
+		Color(0.42, 0.40, 0.38, 0.22))

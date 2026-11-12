@@ -10710,6 +10710,7 @@ func _draw_foundry_arena() -> void:
 	if not sim.colossus.is_empty() and sim.colossus.get("alive", false):
 		var cpos := _to_screen(sim.colossus["x"], sim.colossus["y"])
 		BossesPolish.draw_arena_scrim(self, cpos, _motion)
+		_wash_load = 1.0 - (1.0 - _wash_load) * (1.0 - BossesPolish.SCRIM_EDGE_LOAD)
 		var ph: int = sim.colossus_phase()
 		var ir := float(SimWorld.COLOSSUS_RING_INNER + (ph - 1) * SimWorld.COLOSSUS_RING_STEP)
 		var ra := 0.65 + 0.2 * Art.pulse(0.05)

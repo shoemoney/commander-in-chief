@@ -76,11 +76,15 @@ func test_real_draw_functions_call_the_module() -> void:
 
 
 func test_presentation_is_bold_enough_for_640x360() -> void:
-	Runner.T.ok(BossesPolish.SCRIM_COL.a >= 0.7, "arena scrim crushes the red decor wash")
+	Runner.T.ok(BossesPolish.SCRIM_COL.a >= 0.3 and BossesPolish.SCRIM_COL.a <= 0.45, "arena scrim is a moderate disc tone, not a frame crush")
 	Runner.T.ok(BossesPolish.SCRIM_COL.r < 0.1 and BossesPolish.SCRIM_COL.b > BossesPolish.SCRIM_COL.r, "scrim is cool, not red")
-	Runner.T.ok(BossesPolish.ROTOR_DISC_ALPHA >= 0.3, "rotor blur disc is visible at native size")
+	Runner.T.ok(BossesPolish.ROTOR_DISC_ALPHA >= 0.08 and BossesPolish.ROTOR_DISC_ALPHA <= 0.2, "rotor blur disc is subtle so the airframe stays readable")
 	Runner.T.ok(BossesPolish.SHADOW_ALPHA >= 0.5, "heli ground shadow reads")
 	Runner.T.ok(BossesPolish.shadow_offset(0.0, 1.0).y >= 40.0, "shadow sits well off the hull for altitude")
+	var bp := FileAccess.get_file_as_string("res://src/view/bosses_polish.gd")
+	var scrim_body := bp.substr(bp.find("static func draw_arena_scrim"))
+	Runner.T.ok(not scrim_body.contains("draw_rect"), "arena scrim is a feathered disc, never a full-frame rect")
+	Runner.T.ok(_body("res://src/main.gd", "_draw_foundry_arena").contains("SCRIM_EDGE_LOAD"), "arena scrim is accounted for in the wash budget")
 	var m := FileAccess.get_file_as_string("res://src/main.gd")
 	Runner.T.ok(not _body("res://src/main.gd", "_draw_bar").contains("ui_bar_frame"), "bar frame sprite no longer smothers the styled bar")
 	Runner.T.ok(m.contains("BossesPolish.draw_damage(self, cbody"), "colossus draws damage smoke and fire")
