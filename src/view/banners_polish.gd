@@ -14,6 +14,7 @@ const ENTER_T := 0.92        # banner t (1 -> 0) above which the plate wipes ope
 const ENTER_DROP := 4.0      # px the banner rises into place
 const EXIT_T := 0.14         # banner t below which the plate wipes closed
 const ROW0_H := 24.0         # tallest alert plate (size 16 + 7 = 23) and a 1px gap: row 0's reserve
+const LABEL_GAP := 3.0       # clear px kept between a banner plate and any world label
 const LABEL_PIN := 4.0       # pointer triangle height
 
 
@@ -71,8 +72,13 @@ static func draw_plate(ci: CanvasItem, full: Rect2, accent: Color, a: float, r :
 	var cap := Color(accent.r, accent.g, accent.b, 0.95 * a)
 	ci.draw_rect(Rect2(b.position.x, b.position.y + 2.0, CAP_W, b.size.y - 4.0), cap)
 	ci.draw_rect(Rect2(b.end.x - CAP_W, b.position.y + 2.0, CAP_W, b.size.y - 4.0), cap)
-	ci.draw_rect(Rect2(b.position.x + CAP_W + 1.0, b.position.y + 1.0, b.size.x - 2.0 * CAP_W - 2.0, 1.0),
-		Color(1, 1, 1, 0.07 * a))
+	var inner_w := b.size.x - 2.0 * CAP_W - 2.0
+	ci.draw_rect(Rect2(b.position.x + CAP_W + 1.0, b.position.y + 1.0, inner_w, 1.0), Color(1, 1, 1, 0.12 * a))
+	# accent-tinted upper half and a dim inner keyline: a lit enamel plate, not a flat slab
+	ci.draw_rect(Rect2(b.position.x + CAP_W + 1.0, b.position.y + 2.0, inner_w, floorf((b.size.y - 4.0) / 2.0)),
+		Color(accent.r, accent.g, accent.b, 0.14 * a))
+	ci.draw_rect(Rect2(b.position.x + CAP_W + 1.0, b.end.y - 3.0, inner_w, 1.0),
+		Color(accent.r, accent.g, accent.b, 0.30 * a))
 
 
 ## Solid lettering: a hard black rim, a drop row, then the colour drawn twice one pixel apart so

@@ -9613,7 +9613,7 @@ func _draw() -> void:
 	# measured from, and most world-label producers draw before that. Band rows persist for
 	# seconds, so a one-frame-stale rect is the right trade against printing into the band.
 	for r in _band:
-		_label_slots.append(r["rect"])
+		_label_slots.append((r["rect"] as Rect2).grow(BannersPolish.LABEL_GAP))   # breathing room: plates never touch
 	# ...and THE BOTTOM RAIL. The three reservations above all sit at the TOP of the frame,
 	# and claim_label_slot's only bound was `y + h <= 360` — so the arbiter knew nothing
 	# about the caption strip or the verb chip, which $HUD paints from layer 2 straight over
@@ -15592,8 +15592,17 @@ func _draw_objective_markers() -> void:
 			# washed out over bright water/sand where the outlined pips stay crisp.
 			# A small plate with a pointer down to the thing it marks — the shared in-world
 			# label style (BannersPolish.draw_label_plate), so the icon reads on any ground.
-			BannersPolish.draw_label_plate(self, Rect2(mp + Vector2(-7.0, -22.0 + bob), Vector2(14, 14)),
-				m["col"], mp + Vector2(0.0, -2.0 + bob))
+			var mplate := Rect2(mp + Vector2(-7.0, -22.0 + bob), Vector2(14, 14))
+			var mclear := true
+			for ls in _label_slots:
+				if (ls as Rect2).intersects(mplate.grow(1.0).merge(Rect2(mp + Vector2(-3.0, -8.0 + bob), Vector2(6, 8)))):
+					mclear = false   # a plate over a world label would eat its glyphs: icon only
+					break
+			if mclear:
+				BannersPolish.draw_label_plate(self, mplate, m["col"], mp + Vector2(0.0, -2.0 + bob))
+			else:
+				draw_texture_rect(Art.tex(m["icon"]),
+					Rect2(mp + Vector2(-4.0, -19.0 + bob), Vector2(10, 10)), false, Color(0, 0, 0, 0.55))
 			draw_texture_rect(Art.tex(m["icon"]),
 				Rect2(mp + Vector2(-5.0, -20.0 + bob), Vector2(10, 10)), false, m["col"])
 		elif edge_used < 6:
