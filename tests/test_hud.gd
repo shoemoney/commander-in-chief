@@ -4518,7 +4518,7 @@ const GLYPH_CALL_SITES := {
 	# chip, revive prompt), 1 genuinely slot-centred call (roll), and the pip/act seams
 	# that reach Art directly. Counts exclude comment lines.
 	"src/view/hud.gd": {"_emit_act_glyph_at(\"": 4, "_emit_act_glyph(\"": 1,
-		"Art.draw_glyph(self": 2, "Art.draw_glyph_left(self": 1},
+		"Art.draw_glyph(self": 0, "Art.draw_glyph_left(self": 0, "HudPolish.draw_act_glyph(self": 3},
 	# main.gd: 2 world label pairs + the wheel cue are left-anchored; the world interact
 	# prompt and the downed-buddy chevron are genuinely centred on their own point.
 	"src/main.gd": {"Art.draw_glyph_left(self": 3, "Art.draw_glyph(self": 2},

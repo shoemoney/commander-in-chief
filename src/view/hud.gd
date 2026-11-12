@@ -1177,6 +1177,7 @@ func panel_bottom() -> float:
 	return 2.0 + HEAD_H + sim.players.size() * ROW_H + (ROW_H if _shop_eligible(sim) else 0.0)
 
 
+var _polish := HudPolish.new()   # view-only polish state (icon trays queued per frame)
 func _draw() -> void:
 	_dirty = false   # c2-09: this paint reflects the latest state; _process re-marks on change
 	if main == null or main.sim == null:
@@ -1185,6 +1186,7 @@ func _draw() -> void:
 			RenderingServer.canvas_item_clear(_plate_ci)
 		return
 	var sim: SimWorld = main.sim
+	_polish.begin_frame()
 	# REDUCE MOTION: the value rollup still runs (_process), but the visual
 	# pulse (scale-thump + gold color lerp) holds at 0 — no animated flash.
 	var chest_pulse: float = _drawn_pulse(_chest_pulse)
@@ -1527,6 +1529,8 @@ func _draw_plate(panel_h: float) -> void:
 	# degenerate/cropped band (_shown_pips empty), in which case there is nothing to dock and the header
 	# must NOT grow. So gate on the real render set, not just the corner reservation.
 	var tsz := ptex_tex.get_size()
+	_polish_plate_under(panel_h)
+	plate_col = HudPolish.PLATE_GRAIN
 	var pip_n := _pips.size()   # c4-16: once-per-paint cache (refreshed at the top of _draw)
 	if pip_n == 0:
 		# Baseline: single dynamic-width rect (full texture) + hairline border.
@@ -1576,6 +1580,35 @@ func _draw_plate(panel_h: float) -> void:
 	if head_r > body_r + PLATE_SEAM_MIN and _plate_ci.is_valid():
 		RenderingServer.canvas_item_add_line(_plate_ci,
 			Vector2(body_r, 2.0 + hb), Vector2(head_r, 2.0 + hb), Color(0, 0, 0, 0.28), 1.0)
+
+
+## Solid backing, queued icon trays and the header/row divider — all on the z:-1 plate item (so the
+## per-player aperture still dissolves them), emitted BEFORE the grain texture and bezel frame.
+func _polish_plate_under(panel_h: float) -> void:
+	var pip_n := _pips.size()
+	var header := Rect2(2, 2, _plate_r, panel_h)
+	var body := Rect2()
+	if pip_n > 0:
+		var hb := _header_bottom(pip_n, panel_h) - 2.0
+		header = Rect2(2, 2, RIGHT - 2.0, hb)
+		if panel_h > 2.0 + hb + PLATE_EPS:
+			body = Rect2(2, 2.0 + hb, minf(2.0 + _plate_r, RIGHT) - 2.0, panel_h - 2.0 - hb)
+	for r in HudPolish.fill_rects(header, body):
+		_emit_plate_solid(r, HudPolish.PLATE_FILL)
+	var sim = main.get("sim") if main != null else null
+	if sim != null:
+		var dy := HudPolish.divider_y(player_rows_top(sim))
+		_emit_plate_solid(Rect2(8.0, dy, maxf(0.0, _plate_r - 12.0), 1.0), HudPolish.DIVIDER)
+	for t in _polish.trays():
+		_emit_plate_solid(t, HudPolish.TRAY_EDGE)
+		_emit_plate_solid(t.grow(-1.0), HudPolish.TRAY_FILL)
+
+
+## Seam for the solid polish rects (default: the z:-1 plate item; a headless capture overrides it).
+func _emit_plate_solid(r: Rect2, col: Color) -> void:
+	if not _plate_ci.is_valid():
+		return
+	RenderingServer.canvas_item_add_rect(_plate_ci, r, col)
 
 
 ## c4-20: the pure geometry of the bevelled plate frame for ONE region — the 8 texture slices
@@ -2875,13 +2908,14 @@ func _verb_legend() -> void:
 	var a := _verb_alpha(_verb_show, main._motion)   # same source the _process dirty check reads
 	var y: float = plate.get_center().y
 	# Fades with the glyphs.
-	_emit_rect(plate, Color(0.03, 0.05, 0.03, 0.75 * a))
+	_emit_rect(plate, Color(HudPolish.EDGE_HI.r, HudPolish.EDGE_HI.g, HudPolish.EDGE_HI.b, 0.6 * a))
+	_emit_rect(plate.grow(-1.0), Color(0.03, 0.05, 0.03, 0.94 * a))
 	# Emit straight off the primitive list (through the seams below), so pixels land
 	# exactly where the test measures and the capture test sees the real commands.
 	for p in verb_legend_primitives(y, segs):
 		_emit_glyph(p["act"], p["glyph"].get_center(), VERB_GH, Color(1, 1, 1, a))
 		_emit_label(p["label_txt"], Vector2(p["label"].position.x, y + 3.0),
-			Color(0.82, 0.87, 0.77, a))
+			Color(0.96, 0.98, 0.92, a))
 
 
 # c1-04: draw seams — every native draw _verb_legend emits routes through one of these
@@ -2894,7 +2928,7 @@ func _emit_glyph(act: String, center: Vector2, size: float, c: Color) -> void:
 	# Both live binds, keyboard AND pad: the keycode arm shipped first, so a pad player who
 	# rebound a verb still read the frozen _GLYPH_PAD ship default. This strip is P1's, hence
 	# device 0.
-	Art.draw_glyph(self, act, center, size, c, false, main.bind_for_glyph(act),
+	HudPolish.draw_act_glyph(self, act, center, size, c, false, main.bind_for_glyph(act),
 		main.pad_bind_for_glyph(act))
 func _emit_label(txt: String, pos: Vector2, c: Color) -> void:
 	Art.text(self, txt, pos, Art.fs(TYPE_MICRO), c)
@@ -3475,6 +3509,7 @@ func _stat(icon: String, txt: String, x: float, y: float,
 	# layout is decided before any pixel lands.
 	if not _measure:
 		var r := Rect2(x, y, ICON, ICON)
+		_polish.queue_tray(r)
 		if pulse > 0.01:
 			var gc := r.get_center()
 			draw_set_transform(gc, 0.0, Vector2.ONE * (1.0 + pulse * 0.25))
@@ -3679,7 +3714,7 @@ func _dead_chips(p: Dictionary, px: float, ry: float, i: int, sim: SimWorld) -> 
 # colorblind palette the rest of the row does.
 const VITALS_GAP := 4.0     # between the vest pip's plate edge and the shield socket (2px clear of it)
 const VITALS_TRAIL := 8.0   # trailing gap after the shield socket before the first equipment chip
-const VITALS_OFF := 0.3     # ink density of an UNLIT pip (the roll glyph / mag-segment unlit idiom)
+const VITALS_OFF := 0.45    # ink density of an UNLIT pip (the roll glyph / mag-segment unlit idiom)
 const VITALS_TRAY := Color(0.1, 0.11, 0.09, 0.85)          # the same dark tray _pip / +N clip use
 const VITALS_LIT := Color(0.75, 0.9, 0.6)                 # a held vest — Art.safe() remaps to CB cyan
 const VITALS_SOCKET_R := 6.0   # the shield socket's radius. r + w/2 == ICON/2, so the socket is
@@ -4001,7 +4036,7 @@ func _emit_ovf(ox: float, y: float, w: float, txt: String, actionable_culled := 
 func _emit_act_glyph(act: String, center: Vector2, size: float, col: Color, alt: bool) -> void:
 	# `alt` IS the per-player device flag every caller passes (`i == 1`, P2 being hardwired to
 	# pad 1), so it doubles as the pad_bind device index — P2's chip shows P2's own rebinds.
-	Art.draw_glyph(self, act, center, size, col, alt, main.bind_for_glyph(act),
+	HudPolish.draw_act_glyph(self, act, center, size, col, alt, main.bind_for_glyph(act),
 		main.pad_bind_for_glyph(act, 1 if alt else 0))
 
 
@@ -4010,7 +4045,8 @@ func _emit_act_glyph(act: String, center: Vector2, size: float, col: Color, alt:
 ## width. Centring a variable-width cap on a fixed offset is what welded the keycap onto the
 ## revive price; here the cap can only ever grow RIGHTWARDS, into space _act_glyph_adv reserved.
 func _emit_act_glyph_at(act: String, left_x: float, mid_y: float, size: float, col: Color, alt: bool) -> void:
-	Art.draw_glyph_left(self, act, left_x, mid_y, size, col, alt, main.bind_for_glyph(act),
+	var cw := Art.glyph_cap_w(act, size, main.bind_for_glyph(act), main.pad_bind_for_glyph(act, 1 if alt else 0), alt)
+	HudPolish.draw_act_glyph(self, act, Vector2(left_x + cw / 2.0, mid_y), size, col, alt, main.bind_for_glyph(act),
 		main.pad_bind_for_glyph(act, 1 if alt else 0))
 
 
