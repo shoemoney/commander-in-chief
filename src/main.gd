@@ -15246,7 +15246,6 @@ func _draw_bar(rect: Rect2, frac: float, fill := Color(0.85, 0.25, 0.18),
 	## Boss/phase bar: dark well, damage-lag ghost chip, heat-shifting gradient fill,
 	## phase pips and gold end caps (BossesPolish.draw_bar), metal frame on top.
 	BossesPolish.draw_bar(self, rect, frac, fill, ghost, ticks, _motion)
-	draw_texture_rect(Art.tex("ui_bar_frame"), rect, false)
 
 
 func _bar_ghost(key: String, frac: float) -> float:

@@ -16,6 +16,9 @@ const TRAIL_STEP := 5.0     # world px between samples
 const FILL_HOT := Color(0.98, 0.42, 0.12)
 const FILL_BASE := Color(0.85, 0.25, 0.18)
 const GOLD := Color(0.95, 0.78, 0.35)
+const SCRIM_COL := Color(0.03, 0.04, 0.07, 0.78)   # arena wash-crush: must beat the red decor
+const ROTOR_DISC_ALPHA := 0.34
+const SHADOW_ALPHA := 0.62
 
 static var _trails := {}   # key -> Array[Vector3] (world x, world y, hull angle)
 
@@ -49,30 +52,35 @@ static func fire_count(wound: float) -> int:
 
 static func draw_damage(ci: CanvasItem, center: Vector2, wound: float, r: float, motion: float, seed_i := 0) -> void:
 	## Smoke columns from stage 1, licking flames from stage 2. `r` is the hull radius.
+	## Smoke is LIGHT grey with a dark core so it reads against dark hulls and dark floors alike.
 	var stage := damage_stage(wound)
 	if stage == 0:
 		return
 	var t := float(Engine.get_physics_frames())
 	var anim := 0.0 if motion < 0.5 else 1.0
-	for i in smoke_count(wound):
-		var ph := fposmod(t * 0.016 * anim + float(i) * 0.19 + float(seed_i) * 0.07, 1.0)
+	var k := clampf(r / 18.0, 1.0, 2.4)   # a 110px colossus needs bigger fires than a tank
+	var soft: Texture2D = Art.tex("fx_softspot")
+	var n := smoke_count(wound)
+	for i in n:
+		var ph := fposmod(t * 0.014 * anim + float(i) / float(n) + float(seed_i) * 0.07, 1.0)
 		if anim == 0.0:
-			ph = fposmod(float(i) * 0.19 + 0.1, 1.0)
-		var sx := center.x + sin(float(i) * 2.3 + float(seed_i)) * r * 0.5 + ph * 6.0
-		var sy := center.y - r * 0.15 - ph * (r * 1.1 + 12.0)
-		var sr := 3.0 + ph * (4.0 + r * 0.16)
-		var dark := 0.07 + 0.04 * float(i % 2)
-		var al := minf(1.0, (1.0 - ph) * 1.1)
-		ci.draw_circle(Vector2(sx, sy), sr, Color(dark, dark * 0.95, dark * 0.9, al))
-		ci.draw_circle(Vector2(sx - sr * 0.25, sy - sr * 0.25), sr * 0.6, Color(dark + 0.1, dark + 0.09, dark + 0.08, al * 0.6))
-	var k := clampf(r / 18.0, 1.0, 2.4)   # flame scale: a 110px colossus needs bigger fires than a tank
+			ph = fposmod(float(i) / float(n) + 0.15, 1.0)
+		var sx := center.x + sin(float(i) * 2.3 + float(seed_i)) * r * 0.55 + ph * 10.0 * k
+		var sy := center.y - r * 0.1 - ph * (r * 1.5 + 14.0)
+		var sr := (4.0 + ph * 9.0) * k
+		var al := minf(0.9, (1.0 - ph) * 1.3)
+		var g := 0.30 + 0.12 * float(i % 3)
+		ci.draw_texture_rect(soft, Rect2(sx - sr * 1.5, sy - sr * 1.5, sr * 3.0, sr * 3.0), false,
+			Color(g * 0.3, g * 0.3, g * 0.32, al * 0.6))
+		ci.draw_circle(Vector2(sx, sy), sr, Color(g, g, g * 1.04, al * 0.85))
+		ci.draw_circle(Vector2(sx - sr * 0.3, sy - sr * 0.3), sr * 0.55, Color(g + 0.2, g + 0.2, g + 0.2, al * 0.7))
 	for i in fire_count(wound):
-		var ang := float(i) * 2.1 + float(seed_i)
-		var base := center + Vector2(cos(ang), sin(ang) * 0.6) * r * 0.6
+		var ang := 0.7 + float(i) * 1.7 + float(seed_i)
+		var base := center + Vector2(cos(ang) * r * 0.85, sin(ang) * r * 0.5 + r * 0.1)
 		var fl := 0.5 + 0.5 * sin(t * 0.7 * anim + float(i) * 1.9)
-		var fh := (7.0 + fl * 4.0 * anim + 3.0 * wound) * k
-		var fw := 4.5 * k
-		ci.draw_circle(base, fw * 1.7, Color(1.0, 0.35, 0.05, 0.28))
+		var fh := (6.0 + fl * 3.0 * anim + 3.0 * wound) * k
+		var fw := 3.6 * k
+		ci.draw_circle(base, fw * 2.2, Color(1.0, 0.35, 0.05, 0.22))
 		ci.draw_colored_polygon(_flame(base, fw, fh), Color(0.95, 0.30, 0.06, 0.95))
 		ci.draw_colored_polygon(_flame(base + Vector2(0, 0.5), fw * 0.66, fh * 0.72), Color(1.0, 0.65, 0.15))
 		ci.draw_colored_polygon(_flame(base + Vector2(0, 1.0), fw * 0.34, fh * 0.42), Color(1.0, 0.95, 0.65))
@@ -164,40 +172,41 @@ static func draw_exhaust(ci: CanvasItem, pos: Vector2, hull: float, motion: floa
 # ------------------------------------------------------------------- helicopters
 
 static func draw_rotor(ci: CanvasItem, pos: Vector2, radius: float, motion: float) -> void:
-	## A translucent blur disc with a bright leading swept fan: reads as spinning blades,
-	## not two lines. Reduce-motion freezes the fan but keeps the disc.
+	## A pale blur disc with a bright swept fan: reads as spinning blades, not two lines.
+	## Reduce-motion freezes the fan but keeps the disc.
 	var t := float(Engine.get_physics_frames())
 	var soft: Texture2D = Art.tex("fx_softspot")
-	ci.draw_texture_rect(soft, Rect2(pos.x - radius, pos.y - radius, radius * 2.0, radius * 2.0), false,
-		Color(0.78, 0.82, 0.86, 0.16))
+	ci.draw_texture_rect(soft, Rect2(pos.x - radius * 1.1, pos.y - radius * 1.1, radius * 2.2, radius * 2.2), false,
+		Color(0.85, 0.9, 0.95, ROTOR_DISC_ALPHA))
+	ci.draw_arc(pos, radius, 0.0, TAU, 40, Color(0.95, 0.97, 1.0, 0.55), 1.5)
 	var base := 0.0 if motion < 0.5 else t * 0.9
 	for blade in 2:
-		for k in 5:
-			var a := base + float(blade) * PI + float(k) * -0.13
-			var al := 0.46 - float(k) * 0.09
+		for k in 6:
+			var a := base + float(blade) * PI + float(k) * -0.16
+			var al := 0.8 - float(k) * 0.12
 			var v := Vector2.from_angle(a) * radius
-			ci.draw_line(pos, pos + v, Color(0.9, 0.92, 0.95, al), 3.0 - float(k) * 0.4)
-	ci.draw_circle(pos, 5.0, Color(0.3, 0.3, 0.35))
-	ci.draw_circle(pos, 2.0, Color(0.7, 0.72, 0.78))
+			ci.draw_line(pos, pos + v, Color(0.96, 0.97, 1.0, al), 4.5 - float(k) * 0.6)
+	ci.draw_circle(pos, 6.0, Color(0.2, 0.2, 0.25))
+	ci.draw_circle(pos, 3.0, Color(0.8, 0.82, 0.88))
 
 
 static func shadow_offset(sway_phase: float, motion: float) -> Vector2:
 	## Where the airborne ground shadow sits relative to the hull: down-screen for altitude,
 	## swinging a few px as the heli drifts so the shadow visibly travels over the ground.
-	return Vector2(10.0 + sin(sway_phase) * 5.0 * motion, 40.0 + cos(sway_phase * 1.3) * 2.0 * motion)
+	return Vector2(16.0 + sin(sway_phase) * 9.0 * motion, 46.0 + cos(sway_phase * 1.3) * 4.0 * motion)
 
 
 static func draw_heli_shadow(ci: CanvasItem, pos: Vector2, radius: float, sway_phase: float, motion: float) -> void:
 	var sp := pos + shadow_offset(sway_phase, motion)
 	var soft: Texture2D = Art.tex("fx_softspot")
 	ci.draw_texture_rect(soft, Rect2(sp.x - radius, sp.y - radius * 0.55, radius * 2.0, radius * 1.1), false,
-		Color(0.0, 0.02, 0.0, 0.34))
+		Color(0.0, 0.0, 0.0, SHADOW_ALPHA))
 	var t := float(Engine.get_physics_frames())
 	var base := 0.0 if motion < 0.5 else t * 0.9
 	for blade in 2:
 		var v := Vector2.from_angle(base + float(blade) * PI) * radius * 0.9
 		v.y *= 0.55
-		ci.draw_line(sp - v * 0.2, sp + v, Color(0.0, 0.02, 0.0, 0.22), 2.0)
+		ci.draw_line(sp - v * 0.2, sp + v, Color(0.0, 0.0, 0.0, 0.5), 3.5)
 
 
 # ------------------------------------------------------------------- HP bar
@@ -213,50 +222,52 @@ static func pip_lit(k: int, ticks: int, frac: float) -> bool:
 
 
 static func draw_bar(ci: CanvasItem, rect: Rect2, frac: float, fill: Color, ghost: float, ticks: int, motion: float) -> void:
-	var inset := Vector2(rect.size.x * 0.06, rect.size.y * 0.22)
-	var well := Rect2(rect.position + inset, rect.size - inset * 2.0)
+	var well := Rect2(rect.position + Vector2(3.0, 1.0), rect.size - Vector2(6.0, 2.0))
 	frac = clampf(frac, 0.0, 1.0)
 	var fw := well.size.x
-	ci.draw_rect(well, Color(0.05, 0.04, 0.04, 0.95))
+	# heavy dark plate + gold bezel so the bar reads as a boss plate even at 640x360
+	ci.draw_rect(Rect2(rect.position - Vector2(1, 1), rect.size + Vector2(2, 2)), Color(0.02, 0.02, 0.02, 0.95))
+	ci.draw_rect(Rect2(rect.position, rect.size), GOLD.darkened(0.15), false, 1.0)
+	ci.draw_rect(well, Color(0.1, 0.03, 0.03, 1.0))
 	if ghost > frac:
 		ci.draw_rect(Rect2(well.position + Vector2(fw * frac, 0), Vector2(fw * (ghost - frac), well.size.y)),
-			Color(1.0, 0.86, 0.5, 0.75))
+			Color(1.0, 0.95, 0.7, 0.95))
 	if frac > 0.0:
 		var fc := fill_color(frac, fill)
 		var fr := Rect2(well.position, Vector2(fw * frac, well.size.y))
-		ci.draw_rect(fr, fc.darkened(0.25))
-		ci.draw_rect(Rect2(fr.position, Vector2(fr.size.x, maxf(1.0, fr.size.y * 0.55))), fc)
-		ci.draw_rect(Rect2(fr.position, Vector2(fr.size.x, 1.0)), fc.lightened(0.45))
-		# leading-edge glint, pulsing when nearly dead
+		ci.draw_rect(fr, fc.darkened(0.35))
+		ci.draw_rect(Rect2(fr.position, Vector2(fr.size.x, maxf(1.0, fr.size.y * 0.6))), fc.lightened(0.15))
+		ci.draw_rect(Rect2(fr.position, Vector2(fr.size.x, 1.0)), fc.lightened(0.6))
 		var lowp := 1.0 if frac > 0.25 or motion < 0.5 else 0.6 + 0.4 * sin(float(Engine.get_physics_frames()) * 0.3)
-		ci.draw_rect(Rect2(fr.end.x - 1.0, fr.position.y, 1.0, fr.size.y), Color(1, 0.95, 0.8, 0.9 * lowp))
-	# phase pips: diamond notches on the well edge, gold once that phase is burned through
+		ci.draw_rect(Rect2(fr.end.x - 1.5, fr.position.y - 1.0, 1.5, fr.size.y + 2.0), Color(1, 0.97, 0.85, lowp))
+	# phase pips: big diamonds straddling the bar edge, dark steel until that phase is burned through
 	for k in range(1, ticks):
 		var tx := well.position.x + fw * float(k) / float(ticks)
 		var lit := pip_lit(k, ticks, frac)
-		var pc := Color(0.04, 0.03, 0.03, 0.9)
-		ci.draw_line(Vector2(tx, well.position.y), Vector2(tx, well.end.y), pc, 1.0)
-		var dc := Color(0.35, 0.3, 0.22) if lit else GOLD
-		var cy := rect.end.y - 1.0
-		ci.draw_colored_polygon(PackedVector2Array([Vector2(tx - 3.0, cy), Vector2(tx, cy - 3.0),
-			Vector2(tx + 3.0, cy), Vector2(tx, cy + 3.0)]), dc)
-	# end caps: gold brackets so the bar reads as a boss plate, not a progress strip
-	var cy0 := rect.position.y + 1.0
-	var cy1 := rect.end.y - 1.0
-	for sx in [rect.position.x + 1.0, rect.end.x - 1.0]:
+		ci.draw_line(Vector2(tx, well.position.y), Vector2(tx, well.end.y), Color(0.0, 0.0, 0.0, 0.95), 2.0)
+		var cy := rect.end.y + 1.0
+		var pts := PackedVector2Array([Vector2(tx - 4.0, cy), Vector2(tx, cy - 4.0), Vector2(tx + 4.0, cy), Vector2(tx, cy + 4.0)])
+		ci.draw_colored_polygon(pts, Color(0.12, 0.1, 0.09) if lit else GOLD)
+		ci.draw_polyline(PackedVector2Array([pts[0], pts[1], pts[2], pts[3], pts[0]]), Color(0.0, 0.0, 0.0, 0.9), 1.0)
+	# end caps: chunky gold brackets
+	var cy0 := rect.position.y - 2.0
+	var cy1 := rect.end.y + 2.0
+	for sx in [rect.position.x - 2.0, rect.end.x + 2.0]:
 		var dir := 1.0 if sx < rect.get_center().x else -1.0
-		ci.draw_line(Vector2(sx, cy0), Vector2(sx, cy1), GOLD, 1.0)
-		ci.draw_line(Vector2(sx, cy0), Vector2(sx + 4.0 * dir, cy0), GOLD, 1.0)
-		ci.draw_line(Vector2(sx, cy1), Vector2(sx + 4.0 * dir, cy1), GOLD, 1.0)
+		ci.draw_line(Vector2(sx, cy0), Vector2(sx, cy1), GOLD, 2.0)
+		ci.draw_line(Vector2(sx, cy0), Vector2(sx + 6.0 * dir, cy0), GOLD, 2.0)
+		ci.draw_line(Vector2(sx, cy1), Vector2(sx + 6.0 * dir, cy1), GOLD, 2.0)
 
 
 # ------------------------------------------------------------------- arena
 
 static func draw_arena_scrim(ci: CanvasItem, center: Vector2, motion: float) -> void:
-	## The finale floor is red-brown on red-brown. A cool dark pool under the fight desaturates
-	## the clutter around the boss so the telegraph rings, bullets and hull separate from it.
+	## The finale floor is red-brown on red-brown. Crush the whole frame toward a cool
+	## charcoal (the swirl decor, scorch and red wash all sit under this), then lift a
+	## dim steel-grey stage under the fight so the boss, rings and bullets own the frame.
 	var soft: Texture2D = Art.tex("fx_softspot")
-	ci.draw_texture_rect(soft, Rect2(center.x - 330.0, center.y - 230.0, 660.0, 460.0), false,
-		Color(0.03, 0.03, 0.05, 0.5))
-	ci.draw_texture_rect(soft, Rect2(center.x - 190.0, center.y - 130.0, 380.0, 260.0), false,
-		Color(0.03, 0.03, 0.06, 0.3))
+	ci.draw_rect(Rect2(-40.0, -40.0, 720.0, 440.0), SCRIM_COL)
+	ci.draw_texture_rect(soft, Rect2(center.x - 250.0, center.y - 150.0, 500.0, 330.0), false,
+		Color(0.34, 0.36, 0.40, 0.55))
+	ci.draw_texture_rect(soft, Rect2(center.x - 120.0, center.y - 90.0, 240.0, 180.0), false,
+		Color(0.42, 0.40, 0.38, 0.35))
