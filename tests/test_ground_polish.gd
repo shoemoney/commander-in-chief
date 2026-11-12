@@ -115,7 +115,7 @@ func test_ground_stays_quieter_than_actors() -> void:
 	for b in range(1, 7):
 		for c in GP.palette(b):
 			Runner.T.ok((c as Color).a <= GP.STAMP_ALPHA_CAP, "biome %d stamp alpha %.2f stays under the cap" % [b, (c as Color).a])
-		Runner.T.ok(GP.tone_tint(b).a <= 0.35, "biome %d tone is faint" % b)
+		Runner.T.ok(GP.tone_tint(b).a <= 0.5, "biome %d tone is faint" % b)
 
 
 func test_track_has_a_defined_edge() -> void:
@@ -140,3 +140,27 @@ func test_main_terrain_actually_calls_the_polish() -> void:
 	Runner.T.ok(body.contains("_in_wbands"), "and culls it with the decor's water snapshot")
 	var gs := FileAccess.get_file_as_string("res://src/view/ground_structure.gd")
 	Runner.T.ok(gs.contains("draw_polyline_colors(e[\"pts\"]"), "paint() draws the track edge")
+
+
+func test_dressing_patches_are_earthy_not_grey_smudges() -> void:
+	for wet in [false, true]:
+		var img: Image = GP.patch_image(wet)
+		Runner.T.eq(img.get_size(), Vector2i(256, 256), "patch atlas is a 2x2 grid of 128px cells")
+		var r := 0.0
+		var b := 0.0
+		var n := 0
+		for y in 256:
+			for x in 256:
+				var c := img.get_pixel(x, y)
+				if c.a > 0.5:
+					r += c.r
+					b += c.b
+					n += 1
+		Runner.T.ok(n > 4000, "patches carry real ink (wet=%s)" % wet)
+		Runner.T.ok(r / n > b / n + 0.2, "patches are warm earth, not neutral grey (wet=%s)" % wet)
+		Runner.T.eq(img.get_pixel(0, 0).a, 0.0, "cell corners stay clear")
+	var cache: Array = []
+	GP._patches_installed = false
+	GP.install_patches(cache)
+	Runner.T.eq(cache.size(), 2, "install_patches fills the desert and jungle slots")
+	GP._patches_installed = false

@@ -9926,6 +9926,7 @@ func _sync_ground_palette() -> void:
 	_bg_sim = sim
 	_bg_cam = sim.camera_top
 	_bg_march = march
+	GroundPolish.install_patches(_dirt_patch_tex)
 	_bg_root.queue_redraw()
 
 
@@ -10234,7 +10235,9 @@ func _draw_terrain() -> void:
 		func(wy: float) -> int: return GroundStructure.biome_at(_ground_campaign and not _ground_biome_map.is_empty(),
 			ground_biome(sim.current_sector()), wy, _ground_biome_map),
 		func(sx: float, sy: float) -> bool: return _in_wbands(wbands, int(sx / PX), sim.camera_top + int(sy / PX)),
-		GroundPolish.lane_anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX)), _ground_biome)
+		GroundPolish.lane_anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX)), _ground_biome,
+		GroundPolish.lane_anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX),
+		func(sx: float, sy: float) -> bool: return _in_wbands(wbands, int(sx / PX), sim.camera_top + int(sy / PX)))
 	# Low scrub understory scattered through the field (hash decorrelated from
 	# the cactus grid so scrub and cacti don't stack on the same cell).
 	# Each decor grid anchors to ITS OWN spacing modulus — the shared 64px grass

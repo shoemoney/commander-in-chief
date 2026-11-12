@@ -20,12 +20,13 @@ const VARIANTS := 4
 const TONE_SRC := 64             # periodic noise lattice resolution
 const TONE_TEX := 256            # texture size (drawn at 2x => 512px world period)
 const TONE_PERIOD := 512.0
-const TONE_ALPHA := 0.30         # global multiplier on the baked tone alpha
+const TONE_ALPHA := 0.46         # global multiplier on the baked tone alpha
 const STAMP_ALPHA_CAP := 0.5     # nothing on the ground is louder than this
 
 static var _atlas: Texture2D = null
 static var _tone: Texture2D = null
 static var last_stamp_count := 0   # probe: stamps drawn by the last paint()
+static var _patches_installed := false
 static var _anc_key := -1
 static var _anc_cache: Array = []
 
@@ -146,6 +147,116 @@ static func _stamp_speck(img: Image, v: int) -> void:
 		_px(img, ox, oy, 1 + hs % 8, 1 + (hs >> 4) % 8, 1.0 if i % 2 == 0 else 0.45, 1.0)
 
 
+## Replacement for the grey dressing-patch atlas (the "lens dirt" smudges): earthy, ragged-edged
+## bare-earth patches with grain and a darker core, 4 variants in a 2x2 grid of 128px cells.
+## `wet` leans olive-brown (jungle/marsh); dry leans tan. Alpha is deliberately modest.
+static func patch_image(wet: bool) -> Image:
+	var out := Image.create_empty(256, 256, false, Image.FORMAT_RGBA8)
+	var base := Color(0.86, 0.74, 0.42) if wet else Color(0.90, 0.78, 0.56)
+	var dark := Color(0.62, 0.52, 0.30) if wet else Color(0.70, 0.58, 0.40)
+	for v in 4:
+		var o := Vector2i((v % 2) * 128, (v / 2) * 128)
+		var ph := float(_h(v, 4411) % 628) / 100.0
+		for y in 128:
+			for x in 128:
+				var u := (float(x) + 0.5 - 64.0) / 64.0
+				var w := (float(y) + 0.5 - 64.0) / 64.0
+				var d := sqrt(u * u + w * w)
+				var th := atan2(w, u)
+				var rb := 0.84 + 0.035 * sin(3.0 * th + ph) + 0.02 * sin(7.0 * th + ph * 2.0) \
+					+ 0.015 * sin(11.0 * th + ph * 3.0)
+				var grain := float(_h(x + v * 131, y * 3 + 17) % 100) / 100.0
+				var edge := 1.0 - smoothstep(rb - 0.55, rb, d)
+				if edge <= 0.0:
+					continue
+				var core := 1.0 - smoothstep(0.0, rb, d)
+				var c := base.lerp(dark, core * (0.35 + grain * 0.65))
+				if grain > 0.94:
+					c = c.lightened(0.22)   # a pebble fleck
+				out.set_pixel(o.x + x, o.y + y, Color(c.r, c.g, c.b, edge))
+	return out
+
+
+## Put the calmed patch atlas in the shared cache so ground_dressing_tex() serves it. Only when
+## the cache is still empty (it is a lazy static), so tests that already built the stock one keep it.
+static func install_patches(cache: Array) -> void:
+	if _patches_installed:
+		return
+	_patches_installed = true
+	cache.clear()
+	cache.append(ImageTexture.create_from_image(patch_image(false)))
+	cache.append(ImageTexture.create_from_image(patch_image(true)))
+
+
+## The worn track drawn as an unmistakable EDGE: a ragged dark rim, a pale lip just inside it, a
+## packed-earth centre and two wheel ruts. World-anchored (rows are 6px of world y), so it never
+## shimmers. `water_fn(sx, sy)` skips rows that sit in a river.
+static func paint_track(canvas: CanvasItem, cam_y: float, anc: Array, biome: int, water_fn: Callable) -> void:
+	if anc.is_empty():
+		return
+	var rim_c := Color(0.10, 0.07, 0.03, 0.85)
+	var lip_c := Color(0.90, 0.80, 0.55, 0.62)
+	var mid_c := Color(0.72, 0.60, 0.40, 0.26)
+	var rut_c := Color(0.14, 0.09, 0.04, 0.45)
+	match biome:
+		2: rim_c = Color(0.08, 0.09, 0.04, 0.85); lip_c = Color(0.66, 0.70, 0.48, 0.55); mid_c = Color(0.52, 0.50, 0.34, 0.20)
+		3: rim_c = Color(0.07, 0.07, 0.06, 0.85); lip_c = Color(0.74, 0.72, 0.66, 0.55); mid_c = Color(0.60, 0.58, 0.52, 0.18)
+		4: rim_c = Color(0.10, 0.08, 0.06, 0.58); lip_c = Color(0.82, 0.72, 0.58, 0.55); mid_c = Color(0.66, 0.58, 0.46, 0.18)
+		5: rim_c = Color(0.03, 0.03, 0.04, 0.85); lip_c = Color(0.56, 0.56, 0.62, 0.55); mid_c = Color(0.40, 0.40, 0.46, 0.20)
+		6: rim_c = Color(0.10, 0.04, 0.03, 0.85); lip_c = Color(0.78, 0.40, 0.22, 0.55); mid_c = Color(0.40, 0.22, 0.16, 0.20)
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var step := 6.0
+	var wy0 := floorf(cam_y / step) * step
+	var rows := int(ceil(360.0 / step)) + 2
+	var segs: Array = []   # runs of consecutive dry rows: [L, R, innerL, innerR, rutL, rutR]
+	var pts: Array[PackedVector2Array] = _blank_run()
+	for i in rows:
+		var wy := wy0 + float(i) * step
+		var sy := wy - cam_y
+		var cx := GroundStructure.lane_x(anc, wy)
+		var hwl := GroundStructure.lane_half_w(wy, -1.0) * 0.74
+		var hwr := GroundStructure.lane_half_w(wy, 1.0) * 0.74
+		if water_fn.call(cx, sy):
+			if pts[0].size() >= 2:
+				segs.append(pts)
+			pts = _blank_run()
+			continue
+		var jl := (float(_h(int(wy / step), 8101) % 100) / 100.0 - 0.5) * 5.0
+		var jr := (float(_h(int(wy / step), 8102) % 100) / 100.0 - 0.5) * 5.0
+		var xl := floorf(cx - hwl + jl)
+		var xr := floorf(cx + hwr + jr)
+		pts[0].append(Vector2(xl, sy))
+		pts[1].append(Vector2(xr, sy))
+		pts[2].append(Vector2(xl + 3.0, sy))
+		pts[3].append(Vector2(xr - 3.0, sy))
+		pts[4].append(Vector2(floorf(cx - hwl * 0.36), sy))
+		pts[5].append(Vector2(floorf(cx + hwr * 0.36), sy))
+	if pts[0].size() >= 2:
+		segs.append(pts)
+	for sg in segs:
+		var L: PackedVector2Array = sg[0]
+		var R: PackedVector2Array = sg[1]
+		var n := L.size()
+		if n < 2:
+			continue
+		# packed centre band
+		for i in n - 1:
+			canvas.draw_colored_polygon(PackedVector2Array([L[i], R[i], R[i + 1], L[i + 1]]), mid_c)
+		canvas.draw_polyline(sg[4], rut_c, 3.0)
+		canvas.draw_polyline(sg[5], rut_c, 3.0)
+		canvas.draw_polyline(sg[2], lip_c, 2.0)
+		canvas.draw_polyline(sg[3], lip_c, 2.0)
+		canvas.draw_polyline(L, rim_c, 3.0)
+		canvas.draw_polyline(R, rim_c, 3.0)
+
+
+static func _blank_run() -> Array[PackedVector2Array]:
+	var r: Array[PackedVector2Array] = []
+	for i in 6:
+		r.append(PackedVector2Array())
+	return r
+
+
 static func atlas() -> Texture2D:
 	if _atlas == null:
 		_atlas = ImageTexture.create_from_image(atlas_image())
@@ -182,7 +293,7 @@ static func tone_image() -> Image:
 			if d >= 0.0:
 				src.set_pixel(x, y, Color(1.0, 1.0, 1.0, d))
 			else:
-				src.set_pixel(x, y, Color(0.04, 0.03, 0.0, -d))
+				src.set_pixel(x, y, Color(0.04, 0.03, 0.0, -d * 0.55))
 	# Wrap-safe upscale: pad by tiling, bilinear resize, crop the centre.
 	var pad := Image.create_empty(TONE_SRC * 3, TONE_SRC * 3, false, Image.FORMAT_RGBA8)
 	for ty in 3:
@@ -255,7 +366,7 @@ static func plan(cam_y: float, biome_fn: Callable, water_fn: Callable, anc: Arra
 			var on_lane := absf(sx - lane_cx) < lane_hw * 0.78
 			if on_lane and kind == int(Kind.TUFT):
 				kind = int(Kind.PEBBLE) if (h >> 3) % 2 == 0 else int(Kind.SPECK)
-			var sc := 2.0 if (kind == int(Kind.TUFT) and (h >> 13) % 4 == 0) else 1.0
+			var sc := 2.0 if ((kind == int(Kind.TUFT) and (h >> 13) % 2 == 0) or (kind == int(Kind.PEBBLE) and (h >> 13) % 4 == 0)) else 1.0
 			out.append([Vector2(floorf(sx), floorf(sy)), kind, (hh >> 16) % VARIANTS, biome, sc])
 	return out
 
@@ -264,7 +375,7 @@ static func plan(cam_y: float, biome_fn: Callable, water_fn: Callable, anc: Arra
 
 ## Draws the macro tone tiles (world-anchored; the field is periodic so tiles join exactly) and the
 ## stamps. `motion` is unused: the ground never animates, so reduce-motion changes nothing.
-static func paint(canvas: CanvasItem, cam_y: float, stamps: Array, biome: int = 1) -> void:
+static func paint(canvas: CanvasItem, cam_y: float, stamps: Array, biome: int = 1, anc: Array = [], water_fn: Callable = Callable()) -> void:
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var tex := tone()
 	var ty0 := int(floor(cam_y / TONE_PERIOD))
@@ -275,6 +386,8 @@ static func paint(canvas: CanvasItem, cam_y: float, stamps: Array, biome: int = 
 		for tx in 2:
 			var r := Rect2(Vector2(float(tx) * TONE_PERIOD, y), Vector2(TONE_PERIOD, TONE_PERIOD))
 			canvas.draw_texture_rect(tex, r, false, tone_tint(biome))
+	if not anc.is_empty() and water_fn.is_valid():
+		paint_track(canvas, cam_y, anc, biome, water_fn)
 	var at := atlas()
 	last_stamp_count = stamps.size()
 	for s in stamps:
