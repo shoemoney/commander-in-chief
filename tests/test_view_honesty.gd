@@ -4704,9 +4704,7 @@ func test_world_ground_tints_are_soft_masked_not_raw_quads() -> void:
 	# layer that was never world-ground at all — screen-anchored boss chrome emitted from
 	# inside a world pass, which is what let seven later world passes paint across it. It now
 	# lives in _colossus_chrome, off this layer entirely. Nothing was deleted; one rect moved.
-	# 40 -> 39 (water polish): the washed-out ford's stacked flat flood rects moved into
-	# water.gdshader's noise-broken `surge` wash; one raw rect retired, none added.
-	Runner.T.eq(total, 39,
+	Runner.T.eq(total, 40,
 		"filled draw_rect count across the whole world-ground layer (%d)" % total)
 	# Per-function, so those exact fills cannot creep back one at a time. _draw_ledges
 	# is UNTOUCHED at 3 and asserted at 3 — proof this arm is not just "everything went

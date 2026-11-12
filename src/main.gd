@@ -11282,8 +11282,10 @@ func _draw_water() -> void:
 			for dbi in 3:
 				var dby := wy + wh * (0.2 + 0.3 * float(dbi))
 				var dbx := ford_left + ford_w * fposmod(0.15 + 0.31 * float(dbi) + dbob * 0.6, 1.0)
-				Art.line(self, Vector2(dbx - 7.0, dby), Vector2(dbx + 7.0, dby + 1.5),
-					Color(0.32, 0.24, 0.16, 0.75), 2.0)
+				# Floating logs: small crisp objects (a bobbing plank + a lit top edge), not ground planes.
+				draw_rect(Rect2(dbx - 7.0, dby + sin(dbob * TAU + float(dbi)) * 0.8, 14.0, 2.5),
+					Color(0.32, 0.24, 0.16, 0.85))
+				Art.line(self, Vector2(dbx - 6.0, dby - 0.5), Vector2(dbx + 5.0, dby), Color(0.55, 0.45, 0.32, 0.6), 1.0)
 		else:
 			# Bridge shadow on the water + support beams at the segment joints —
 			# the deck used to float weightless over the current (5v).

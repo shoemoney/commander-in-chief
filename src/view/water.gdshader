@@ -159,11 +159,16 @@ void fragment() {
 	// the sim's own ford current shoves you (dark troughs + pale crests), so direction
 	// reads in a still frame. One token flips both space and time.
 	float fd = flow_dir;
-	vec2 fp = vec2((p.x * 0.30 - t * 2.4) * fd, p.y * 6.0);
+	vec2 fp = vec2((p.x * 0.75 - t * 2.4) * fd, p.y * 5.0);
 	float fl = vnoise(fp) * 0.65 + vnoise(fp * vec2(2.3, 1.7) + 5.1) * 0.35;
 	float fmask = abs(sign(fd));
-	col += vec3(0.16, 0.21, 0.21) * smoothstep(0.66, 0.90, fl) * 0.55 * fmask;
-	col *= 1.0 - 0.10 * smoothstep(0.38, 0.12, fl) * fmask;
+	col += vec3(0.16, 0.21, 0.21) * smoothstep(0.70, 0.92, fl) * 0.22 * fmask;
+	col *= 1.0 - 0.12 * smoothstep(0.38, 0.12, fl) * fmask;
+	// Fine wavelets: thin warped crest lines running across the channel, brighter
+	// toward the middle, so the surface reads as water at native 640x360.
+	float wv = sin((uv.x * rect_size.x * 0.11 + ripple * 5.0 - t * 5.0 * fd) + uv.y * 9.0);
+	col += vec3(0.05, 0.09, 0.10) * smoothstep(0.82, 1.0, wv) * (0.3 + 0.7 * depth);
+	col *= 1.0 - 0.07 * smoothstep(-0.2, -1.0, wv) * depth;
 
 	// Sun glints: a soft drifting specular band broken by the ripples, plus crisp
 	// two-pixel twinkles that flick on and off on the wave crests only.
@@ -215,10 +220,11 @@ void fragment() {
 		float sdx = abs(u - ford_center);
 		float edge = (vnoise(vec2(b * 9.0, t * 0.5 + 3.0)) - 0.5) * 0.02;
 		float sm = smoothstep(surge_halfw + 0.012, surge_halfw - 0.02, sdx + edge);
-		float sw = vnoise(vec2((p.x * 0.9 - t * 3.2 * fd) , p.y * 9.0));
-		float churn = smoothstep(0.48, 0.80, sw) * sm;
+		vec2 sp = vec2(p.x * 2.4 - t * 3.2 * fd, p.y * 15.0);
+		float sw = vnoise(sp) * 0.6 + vnoise(sp * 2.3 + 7.0) * 0.4;
+		float churn = smoothstep(0.55, 0.85, sw) * sm;
 		col = mix(col, col * 0.78 + vec3(0.03, 0.05, 0.05), sm * 0.55);
-		col = mix(col, vec3(0.86, 0.91, 0.88), churn * 0.65);
+		col = mix(col, vec3(0.86, 0.91, 0.88), churn * 0.5);
 	}
 
 	// Shore translucency: near the (curved) bank the ground beneath shows through —
