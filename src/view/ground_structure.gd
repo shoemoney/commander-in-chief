@@ -28,6 +28,7 @@ const RUT_CELL := 34.0                # world px per rut dash cell
 const DETAIL_CELL := 96.0             # world px per puddle / joint / pothole cell
 const APRON_DEPTH := 112.0
 const FORD_PLANK_DEPTH := 20.0
+const FINE_CELL := 40.0               # world px per ROAD centre-line / SLAG sleeper cell
 
 enum LaneKind { DIRT, MUD, PLANK, GRAVEL, ROAD, SLAG }
 
@@ -367,6 +368,186 @@ static func plan(anc: Array, gate_ys: Array, waters: Array, cam_y: float,
 		"aprons": aprons, "planks": planks, "details": details, "edges": edges}
 
 
+# --- world-space plan cache -----------------------------------------------------------
+# plan() above rebuilds every record in SCREEN space each frame (cheap to read, dear to run while
+# the camera scrolls: the edge noise, the dressing hashes, a lane-row duplicate per row). The
+# renderer path below builds the same records ONCE in WORLD px, in fixed blocks / cells, and only
+# translates them by -cam_y at draw time. Everything cached is a pure function of the anchors and
+# a world index, so the whole cache is keyed on the anchors alone and dropped when they change
+# (a new run, a gate or ford appearing): a restart can never see the old run's ground.
+const BLOCK_PX := 120.0               # lane rows are cached in 20-row world blocks
+const BLOCK_ROWS := 20
+static var blocks_built := 0           # probe/test: blocks built from scratch
+static var cells_built := 0            # probe/test: dressing cells built from scratch
+static var _world_anc: Array = []
+static var _blocks: Dictionary = {}    # block index -> {"tp","tc","ti","ep","ec"}
+static var _rut_cells: Dictionary = {}
+static var _detail_cells: Dictionary = {}
+static var _fine_cells: Dictionary = {}
+static var _apron_cache: Dictionary = {}   # gate world y -> apron record (blobs in world px)
+static var _plank_cache: Dictionary = {}   # [water y, ford x] -> plank records (world px)
+
+
+## Drop every world-space cache (the anchor check calls this when the world changes).
+static func reset_cache() -> void:
+	_world_anc = []
+	_blocks.clear()
+	_rut_cells.clear()
+	_detail_cells.clear()
+	_fine_cells.clear()
+	_apron_cache.clear()
+	_plank_cache.clear()
+	_row_cache.clear()
+	_row_anc = []
+	_anc_memo = []
+
+
+static var _anc_sig := 0
+static var _anc_memo: Array = []
+
+
+## anchors() memoised on the exact gate / ford positions (the sort per frame was real cost), so a
+## new run or a re-laid world can never be served the previous run's anchors.
+static func cached_anchors(gates: Array, waters: Array, water_h_px: float, scale: float) -> Array:
+	var sig := gates.size() * 1000 + waters.size()
+	for g in gates:
+		sig = sig * 31 + int(g["y"])
+	for w in waters:
+		sig = sig * 31 + int(w["y"]) * 7 + int(w["ford_x"])
+	if _anc_memo.is_empty() or sig != _anc_sig or not cache_enabled:
+		_anc_sig = sig
+		_anc_memo = anchors(gates, waters, water_h_px, scale)
+	return _anc_memo
+
+
+static func _sync_world_cache(anc: Array) -> void:
+	if not cache_enabled or anc != _world_anc:
+		reset_cache()
+		_world_anc = anc.duplicate()
+
+
+static func _evict_keys(d: Dictionary, lo: int, hi: int, cap: int) -> void:
+	if d.size() <= cap:
+		return
+	for k in d.keys():
+		if int(k) < lo or int(k) > hi:
+			d.erase(k)
+
+
+static func _block(anc: Array, bi: int) -> Dictionary:
+	if _blocks.has(bi):
+		return _blocks[bi]
+	blocks_built += 1
+	var wy0 := float(bi) * BLOCK_PX
+	var rows: Array = []
+	for i in BLOCK_ROWS + 1:
+		rows.append(_cached_row(anc, wy0 + float(i) * ROW_PX))
+	var pts := PackedVector2Array()
+	var cols := PackedColorArray()
+	var ep: Array[PackedVector2Array] = [PackedVector2Array(), PackedVector2Array(),
+		PackedVector2Array(), PackedVector2Array()]
+	var ec: Array[PackedColorArray] = [PackedColorArray(), PackedColorArray(),
+		PackedColorArray(), PackedColorArray()]
+	for i in BLOCK_ROWS:
+		var r: Dictionary = rows[i]
+		if not r.has("tp"):
+			_attach_tris(r, rows[i + 1])
+		pts.append_array(r["tp"])
+		cols.append_array(r["tc"])
+		var e := 0
+		for side: float in [-1.0, 1.0]:
+			for ring in 2:
+				ep[e].append(Vector2(_edge_x(r, side, ring), float(r["wy"])))
+				ec[e].append(_edge_color(r, ring))
+				e += 1
+	var idx := PackedInt32Array()
+	idx.resize(pts.size())
+	for k in idx.size():
+		idx[k] = k
+	var blk := {"tp": pts, "tc": cols, "ti": idx, "ep": ep, "ec": ec}
+	if cache_enabled:
+		_blocks[bi] = blk
+	return blk
+
+
+static func _cell(cache: Dictionary, anc: Array, k: int, kind: int) -> Variant:
+	if cache.has(k):
+		return cache[k]
+	cells_built += 1
+	var v: Variant
+	match kind:
+		0: v = _rut_cell(anc, k)
+		1: v = _detail_cell(anc, k)
+		_: v = _fine_cell(anc, k)
+	if cache_enabled:
+		cache[k] = v
+	return v
+
+
+## The renderer's plan: same ground as plan(), but WORLD-space and cached. Hands paint() a small
+## record of references (blocks / cells / aprons / planks) plus the camera; no per-frame geometry.
+static func world_plan(anc: Array, gate_ys: Array, waters: Array, cam_y: float,
+		water_h_px: float, ford_half_w_fn: Callable) -> Dictionary:
+	_sync_world_cache(anc)
+	_sync_row_cache(anc)
+	var b_lo := int(floor((floorf(cam_y / ROW_PX) * ROW_PX - ROW_PX) / BLOCK_PX))
+	var b_hi := int(floor((cam_y + 360.0 + ROW_PX * 2.0) / BLOCK_PX))
+	var blocks: Array = []
+	for bi in range(b_lo, b_hi + 1):
+		blocks.append(_block(anc, bi))
+	_evict_keys(_blocks, b_lo - 1, b_hi + 1, 16)
+	_evict_rows(float(b_lo) * BLOCK_PX, float(b_hi + 1) * BLOCK_PX)
+	var span_lo := cam_y - RUT_CELL * 2.0
+	var span_hi := cam_y + 360.0 + RUT_CELL * 2.0
+	var ruts: Array = []
+	var k0 := int(floor(span_lo / RUT_CELL))
+	var k1 := int(floor(span_hi / RUT_CELL))
+	for k in range(k0, k1 + 1):
+		ruts.append_array(_cell(_rut_cells, anc, k, 0))
+	_evict_keys(_rut_cells, k0 - 2, k1 + 2, 48)
+	var seams: Array = []
+	var details: Array = []
+	k0 = int(floor(span_lo / DETAIL_CELL))
+	k1 = int(floor(span_hi / DETAIL_CELL))
+	for k in range(k0, k1 + 1):
+		var dc: Dictionary = _cell(_detail_cells, anc, k, 1)
+		seams.append_array(dc["seams"])
+		details.append_array(dc["details"])
+	_evict_keys(_detail_cells, k0 - 2, k1 + 2, 24)
+	var dashes: Array = []
+	k0 = int(floor(span_lo / FINE_CELL))
+	k1 = int(floor(span_hi / FINE_CELL))
+	for k in range(k0, k1 + 1):
+		var fc: Dictionary = _cell(_fine_cells, anc, k, 2)
+		dashes.append_array(fc["dashes"])
+		seams.append_array(fc["seams"])
+	_evict_keys(_fine_cells, k0 - 2, k1 + 2, 48)
+	var aprons: Array = []
+	for gy in gate_ys:
+		var sy := float(gy) - cam_y
+		if sy < -APRON_DEPTH or sy > 360.0 + 40.0:
+			continue
+		if not _apron_cache.has(gy):
+			_apron_cache[gy] = _apron(float(gy), float(gy))
+		aprons.append(_apron_cache[gy])
+	var planks: Array = []
+	for w in waters:
+		var wwy := float(w["y"]) * (1.0 / float(Fixed.ONE))
+		var wsy := wwy - cam_y
+		if wsy > 360.0 + FORD_PLANK_DEPTH or wsy + water_h_px < -FORD_PLANK_DEPTH:
+			continue
+		var pk := [w["y"], w["ford_x"]]
+		if not _plank_cache.has(pk):
+			var rec: Array = []
+			var hw: float = float(ford_half_w_fn.call(int(absf(wwy) / GATE_SPACING_PX))) * (1.0 / float(Fixed.ONE))
+			_planks(rec, float(w["ford_x"]) * (1.0 / float(Fixed.ONE)), hw, wwy, water_h_px, int(wwy),
+				lane_kind(sector_for_y(wwy)))
+			_plank_cache[pk] = rec
+		planks.append_array(_plank_cache[pk])
+	return {"world": true, "cam_y": cam_y, "blocks": blocks, "ruts": ruts, "seams": seams,
+		"dashes": dashes, "aprons": aprons, "planks": planks, "details": details}
+
+
 ## The worn track's EDGE: per side, a dark ragged rim at the outer shore and a pale lip just
 ## inside it, as two polylines with noise-varied alpha, so the track reads as a trodden strip
 ## with a shoulder instead of a smear. Flat 1-2px paint, alpha <= 0.3 (the honesty rule).
@@ -380,123 +561,162 @@ static func _lane_edges(lane: Array) -> Array:
 			var pts := PackedVector2Array()
 			var cols := PackedColorArray()
 			for r in lane:
-				var wy: float = r["wy"]
-				var hw: float = float(r["hwl"]) if side < 0.0 else float(r["hwr"])
-				var u := 0.93 if ring == 0 else 0.80
-				var x := float(r["cx"]) + side * hw * u + 1.6 * _vn(wy, 23.0, 31 + ring) + 0.8 * _vn(wy, 7.0, 33)
-				pts.append(Vector2(x, float(r["y"])))
-				var n := 0.5 + 0.5 * _vn(wy, 41.0, 35 + ring)
-				var kind: int = r["kind"]
-				var tint := lane_tint(kind)
-				if ring == 0:
-					var dk: Color = tint[0]
-					cols.append(Color(dk.r * 0.45, dk.g * 0.45, dk.b * 0.45, 0.10 + 0.20 * n))
-				else:
-					var lt: Color = tint[2]
-					cols.append(Color(lt.r, lt.g, lt.b, 0.04 + 0.12 * n))
+				pts.append(Vector2(_edge_x(r, side, ring), float(r["y"])))
+				cols.append(_edge_color(r, ring))
 			out.append({"pts": pts, "cols": cols, "w": 2.0 if ring == 0 else 1.0})
 	return out
 
 
+static func _edge_x(r: Dictionary, side: float, ring: int) -> float:
+	var wy: float = r["wy"]
+	var hw: float = float(r["hwl"]) if side < 0.0 else float(r["hwr"])
+	var u := 0.93 if ring == 0 else 0.80
+	return float(r["cx"]) + side * hw * u + 1.6 * _vn(wy, 23.0, 31 + ring) + 0.8 * _vn(wy, 7.0, 33)
+
+
+static func _edge_color(r: Dictionary, ring: int) -> Color:
+	var wy: float = r["wy"]
+	var n := 0.5 + 0.5 * _vn(wy, 41.0, 35 + ring)
+	var tint := lane_tint(int(r["kind"]))
+	if ring == 0:
+		var dk: Color = tint[0]
+		return Color(dk.r * 0.45, dk.g * 0.45, dk.b * 0.45, 0.10 + 0.20 * n)
+	var lt: Color = tint[2]
+	return Color(lt.r, lt.g, lt.b, 0.04 + 0.12 * n)
+
+
 ## Ruts (broken, uneven dashes), joints, centre-line fragments, puddles, potholes,
 ## pebbles: everything the track carries besides its soft body. World-cell hashed, so
-## the dressing is stable under scrolling.
+## the dressing is stable under scrolling. Each cell builder below is a pure function of
+## (anchors, cell index) in WORLD px; this wrapper shifts them to screen space for plan().
 static func _dress_lane(anc: Array, cam_y: float, ruts: Array, seams: Array,
 		dashes: Array, details: Array) -> void:
 	var span_lo := cam_y - RUT_CELL * 2.0
 	var span_hi := cam_y + 360.0 + RUT_CELL * 2.0
-	var k0 := int(floor(span_lo / RUT_CELL))
-	var k1 := int(floor(span_hi / RUT_CELL))
-	for k in range(k0, k1 + 1):
-		var kind := lane_kind(sector_for_y(float(k) * RUT_CELL + RUT_CELL * 0.5))
-		for side: float in [-1.0, 1.0]:
-			var h := Art.cell_hash(k, 40 + (0 if side < 0.0 else 1))
-			if kind == LaneKind.PLANK:
-				continue
-			var slag := kind == LaneKind.SLAG
-			if h % (16 if slag else 9) == 0:
-				continue
-			var y0 := float(k) * RUT_CELL + float((h >> 3) % 10)
-			var ln := (24.0 + float((h >> 7) % 10)) if slag else (10.0 + float((h >> 7) % 20))
-			var y1 := y0 + ln
-			var off := (0.30 if not slag else 0.34)
-			var jit := 1.6 * _vn(y0, 41.0, 6 + int(side))
-			var hw0 := (lane_half_w(y0, side))
-			var hw1 := (lane_half_w(y1, side))
-			var x0 := lane_x(anc, y0) + side * off * hw0 + jit
-			var x1 := lane_x(anc, y1) + side * off * hw1 + jit
-			var al := 0.16 + float((h >> 13) % 10) / 100.0
-			var col := Color(0.0, 0.0, 0.0, al)
-			if kind == LaneKind.MUD:
-				col = Color(0.08, 0.06, 0.03, al + 0.04)
-			elif slag:
-				col = Color(0.04, 0.01, 0.01, 0.28)
-			var w := 2.0 + float((h >> 11) % 2) + (1.0 if slag else 0.0)
-			ruts.append(_line(x0, y0 - cam_y, x1, y1 - cam_y, w, col))
-			if slag:   # a thin warm lip beside the groove, so it reads as a worn channel
-				ruts.append(_line(x0 + 2.0, y0 - cam_y, x1 + 2.0, y1 - cam_y, 1.0, Color(0.55, 0.30, 0.20, 0.12)))
-	var d0 := int(floor(span_lo / DETAIL_CELL))
-	var d1 := int(floor(span_hi / DETAIL_CELL))
-	for k in range(d0, d1 + 1):
-		var cwy := float(k) * DETAIL_CELL
-		var kind := lane_kind(sector_for_y(cwy + DETAIL_CELL * 0.5))
-		var h := Art.cell_hash(k, 50)
-		var py := cwy + float((h >> 5) % int(DETAIL_CELL))
-		var cx := lane_x(anc, py)
-		var px := cx + float(h % 50) - 25.0
-		var sy := py - cam_y
-		match kind:
-			LaneKind.MUD:
-				if h % 3 != 0:
-					var pw := 22.0 + float((h >> 9) % 22)
-					var ph := 8.0 + float((h >> 13) % 8)
-					details.append(_blob(px, sy, pw * 1.3, ph * 1.3, Color(0.12, 0.10, 0.05, 0.14)))
-					details.append(_blob(px, sy, pw, ph, Color(0.20, 0.27, 0.28, 0.30)))
-					details.append(_blob(px - pw * 0.15, sy - ph * 0.15, pw * 0.5, ph * 0.4, Color(0.55, 0.62, 0.60, 0.12)))
-			LaneKind.PLANK:
-				# expansion joints: partial lines across the slab, with a gap and a light lip
-				var jy := cwy + float(h % 40)
-				var jcx := lane_x(anc, jy)
-				var l0 := jcx - lane_half_w(jy, -1.0) * (0.45 + float((h >> 3) % 50) / 100.0)
-				var r0 := jcx + lane_half_w(jy, 1.0) * (0.45 + float((h >> 9) % 50) / 100.0)
-				var gap := lerpf(l0, r0, 0.3 + float((h >> 15) % 40) / 100.0)
-				seams.append({"x0": l0, "x1": gap - 3.0, "y": jy - cam_y, "color": Color(0.05, 0.04, 0.03, 0.26)})
-				seams.append({"x0": gap + 4.0, "x1": r0, "y": jy - cam_y, "color": Color(0.05, 0.04, 0.03, 0.26)})
-				seams.append({"x0": l0, "x1": gap - 3.0, "y": jy - cam_y + 1.0, "color": Color(0.85, 0.83, 0.78, 0.08)})
-				if h % 2 == 0:
-					details.append(_blob(px, sy, 24.0 + float((h >> 9) % 22), 12.0 + float((h >> 13) % 14),
-						Color(0.10, 0.09, 0.08, 0.16)))
-			LaneKind.ROAD:
-				if h % 4 == 0:
-					var pw2 := 10.0 + float((h >> 9) % 8)
-					details.append(_blob(px, sy, pw2 * 1.5, pw2 * 0.9, Color(0.55, 0.55, 0.58, 0.07)))
-					details.append(_blob(px, sy, pw2, pw2 * 0.6, Color(0.02, 0.02, 0.03, 0.30)))
-				if (h >> 3) % 5 == 0:
-					details.append(_blob(px, sy, 44.0, 22.0, Color(0.0, 0.0, 0.0, 0.10)))
-			LaneKind.GRAVEL, LaneKind.DIRT:
-				for i in 4:
-					var hp := Art.cell_hash(k * 11 + i, 51)
-					var rr := 2.0 + float(hp % 3)
-					details.append(_blob(cx + float(hp % 70) - 35.0, sy + float((hp >> 7) % 40) - 20.0, rr * 2.0, rr * 1.6,
-						Color(0.14, 0.12, 0.09, 0.22) if kind == LaneKind.GRAVEL else Color(0.55, 0.47, 0.34, 0.20)))
-			_:
-				pass
-	if true:   # ROAD centre-line fragments + SLAG sleepers ride finer cells than the details
-		var f0 := int(floor(span_lo / 40.0))
-		var f1 := int(floor(span_hi / 40.0))
-		for k in range(f0, f1 + 1):
-			var kind := lane_kind(sector_for_y(float(k) * 40.0 + 20.0))
-			var h := Art.cell_hash(k, 60)
-			if kind == LaneKind.ROAD and h % 100 >= 36:
-				var ds := float(k) * 40.0 + float(h % 14)
-				var de := ds + 6.0 + float((h >> 7) % 11)
-				dashes.append({"x": lane_x(anc, (ds + de) * 0.5) + 1.0, "y0": ds - cam_y, "y1": de - cam_y,
-					"color": Color(0.82, 0.76, 0.52, 0.12 + float((h >> 11) % 12) / 100.0)})
-			elif kind == LaneKind.SLAG and h % 3 != 0:
-				var sy2 := float(k) * 40.0 + float(h % 30)
-				var scx := lane_x(anc, sy2)
-				var shw := lane_half_w(sy2, 1.0) * 0.34
-				seams.append({"x0": scx - shw, "x1": scx + shw, "y": sy2 - cam_y, "color": Color(0.05, 0.02, 0.02, 0.14)})
+	for k in range(int(floor(span_lo / RUT_CELL)), int(floor(span_hi / RUT_CELL)) + 1):
+		for r in _rut_cell(anc, k):
+			r["y0"] = float(r["y0"]) - cam_y
+			r["y1"] = float(r["y1"]) - cam_y
+			ruts.append(r)
+	for k in range(int(floor(span_lo / DETAIL_CELL)), int(floor(span_hi / DETAIL_CELL)) + 1):
+		var cell := _detail_cell(anc, k)
+		for s in cell["seams"]:
+			s["y"] = float(s["y"]) - cam_y
+			seams.append(s)
+		for b in cell["details"]:
+			b["y"] = float(b["y"]) - cam_y
+			details.append(b)
+	for k in range(int(floor(span_lo / FINE_CELL)), int(floor(span_hi / FINE_CELL)) + 1):
+		var cell := _fine_cell(anc, k)
+		for d in cell["dashes"]:
+			d["y0"] = float(d["y0"]) - cam_y
+			d["y1"] = float(d["y1"]) - cam_y
+			dashes.append(d)
+		for s in cell["seams"]:
+			s["y"] = float(s["y"]) - cam_y
+			seams.append(s)
+
+
+## World-space rut dashes of RUT_CELL cell `k` (both sides).
+static func _rut_cell(anc: Array, k: int) -> Array:
+	var out: Array = []
+	var kind := lane_kind(sector_for_y(float(k) * RUT_CELL + RUT_CELL * 0.5))
+	for side: float in [-1.0, 1.0]:
+		var h := Art.cell_hash(k, 40 + (0 if side < 0.0 else 1))
+		if kind == LaneKind.PLANK:
+			continue
+		var slag := kind == LaneKind.SLAG
+		if h % (16 if slag else 9) == 0:
+			continue
+		var y0 := float(k) * RUT_CELL + float((h >> 3) % 10)
+		var ln := (24.0 + float((h >> 7) % 10)) if slag else (10.0 + float((h >> 7) % 20))
+		var y1 := y0 + ln
+		var off := (0.30 if not slag else 0.34)
+		var jit := 1.6 * _vn(y0, 41.0, 6 + int(side))
+		var hw0 := (lane_half_w(y0, side))
+		var hw1 := (lane_half_w(y1, side))
+		var x0 := lane_x(anc, y0) + side * off * hw0 + jit
+		var x1 := lane_x(anc, y1) + side * off * hw1 + jit
+		var al := 0.16 + float((h >> 13) % 10) / 100.0
+		var col := Color(0.0, 0.0, 0.0, al)
+		if kind == LaneKind.MUD:
+			col = Color(0.08, 0.06, 0.03, al + 0.04)
+		elif slag:
+			col = Color(0.04, 0.01, 0.01, 0.28)
+		var w := 2.0 + float((h >> 11) % 2) + (1.0 if slag else 0.0)
+		out.append(_line(x0, y0, x1, y1, w, col))
+		if slag:   # a thin warm lip beside the groove, so it reads as a worn channel
+			out.append(_line(x0 + 2.0, y0, x1 + 2.0, y1, 1.0, Color(0.55, 0.30, 0.20, 0.12)))
+	return out
+
+
+## World-space soft blobs ("details") and expansion-joint "seams" of DETAIL_CELL cell `k`.
+static func _detail_cell(anc: Array, k: int) -> Dictionary:
+	var details: Array = []
+	var seams: Array = []
+	var cwy := float(k) * DETAIL_CELL
+	var kind := lane_kind(sector_for_y(cwy + DETAIL_CELL * 0.5))
+	var h := Art.cell_hash(k, 50)
+	var py := cwy + float((h >> 5) % int(DETAIL_CELL))
+	var cx := lane_x(anc, py)
+	var px := cx + float(h % 50) - 25.0
+	var sy := py
+	match kind:
+		LaneKind.MUD:
+			if h % 3 != 0:
+				var pw := 22.0 + float((h >> 9) % 22)
+				var ph := 8.0 + float((h >> 13) % 8)
+				details.append(_blob(px, sy, pw * 1.3, ph * 1.3, Color(0.12, 0.10, 0.05, 0.14)))
+				details.append(_blob(px, sy, pw, ph, Color(0.20, 0.27, 0.28, 0.30)))
+				details.append(_blob(px - pw * 0.15, sy - ph * 0.15, pw * 0.5, ph * 0.4, Color(0.55, 0.62, 0.60, 0.12)))
+		LaneKind.PLANK:
+			# expansion joints: partial lines across the slab, with a gap and a light lip
+			var jy := cwy + float(h % 40)
+			var jcx := lane_x(anc, jy)
+			var l0 := jcx - lane_half_w(jy, -1.0) * (0.45 + float((h >> 3) % 50) / 100.0)
+			var r0 := jcx + lane_half_w(jy, 1.0) * (0.45 + float((h >> 9) % 50) / 100.0)
+			var gap := lerpf(l0, r0, 0.3 + float((h >> 15) % 40) / 100.0)
+			seams.append({"x0": l0, "x1": gap - 3.0, "y": jy, "color": Color(0.05, 0.04, 0.03, 0.26)})
+			seams.append({"x0": gap + 4.0, "x1": r0, "y": jy, "color": Color(0.05, 0.04, 0.03, 0.26)})
+			seams.append({"x0": l0, "x1": gap - 3.0, "y": jy + 1.0, "color": Color(0.85, 0.83, 0.78, 0.08)})
+			if h % 2 == 0:
+				details.append(_blob(px, sy, 24.0 + float((h >> 9) % 22), 12.0 + float((h >> 13) % 14),
+					Color(0.10, 0.09, 0.08, 0.16)))
+		LaneKind.ROAD:
+			if h % 4 == 0:
+				var pw2 := 10.0 + float((h >> 9) % 8)
+				details.append(_blob(px, sy, pw2 * 1.5, pw2 * 0.9, Color(0.55, 0.55, 0.58, 0.07)))
+				details.append(_blob(px, sy, pw2, pw2 * 0.6, Color(0.02, 0.02, 0.03, 0.30)))
+			if (h >> 3) % 5 == 0:
+				details.append(_blob(px, sy, 44.0, 22.0, Color(0.0, 0.0, 0.0, 0.10)))
+		LaneKind.GRAVEL, LaneKind.DIRT:
+			for i in 4:
+				var hp := Art.cell_hash(k * 11 + i, 51)
+				var rr := 2.0 + float(hp % 3)
+				details.append(_blob(cx + float(hp % 70) - 35.0, sy + float((hp >> 7) % 40) - 20.0, rr * 2.0, rr * 1.6,
+					Color(0.14, 0.12, 0.09, 0.22) if kind == LaneKind.GRAVEL else Color(0.55, 0.47, 0.34, 0.20)))
+		_:
+			pass
+	return {"details": details, "seams": seams}
+
+
+## ROAD centre-line fragments + SLAG sleepers ride finer cells than the details.
+static func _fine_cell(anc: Array, k: int) -> Dictionary:
+	var dashes: Array = []
+	var seams: Array = []
+	var kind := lane_kind(sector_for_y(float(k) * FINE_CELL + 20.0))
+	var h := Art.cell_hash(k, 60)
+	if kind == LaneKind.ROAD and h % 100 >= 36:
+		var ds := float(k) * FINE_CELL + float(h % 14)
+		var de := ds + 6.0 + float((h >> 7) % 11)
+		dashes.append({"x": lane_x(anc, (ds + de) * 0.5) + 1.0, "y0": ds, "y1": de,
+			"color": Color(0.82, 0.76, 0.52, 0.12 + float((h >> 11) % 12) / 100.0)})
+	elif kind == LaneKind.SLAG and h % 3 != 0:
+		var sy2 := float(k) * FINE_CELL + float(h % 30)
+		var scx := lane_x(anc, sy2)
+		var shw := lane_half_w(sy2, 1.0) * 0.34
+		seams.append({"x0": scx - shw, "x1": scx + shw, "y": sy2, "color": Color(0.05, 0.02, 0.02, 0.14)})
+	return {"dashes": dashes, "seams": seams}
 
 
 ## A gate apron: churned ground in front of the wall as ~24 overlapping soft blobs and a
@@ -628,6 +848,9 @@ static var lane_commands := 0   # canvas commands the last _paint_lane issued: t
 
 ## Draw a plan onto `canvas` (the ground layer): the track as vertex-coloured quads, then ruts / joints / fragments as short strokes, then soft blobs.
 static func paint(canvas: CanvasItem, p: Dictionary) -> void:
+	if p.has("world"):
+		_paint_world(canvas, p)
+		return
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	for a in p["aprons"]:
 		_paint_blobs(canvas, a["blobs"], Vector2.ZERO)
@@ -643,6 +866,46 @@ static func paint(canvas: CanvasItem, p: Dictionary) -> void:
 		canvas.draw_line(Vector2(d["x"], d["y0"]), Vector2(d["x"], d["y1"]), d["color"], 2.0)
 	for q in p["planks"]:
 		canvas.draw_line(Vector2(q["x0"], q["y"] + 1.0), Vector2(q["x1"], q["y"] + 1.0), q["color"], 2.0)
+
+
+## Paints a world_plan(): every record is in world px under ONE -cam_y translation, in the same
+## order and with the same widths / colours as the screen-space path.
+static func _paint_world(canvas: CanvasItem, p: Dictionary) -> void:
+	var off := Vector2(0.0, -float(p["cam_y"]))
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	for a in p["aprons"]:
+		_paint_blobs(canvas, a["blobs"], off)
+	canvas.draw_set_transform(off, 0.0, Vector2.ONE)
+	var ci := canvas.get_canvas_item()
+	var verts := 0
+	lane_commands = 0
+	for blk in p["blocks"]:
+		var tp: PackedVector2Array = blk["tp"]
+		if tp.is_empty():
+			continue
+		verts += tp.size()
+		lane_commands += 1
+		RenderingServer.canvas_item_add_triangle_array(ci, blk["ti"], tp, blk["tc"])
+	lane_vertex_count = verts
+	for e in 4:
+		var ep := PackedVector2Array()
+		var ec := PackedColorArray()
+		for blk in p["blocks"]:
+			ep.append_array((blk["ep"] as Array)[e])
+			ec.append_array((blk["ec"] as Array)[e])
+		canvas.draw_polyline_colors(ep, ec, 2.0 if e % 2 == 0 else 1.0)
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_paint_blobs(canvas, p["details"], off)
+	canvas.draw_set_transform(off, 0.0, Vector2.ONE)
+	for r in p["ruts"]:
+		canvas.draw_line(Vector2(r["x0"], r["y0"]), Vector2(r["x1"], r["y1"]), r["color"], r["w"])
+	for s in p["seams"]:
+		canvas.draw_line(Vector2(s["x0"], s["y"]), Vector2(s["x1"], s["y"]), s["color"], 1.0)
+	for d in p["dashes"]:
+		canvas.draw_line(Vector2(d["x"], d["y0"]), Vector2(d["x"], d["y1"]), d["color"], 2.0)
+	for q in p["planks"]:
+		canvas.draw_line(Vector2(q["x0"], q["y"] + 1.0), Vector2(q["x1"], q["y"] + 1.0), q["color"], 2.0)
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 # --- test compositor ----------------------------------------------------------

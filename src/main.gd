@@ -1870,11 +1870,11 @@ func _paint_ground_polish(canvas: Node2D, cam_y: float) -> void:
 ## gates and waters only; `canvas` is the ground layer, so everything draws beneath
 ## actors, mines and telegraphs (see GroundStructure's honesty rule).
 func _paint_ground_structure(canvas: Node2D, cam_y: float) -> void:
-	var anc := GroundStructure.anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX)
+	var anc := GroundStructure.cached_anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX)
 	var gys: Array = []
 	for g in sim.gates:
 		gys.append(float(g["y"]) * PX)
-	GroundStructure.paint(canvas, GroundStructure.plan(anc, gys, sim.waters, cam_y,
+	GroundStructure.paint(canvas, GroundStructure.world_plan(anc, gys, sim.waters, cam_y,
 		SimWorld.WATER_H * PX, func(b: int) -> int: return SimWorld.ford_half_w(b)))
 
 

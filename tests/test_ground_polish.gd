@@ -212,3 +212,153 @@ func test_dressing_patches_are_earthy_not_grey_smudges() -> void:
 	GP.install_patches(cache)
 	Runner.T.eq(cache.size(), 2, "install_patches fills the desert and jungle slots")
 	GP._patches_installed = false
+
+
+# --- the world-space structure cache (renderer path) -----------------------------------------------
+
+const _F := 65536
+
+
+func _world_inputs(ford_x: int = 480) -> Dictionary:
+	var gates: Array = []
+	for k in range(1, 7):
+		gates.append({"y": -k * 1000 * _F})
+	var ws: Array = [{"y": -1500 * _F, "ford_x": ford_x * _F}]
+	var gys: Array = []
+	for g in gates:
+		gys.append(float(g["y"]) / float(_F))
+	return {"gates": gates, "waters": ws, "gys": gys,
+		"anc": GS.anchors(gates, ws, 80.0, 1.0 / float(_F))}
+
+
+func _wplan(w: Dictionary, cam_y: float) -> Dictionary:
+	return GS.world_plan(w["anc"], w["gys"], w["waters"], cam_y, 80.0,
+		func(b: int) -> int: return SimWorld.ford_half_w(b))
+
+
+func _splan(w: Dictionary, cam_y: float) -> Dictionary:
+	return GS.plan(w["anc"], w["gys"], w["waters"], cam_y, 80.0,
+		func(b: int) -> int: return SimWorld.ford_half_w(b))
+
+
+func _lane_tris(p: Dictionary) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for blk in p["blocks"]:
+		out.append_array(blk["tp"])
+	return out
+
+
+func test_world_plan_is_the_screen_plan_shifted_by_the_camera() -> void:
+	GS.cache_enabled = true
+	GS.reset_cache()
+	var w := _world_inputs()
+	for cam_y in [-100.0, -1337.4, -1500.0, -1555.25, -3001.0]:
+		var wp := _wplan(w, cam_y)
+		var sp := _splan(w, cam_y)
+		var ra: Array = wp["ruts"]
+		var rb: Array = sp["ruts"]
+		Runner.T.eq(ra.size(), rb.size(), "ruts: same record count at cam %.2f" % cam_y)
+		for i in mini(ra.size(), rb.size()):
+			Runner.T.ok(absf(float(ra[i]["y0"]) - cam_y - float(rb[i]["y0"])) < 1e-6
+				and absf(float(ra[i]["x0"]) - float(rb[i]["x0"])) < 1e-6, "rut %d is the screen record shifted" % i)
+		var da: Array = wp["dashes"]
+		var db: Array = sp["dashes"]
+		Runner.T.eq(da.size(), db.size(), "dashes: same count at cam %.2f" % cam_y)
+		var wd: Array = wp["details"]
+		var sd: Array = sp["details"]
+		Runner.T.eq(wd.size(), sd.size(), "details: same blob count at cam %.2f" % cam_y)
+		for i in mini(wd.size(), sd.size()):
+			Runner.T.ok(absf(float(wd[i]["y"]) - cam_y - float(sd[i]["y"])) < 1e-6 and wd[i]["color"] == sd[i]["color"],
+				"detail %d matches" % i)
+		Runner.T.eq((wp["seams"] as Array).size(), (sp["seams"] as Array).size(), "seams: same count at cam %.2f" % cam_y)
+		Runner.T.eq((wp["planks"] as Array).size(), (sp["planks"] as Array).size(), "planks: same count at cam %.2f" % cam_y)
+		Runner.T.eq((wp["aprons"] as Array).size(), (sp["aprons"] as Array).size(), "aprons: same count at cam %.2f" % cam_y)
+		# the lane: the cached blocks carry the screen plan's triangles, vertex for vertex (world px)
+		var want := PackedVector2Array()
+		var rows: Array = sp["lane"]
+		for i in rows.size() - 1:
+			var r: Dictionary = rows[i]
+			if not r.has("tp"):
+				GS._attach_tris(r, rows[i + 1])
+			want.append_array(r["tp"])
+		var got := _lane_tris(wp)
+		Runner.T.ok(want.size() > 0 and got.size() >= want.size(), "the blocks cover the viewport lane at cam %.2f" % cam_y)
+		var run := false
+		for at in got.size() - want.size() + 1:
+			if got[at] == want[0] and got.slice(at, at + want.size()) == want:
+				run = true
+				break
+		Runner.T.ok(run, "the viewport's triangles are a contiguous run of the blocks")
+		var edges: Array = sp["edges"]
+		for e in 4:
+			var ep := PackedVector2Array()
+			var ec := PackedColorArray()
+			for blk in wp["blocks"]:
+				ep.append_array((blk["ep"] as Array)[e])
+				ec.append_array((blk["ec"] as Array)[e])
+			var spts: PackedVector2Array = edges[e]["pts"]
+			var scol: PackedColorArray = edges[e]["cols"]
+			var first := Vector2(spts[0].x, spts[0].y + cam_y)
+			var j := -1
+			for q in ep.size():
+				if absf(ep[q].x - first.x) < 1e-4 and absf(ep[q].y - first.y) < 1e-4:
+					j = q
+					break
+			var same := j >= 0 and j + spts.size() <= ep.size()
+			if same:
+				for q in spts.size():
+					if absf(ep[j + q].x - spts[q].x) > 1e-4 or absf(ep[j + q].y - cam_y - spts[q].y) > 1e-4 or ec[j + q] != scol[q]:
+						same = false
+						break
+			Runner.T.ok(same, "edge line %d is the screen plan's polyline in world px" % e)
+	GS.reset_cache()
+
+
+func test_world_cache_builds_once_then_scrolls_free() -> void:
+	GS.cache_enabled = true
+	GS.reset_cache()
+	var w := _world_inputs()
+	_wplan(w, -1600.0)
+	var b0 := GS.blocks_built
+	var c0 := GS.cells_built
+	Runner.T.ok(b0 >= 3 and c0 > 10, "a cold frame builds blocks (%d) and cells (%d)" % [b0, c0])
+	_wplan(w, -1600.0)
+	_wplan(w, -1601.5)
+	Runner.T.eq(GS.blocks_built, b0, "a re-draw and a sub-block scroll build no block")
+	Runner.T.ok(GS.cells_built - c0 <= 2, "a 1.5px scroll builds at most the one new dressing cell")
+	_wplan(w, -1600.0 - GS.BLOCK_PX * 3.0)
+	Runner.T.ok(GS.blocks_built > b0, "a scroll into new world builds the new blocks")
+	GS.reset_cache()
+
+
+func test_world_cache_drops_on_a_changed_world_and_a_reset() -> void:
+	GS.cache_enabled = true
+	GS.reset_cache()
+	var a := _world_inputs(480)
+	var b := _world_inputs(150)
+	var tri_a := _lane_tris(_wplan(a, -1500.0))
+	# same gate/water COUNTS, different ford: the cache must not serve world A's ground
+	var tri_b := _lane_tris(_wplan(b, -1500.0))
+	Runner.T.ok(tri_a != tri_b, "a re-laid world (same counts, other ford x) gets its own lane")
+	GS.cache_enabled = false
+	var tri_f := _lane_tris(_wplan(b, -1500.0))
+	GS.cache_enabled = true
+	Runner.T.ok(tri_b == tri_f, "the cached lane equals a cold, uncached build of the same world")
+	GS.reset_cache()
+	var b1 := GS.blocks_built
+	_wplan(b, -1500.0)
+	Runner.T.ok(GS.blocks_built > b1, "reset_cache() forces a rebuild (the restart path)")
+	var ca := GS.cached_anchors(a["gates"], a["waters"], 80.0, 1.0 / float(_F))
+	var cb := GS.cached_anchors(b["gates"], b["waters"], 80.0, 1.0 / float(_F))
+	Runner.T.ok(ca != cb, "cached_anchors keys on positions, not just counts")
+	Runner.T.eq(cb, b["anc"], "cached_anchors equals a fresh anchors() call")
+	GS.reset_cache()
+
+
+func test_main_paints_the_structure_through_the_world_cache() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var at := src.find("func _paint_ground_structure(")
+	var body := src.substr(at, src.find("\nfunc ", at + 1) - at)
+	Runner.T.ok(body.contains("GroundStructure.world_plan(") and body.contains("GroundStructure.cached_anchors("),
+		"the ground layer paints the cached world plan and memoised anchors")
+	Runner.T.ok(not body.contains("GroundStructure.plan("), "and no longer rebuilds the screen plan every scroll frame")
