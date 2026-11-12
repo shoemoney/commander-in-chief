@@ -1809,6 +1809,7 @@ func _paint_bg(canvas: Node2D) -> void:
 					canvas.draw_texture_rect(Art.tex("fx_softspot"),
 						Rect2(Vector2(-msz * 0.75 + float(mh % 60), -msz * 0.6), Vector2.ONE * msz * 1.3),
 						false, Color(mcol.r, mcol.g, mcol.b, mcol.a * 0.5))
+	_paint_ground_polish(canvas, cam_y)
 	if _ground_campaign:
 		_paint_ground_structure(canvas, cam_y)
 	# a1-14 SKY LIGHT — last thing the ground pass lays down, so it grades the
@@ -1836,6 +1837,33 @@ func _paint_bg(canvas: Node2D) -> void:
 	var glt := _ground_light()
 	canvas.draw_texture_rect_region(glt, GROUND_LIGHT_RECT, Rect2i(0, 0, 1, GROUND_LIGHT_TEX_H))
 	canvas.draw_texture_rect_region(glt, GROUND_LIGHT_RECT, Rect2i(1, 0, 1, GROUND_LIGHT_TEX_H))
+
+
+## Ground polish on the cached ground layer (z -2, under the water): the plan, track geometry
+## and river bands are rebuilt only when the 26px camera row or the world inputs change, not per
+## frame. The track, stamps and tone all stay out of the WHOLE river band, ford column included.
+func _paint_ground_polish(canvas: Node2D, cam_y: float) -> void:
+	var anc := GroundPolish.lane_anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX)
+	var key := [sim.get_instance_id(), sim.waters.size(), sim.gates.size(), ground_biome(sim.current_sector()), _ground_campaign]
+	if not GroundPolish.layer_cached(cam_y, key):
+		var lo := cam_y - 64.0
+		var hi := cam_y + 36.0 * 26.0
+		var wbands: Array = []
+		var bands: Array = []
+		for w in sim.waters:
+			var wy0: float = float(w["y"]) * PX
+			var wy1: float = wy0 + SimWorld.WATER_H * PX
+			if wy1 >= lo and wy0 <= hi:
+				bands.append([wy0, wy1])
+				wbands.append([w["y"], w["y"] + SimWorld.WATER_H,
+					w["ford_x"] - SimWorld.FORD_HALF_W, w["ford_x"] + SimWorld.FORD_HALF_W])
+		var fb := ground_biome(sim.current_sector())
+		var camp := _ground_campaign and not _ground_biome_map.is_empty()
+		GroundPolish.build_layer(cam_y, key,
+			func(wy: float) -> int: return GroundStructure.biome_at(camp, fb, wy, _ground_biome_map),
+			func(sx: float, wy: float) -> bool: return _in_wbands(wbands, int(sx / PX), int(wy / PX)),
+			anc, bands)
+	GroundPolish.paint_layer(canvas, cam_y, _ground_biome)
 
 
 ## The lane / gate aprons / ford-bank planking, as one GroundStructure plan. Reads sim
@@ -9929,6 +9957,7 @@ func _sync_ground_palette() -> void:
 	_bg_cam = sim.camera_top
 	_bg_march = march
 	GroundPolish.install_patches(_dirt_patch_tex)
+	GroundPolish.warm()   # build the stamp/tone textures at boot, not on the first gameplay frame
 	_bg_root.queue_redraw()
 
 
@@ -10231,15 +10260,7 @@ func _draw_terrain() -> void:
 		if w["y"] <= whi and w["y"] + SimWorld.WATER_H >= wlo:
 			wbands.append([w["y"], w["y"] + SimWorld.WATER_H,
 				w["ford_x"] - SimWorld.FORD_HALF_W, w["ford_x"] + SimWorld.FORD_HALF_W])
-	# ground-polish: structured tone field + per-biome micro-detail (tufts, pebbles, cracks),
-	# under every prop below. Water cells are skipped with the same snapshot the decor uses.
-	GroundPolish.paint(self, cam_y, GroundPolish.plan(cam_y,
-		func(wy: float) -> int: return GroundStructure.biome_at(_ground_campaign and not _ground_biome_map.is_empty(),
-			ground_biome(sim.current_sector()), wy, _ground_biome_map),
-		func(sx: float, sy: float) -> bool: return _in_wbands(wbands, int(sx / PX), sim.camera_top + int(sy / PX)),
-		GroundPolish.lane_anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX)), _ground_biome,
-		GroundPolish.lane_anchors(sim.gates, sim.waters, SimWorld.WATER_H * PX, PX),
-		func(sx: float, sy: float) -> bool: return _in_wbands(wbands, int(sx / PX), sim.camera_top + int(sy / PX)))
+	# ground-polish (tone field, micro-detail, worn track) now lives in the cached ground layer: _paint_bg.
 	# Low scrub understory scattered through the field (hash decorrelated from
 	# the cactus grid so scrub and cacti don't stack on the same cell).
 	# Each decor grid anchors to ITS OWN spacing modulus — the shared 64px grass

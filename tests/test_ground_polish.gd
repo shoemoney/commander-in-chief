@@ -130,16 +130,64 @@ func test_track_has_a_defined_edge() -> void:
 	Runner.T.ok(right[10].x - left[10].x > 60.0, "the two rims bound a real track width")
 
 
-func test_main_terrain_actually_calls_the_polish() -> void:
+func test_main_ground_layer_actually_calls_the_polish() -> void:
 	var src := FileAccess.get_file_as_string("res://src/main.gd")
-	var a := src.find("func _draw_terrain()")
-	var b := src.find("\nfunc _in_wbands(", a)
-	Runner.T.ok(a > 0 and b > a, "found _draw_terrain")
+	var a := src.find("func _paint_ground_polish(")
+	var b := src.find("\n## The lane / gate aprons", a)
+	Runner.T.ok(a > 0 and b > a, "found _paint_ground_polish")
 	var body := src.substr(a, b - a)
-	Runner.T.ok(body.contains("GroundPolish.plan(") and body.contains("GroundPolish.paint("), "_draw_terrain plans and paints the polish")
-	Runner.T.ok(body.contains("_in_wbands"), "and culls it with the decor's water snapshot")
+	Runner.T.ok(body.contains("GroundPolish.build_layer(") and body.contains("GroundPolish.paint_layer("), "the cached ground layer plans and paints the polish")
+	Runner.T.ok(body.contains("layer_cached(") and body.contains("_in_wbands"), "rebuilds only on a miss, culled by the water snapshot")
+	var pb := src.find("func _paint_bg(")
+	var pe := src.find("\n## The lane / gate aprons", pb)
+	Runner.T.ok(src.substr(pb, pe - pb).contains("_paint_ground_polish(canvas, cam_y)"), "_paint_bg (the cached layer, under the water) paints it")
+	var dt := src.find("func _draw_terrain()")
+	var de := src.find("\nfunc _in_wbands(", dt)
+	Runner.T.ok(not src.substr(dt, de - dt).contains("GroundPolish."), "_draw_terrain no longer rebuilds it every frame")
 	var gs := FileAccess.get_file_as_string("res://src/view/ground_structure.gd")
 	Runner.T.ok(gs.contains("draw_polyline_colors(e[\"pts\"]"), "paint() draws the track edge")
+
+
+func test_layer_is_not_rebuilt_when_the_camera_has_not_moved() -> void:
+	var biome := func(_wy: float) -> int: return 1
+	var dry := func(_sx: float, _wy: float) -> bool: return false
+	var anc := [Vector2(320.0, 0.0)]
+	var key := [1, 0, 0, 1, true]
+	GP._layer.clear()
+	var n0: int = GP.plan_builds
+	Runner.T.ok(not GP.layer_cached(1000.0, key), "empty cache misses")
+	GP.build_layer(1000.0, key, biome, dry, anc, [])
+	Runner.T.eq(GP.plan_builds, n0 + 1, "first call builds")
+	Runner.T.ok(GP.layer_cached(1000.0, key), "same camera hits")
+	Runner.T.ok(GP.layer_cached(1000.0 + 5.0, key), "a sub-row scroll still hits (rows are 26px)")
+	Runner.T.ok(not GP.layer_cached(1000.0 + GP.CELL_PX, key), "a new camera row misses")
+	Runner.T.ok(not GP.layer_cached(1000.0, [2, 0, 0, 1, true]), "a changed world (key) misses")
+	GP._layer.clear()
+
+
+func test_track_and_stamps_break_across_the_whole_river_band() -> void:
+	var biome := func(_wy: float) -> int: return 1
+	var dry := func(_sx: float, _wy: float) -> bool: return false   # the sim water test calls the ford column dry
+	var anc := [Vector2(320.0, -2000.0), Vector2(320.0, 2000.0)]
+	var band := [1100.0, 1180.0]
+	GP.build_layer(1000.0, [9], biome, dry, anc, [band])
+	var runs: Array = GP._layer["runs"]
+	Runner.T.ok(runs.size() >= 2, "the track is cut in two by the band (%d runs)" % runs.size())
+	for sg in runs:
+		for v in (sg[0] as PackedVector2Array):
+			Runner.T.ok(v.y < band[0] or v.y > band[1], "no track row inside the band (y %.0f)" % v.y)
+	for s in GP._layer["stamps"]:
+		var py: float = (s[0] as Vector2).y
+		Runner.T.ok(py < band[0] or py > band[1], "no stamp inside the band")
+	GP._layer.clear()
+
+
+func test_track_edge_reads_as_worn_ground_not_a_wall() -> void:
+	Runner.T.ok(GP.TRACK_RIM_A <= 0.4 and GP.TRACK_LIP_A <= 0.4, "edge alpha stays under 0.4")
+	Runner.T.ok(GP.TRACK_RIM_W <= 2.0, "edge is at most 2px")
+	for b in range(1, 7):
+		var c := GP.track_colors(b)
+		Runner.T.ok((c[0] as Color).a <= 0.4 and (c[1] as Color).a <= 0.4 and (c[3] as Color).a <= 0.4, "biome %d track edge/ruts are quiet" % b)
 
 
 func test_dressing_patches_are_earthy_not_grey_smudges() -> void:

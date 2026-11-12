@@ -22,12 +22,19 @@ const TONE_TEX := 256            # texture size (drawn at 2x => 512px world peri
 const TONE_PERIOD := 512.0
 const TONE_ALPHA := 0.46         # global multiplier on the baked tone alpha
 const STAMP_ALPHA_CAP := 0.5     # nothing on the ground is louder than this
+const TRACK_STEP := 6.0
+const TRACK_RIM_A := 0.36        # worn ground, not a wall: well under sandbag contrast
+const TRACK_LIP_A := 0.30
+const TRACK_RIM_W := 2.0
 
 static var _atlas: Texture2D = null
 static var _tone: Texture2D = null
 static var last_stamp_count := 0   # probe: stamps drawn by the last paint()
 static var _patches_installed := false
 static var _anc_key := -1
+static var plan_builds := 0        # probe/test: how many times the cached layer was (re)built
+static var _layer_key: Array = []
+static var _layer: Dictionary = {}
 static var _anc_cache: Array = []
 
 
@@ -188,66 +195,81 @@ static func install_patches(cache: Array) -> void:
 	cache.append(ImageTexture.create_from_image(patch_image(true)))
 
 
-## The worn track drawn as an unmistakable EDGE: a ragged dark rim, a pale lip just inside it, a
-## packed-earth centre and two wheel ruts. World-anchored (rows are 6px of world y), so it never
-## shimmers. `water_fn(sx, sy)` skips rows that sit in a river.
+## The worn track: a faint ragged rim, a pale lip just inside it, a packed-earth centre and two
+## wheel ruts. Worn ground, never a wall: every edge stays at or under 0.4 alpha and 2px, so
+## sandbags and cover are always the louder thing on the field. World-anchored (rows are 6px of
+## world y). `water_fn(sx, sy)` skips rows that sit in a river.
 static func paint_track(canvas: CanvasItem, cam_y: float, anc: Array, biome: int, water_fn: Callable) -> void:
 	if anc.is_empty():
 		return
-	var rim_c := Color(0.10, 0.07, 0.03, 0.85)
-	var lip_c := Color(0.90, 0.80, 0.55, 0.62)
-	var mid_c := Color(0.72, 0.60, 0.40, 0.26)
-	var rut_c := Color(0.14, 0.09, 0.04, 0.45)
-	match biome:
-		2: rim_c = Color(0.08, 0.09, 0.04, 0.85); lip_c = Color(0.66, 0.70, 0.48, 0.55); mid_c = Color(0.52, 0.50, 0.34, 0.20)
-		3: rim_c = Color(0.07, 0.07, 0.06, 0.85); lip_c = Color(0.74, 0.72, 0.66, 0.55); mid_c = Color(0.60, 0.58, 0.52, 0.18)
-		4: rim_c = Color(0.10, 0.08, 0.06, 0.58); lip_c = Color(0.82, 0.72, 0.58, 0.55); mid_c = Color(0.66, 0.58, 0.46, 0.18)
-		5: rim_c = Color(0.03, 0.03, 0.04, 0.85); lip_c = Color(0.56, 0.56, 0.62, 0.55); mid_c = Color(0.40, 0.40, 0.46, 0.20)
-		6: rim_c = Color(0.10, 0.04, 0.03, 0.85); lip_c = Color(0.78, 0.40, 0.22, 0.55); mid_c = Color(0.40, 0.22, 0.16, 0.20)
+	var wy0 := floorf(cam_y / TRACK_STEP) * TRACK_STEP
+	var runs := track_runs(wy0, int(ceil(360.0 / TRACK_STEP)) + 2, anc,
+		func(cx: float, wy: float) -> bool: return water_fn.call(cx, wy - cam_y))
+	canvas.draw_set_transform(Vector2(0.0, -cam_y), 0.0, Vector2.ONE)
+	draw_track_runs(canvas, runs, biome)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	var step := 6.0
-	var wy0 := floorf(cam_y / step) * step
-	var rows := int(ceil(360.0 / step)) + 2
-	var segs: Array = []   # runs of consecutive dry rows: [L, R, innerL, innerR, rutL, rutR]
+
+
+## Runs of consecutive dry rows in WORLD coordinates: [L, R, innerL, innerR, rutL, rutR] each.
+## `skip_fn(cx, wy) -> bool` breaks the track (a river band, however the ford column is treated).
+static func track_runs(wy0: float, rows: int, anc: Array, skip_fn: Callable) -> Array:
+	var segs: Array = []
 	var pts: Array[PackedVector2Array] = _blank_run()
 	for i in rows:
-		var wy := wy0 + float(i) * step
-		var sy := wy - cam_y
+		var wy := wy0 + float(i) * TRACK_STEP
 		var cx := GroundStructure.lane_x(anc, wy)
 		var hwl := GroundStructure.lane_half_w(wy, -1.0) * 0.74
 		var hwr := GroundStructure.lane_half_w(wy, 1.0) * 0.74
-		if water_fn.call(cx, sy):
+		if skip_fn.call(cx, wy):
 			if pts[0].size() >= 2:
 				segs.append(pts)
 			pts = _blank_run()
 			continue
-		var jl := (float(_h(int(wy / step), 8101) % 100) / 100.0 - 0.5) * 5.0
-		var jr := (float(_h(int(wy / step), 8102) % 100) / 100.0 - 0.5) * 5.0
+		var jl := (float(_h(int(wy / TRACK_STEP), 8101) % 100) / 100.0 - 0.5) * 5.0
+		var jr := (float(_h(int(wy / TRACK_STEP), 8102) % 100) / 100.0 - 0.5) * 5.0
 		var xl := floorf(cx - hwl + jl)
 		var xr := floorf(cx + hwr + jr)
-		pts[0].append(Vector2(xl, sy))
-		pts[1].append(Vector2(xr, sy))
-		pts[2].append(Vector2(xl + 3.0, sy))
-		pts[3].append(Vector2(xr - 3.0, sy))
-		pts[4].append(Vector2(floorf(cx - hwl * 0.36), sy))
-		pts[5].append(Vector2(floorf(cx + hwr * 0.36), sy))
+		pts[0].append(Vector2(xl, wy))
+		pts[1].append(Vector2(xr, wy))
+		pts[2].append(Vector2(xl + 3.0, wy))
+		pts[3].append(Vector2(xr - 3.0, wy))
+		pts[4].append(Vector2(floorf(cx - hwl * 0.36), wy))
+		pts[5].append(Vector2(floorf(cx + hwr * 0.36), wy))
 	if pts[0].size() >= 2:
 		segs.append(pts)
+	return segs
+
+
+static func track_colors(biome: int) -> Array:
+	var rim_c := Color(0.10, 0.07, 0.03, TRACK_RIM_A)
+	var lip_c := Color(0.90, 0.80, 0.55, TRACK_LIP_A)
+	var mid_c := Color(0.72, 0.60, 0.40, 0.22)
+	var rut_c := Color(0.14, 0.09, 0.04, 0.30)
+	match biome:
+		2: rim_c = Color(0.08, 0.09, 0.04, TRACK_RIM_A); lip_c = Color(0.66, 0.70, 0.48, TRACK_LIP_A); mid_c = Color(0.52, 0.50, 0.34, 0.18)
+		3: rim_c = Color(0.07, 0.07, 0.06, TRACK_RIM_A); lip_c = Color(0.74, 0.72, 0.66, TRACK_LIP_A); mid_c = Color(0.60, 0.58, 0.52, 0.16)
+		4: rim_c = Color(0.10, 0.08, 0.06, TRACK_RIM_A); lip_c = Color(0.82, 0.72, 0.58, TRACK_LIP_A); mid_c = Color(0.66, 0.58, 0.46, 0.16)
+		5: rim_c = Color(0.03, 0.03, 0.04, TRACK_RIM_A); lip_c = Color(0.56, 0.56, 0.62, TRACK_LIP_A); mid_c = Color(0.40, 0.40, 0.46, 0.18)
+		6: rim_c = Color(0.10, 0.04, 0.03, TRACK_RIM_A); lip_c = Color(0.78, 0.40, 0.22, TRACK_LIP_A); mid_c = Color(0.40, 0.22, 0.16, 0.18)
+	return [rim_c, lip_c, mid_c, rut_c]
+
+
+static func draw_track_runs(canvas: CanvasItem, segs: Array, biome: int) -> void:
+	var col := track_colors(biome)
 	for sg in segs:
 		var L: PackedVector2Array = sg[0]
 		var R: PackedVector2Array = sg[1]
 		var n := L.size()
 		if n < 2:
 			continue
-		# packed centre band
 		for i in n - 1:
-			canvas.draw_colored_polygon(PackedVector2Array([L[i], R[i], R[i + 1], L[i + 1]]), mid_c)
-		canvas.draw_polyline(sg[4], rut_c, 3.0)
-		canvas.draw_polyline(sg[5], rut_c, 3.0)
-		canvas.draw_polyline(sg[2], lip_c, 2.0)
-		canvas.draw_polyline(sg[3], lip_c, 2.0)
-		canvas.draw_polyline(L, rim_c, 3.0)
-		canvas.draw_polyline(R, rim_c, 3.0)
+			canvas.draw_colored_polygon(PackedVector2Array([L[i], R[i], R[i + 1], L[i + 1]]), col[2])
+		canvas.draw_polyline(sg[4], col[3], 2.0)
+		canvas.draw_polyline(sg[5], col[3], 2.0)
+		canvas.draw_polyline(sg[2], col[1], 1.0)
+		canvas.draw_polyline(sg[3], col[1], 1.0)
+		canvas.draw_polyline(L, col[0], TRACK_RIM_W)
+		canvas.draw_polyline(R, col[0], TRACK_RIM_W)
 
 
 static func _blank_run() -> Array[PackedVector2Array]:
@@ -398,3 +420,93 @@ static func paint(canvas: CanvasItem, cam_y: float, stamps: Array, biome: int = 
 		var pos: Vector2 = s[0]
 		canvas.draw_texture_rect_region(at, Rect2(pos, Vector2(STAMP, STAMP) * sc),
 			Rect2(float(int(s[2]) * STAMP), float(int(s[1]) * STAMP), float(STAMP), float(STAMP)), col)
+
+
+
+# --- cached layer ----------------------------------------------------------------------
+# The ground never animates, so the plan, the track geometry and the water bands are built once
+# per 26px camera row (world coordinates) and replayed; the camera only translates them.
+
+## Build the atlas and tone textures now (boot/splash) so the first gameplay frame does not hitch.
+static func warm() -> void:
+	atlas()
+	tone()
+
+
+static func layer_cached(cam_y: float, key: Array) -> bool:
+	return not _layer.is_empty() and _layer_key == [int(floor(cam_y / CELL_PX))] + key
+
+
+## `water_fn(sx, world_y)`; `bands` = [[y0, y1], ...] world-px river bands (the WHOLE band, ford
+## included): no stamp, tone or track is drawn inside one. `key` must change whenever the
+## inputs of biome_fn / water_fn / anc / bands change (the camera row is added here).
+static func build_layer(cam_y: float, key: Array, biome_fn: Callable, water_fn: Callable,
+		anc: Array, bands: Array) -> void:
+	var iy0 := int(floor(cam_y / CELL_PX))
+	var snap := float(iy0) * CELL_PX
+	plan_builds += 1
+	var in_band := func(wy: float) -> bool:
+		for b in bands:
+			if wy >= b[0] and wy <= b[1]:
+				return true
+		return false
+	var stamps := plan(snap, biome_fn,
+		func(sx: float, sy: float) -> bool: return in_band.call(snap + sy) or water_fn.call(sx, snap + sy), anc)
+	for s in stamps:
+		s[0] = (s[0] as Vector2) + Vector2(0.0, snap)
+	var runs: Array = []
+	if not anc.is_empty():
+		var wy0 := floorf(snap / TRACK_STEP) * TRACK_STEP
+		runs = track_runs(wy0, int(ceil((float(ROWS) * CELL_PX + CELL_PX) / TRACK_STEP)) + 2, anc,
+			func(cx: float, wy: float) -> bool: return in_band.call(wy) or water_fn.call(cx, wy))
+	_layer = {"stamps": stamps, "runs": runs, "bands": bands}
+	_layer_key = [iy0] + key
+
+
+static func paint_layer(canvas: CanvasItem, cam_y: float, biome: int) -> void:
+	if _layer.is_empty():
+		return
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_paint_tone(canvas, cam_y, biome, _layer["bands"])
+	canvas.draw_set_transform(Vector2(0.0, -floorf(cam_y)), 0.0, Vector2.ONE)
+	draw_track_runs(canvas, _layer["runs"], biome)
+	var at := atlas()
+	var stamps: Array = _layer["stamps"]
+	last_stamp_count = stamps.size()
+	for s in stamps:
+		var pal: Array = palette(int(s[3]))
+		var col: Color = pal[int(s[1])]
+		col.a = minf(col.a, STAMP_ALPHA_CAP)
+		var pos: Vector2 = s[0]
+		canvas.draw_texture_rect_region(at, Rect2(pos, Vector2(STAMP, STAMP) * float(s[4])),
+			Rect2(float(int(s[2]) * STAMP), float(int(s[1]) * STAMP), float(STAMP), float(STAMP)), col)
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## Tone tiles minus the river bands (cut as source-region strips).
+static func _paint_tone(canvas: CanvasItem, cam_y: float, biome: int, bands: Array) -> void:
+	var tex := tone()
+	var tint := tone_tint(biome)
+	var ty0 := int(floor(cam_y / TONE_PERIOD))
+	var k := float(TONE_TEX) / TONE_PERIOD
+	for ty in range(ty0, ty0 + 3):
+		var wy := float(ty) * TONE_PERIOD
+		if wy - cam_y > 360.0 or wy + TONE_PERIOD - cam_y < 0.0:
+			continue
+		var spans: Array = [[wy, wy + TONE_PERIOD]]
+		for b in bands:
+			var nxt: Array = []
+			for sp in spans:
+				if b[1] <= sp[0] or b[0] >= sp[1]:
+					nxt.append(sp)
+					continue
+				if b[0] > sp[0]:
+					nxt.append([sp[0], b[0]])
+				if b[1] < sp[1]:
+					nxt.append([b[1], sp[1]])
+			spans = nxt
+		for sp in spans:
+			for tx in 2:
+				canvas.draw_texture_rect_region(tex,
+					Rect2(float(tx) * TONE_PERIOD, sp[0] - cam_y, TONE_PERIOD, sp[1] - sp[0]),
+					Rect2(0.0, (sp[0] - wy) * k, float(TONE_TEX), (sp[1] - sp[0]) * k), tint)
