@@ -113,6 +113,64 @@ func test_draw_water_is_wired_to_the_module_and_dropped_the_flat_boxes() -> void
 	var at := src.find("func _draw_water() -> void:")
 	var end := src.find("static func ford_visual", at)
 	var body := src.substr(at, end - at)
-	Runner.T.ok(body.contains("WaterPolish.shore_points("), "_draw_water cuts the bank from the shared shoreline")
-	Runner.T.ok(body.contains("WaterPolish.wet_strip("), "_draw_water paints the wet-sand strip")
+	Runner.T.ok(body.contains("WaterPolish.band_geometry("), "_draw_water cuts the bank from the cached shared shoreline")
+	Runner.T.ok(body.contains("WaterPolish.paint_shore("), "_draw_water paints the sand polygon + wet-sand strip")
 	Runner.T.ok(not body.contains("for fi in 4:"), "the stacked flat flood rectangles are gone")
+
+
+func test_cached_band_geometry_matches_the_uncached_shoreline_at_any_camera_y() -> void:
+	WaterPolish.clear_cache()
+	var col := Color(0.9, 0.85, 0.7)
+	for top in [true, false]:
+		var geo := WaterPolish.band_geometry(1.3, top, 80.0, Main.BANK_BASE, Main.BANK_AMP, Main.BANK_FREQ, col)
+		for wy in [12.25, 140.5, -33.125]:
+			var want := WaterPolish.shore_points(wy, 80.0, 1.3, top, Main.BANK_AMP, Main.BANK_FREQ)
+			var at: float = wy if top else wy + 80.0
+			var got: PackedVector2Array = Transform2D(0.0, Vector2(0.0, at)) * geo["shore"]
+			var worst := 0.0
+			for i in want.size():
+				worst = maxf(worst, (want[i] - got[i]).length())
+			Runner.T.ok(worst < 0.001, "translated cached shore == fresh shore (top=%s wy=%s, %.6f)" % [top, wy, worst])
+		Runner.T.ok(geo["sand_idx"].size() >= 3 and geo["sand_idx"].size() % 3 == 0, "sand polygon triangulates (top=%s)" % top)
+		Runner.T.ok(geo["wet_idx"].size() >= 3, "wet strip triangulates (top=%s)" % top)
+	Runner.T.eq(WaterPolish.band_geometry(1.3, true, 80.0, Main.BANK_BASE, Main.BANK_AMP, Main.BANK_FREQ, col),
+		WaterPolish.band_geometry(1.3, true, 80.0, Main.BANK_BASE, Main.BANK_AMP, Main.BANK_FREQ, col),
+		"a repeat lookup returns the cached geometry")
+	WaterPolish.clear_cache()
+
+
+func test_band_geometry_cache_invalidates_on_every_input_and_clears() -> void:
+	WaterPolish.clear_cache()
+	var col := Color(0.9, 0.85, 0.7)
+	var base := WaterPolish.band_geometry(1.3, true, 80.0, Main.BANK_BASE, Main.BANK_AMP, Main.BANK_FREQ, col)
+	var other_phase := WaterPolish.band_geometry(2.9, true, 80.0, Main.BANK_BASE, Main.BANK_AMP, Main.BANK_FREQ, col)
+	Runner.T.ok(base["shore"] != other_phase["shore"], "another band phase (another run's river) gets its own shoreline")
+	var scorched := WaterPolish.band_geometry(1.3, true, 80.0, Main.BANK_BASE, Main.BANK_AMP, Main.BANK_FREQ,
+		Color(0.5, 0.45, 0.4))
+	Runner.T.ok(base["wet_cols"] != scorched["wet_cols"], "a sector's scorched bank colour re-tints the wet strip")
+	Runner.T.ok(base["sand_cols"][0] != scorched["sand_cols"][0], "and the sand modulate")
+	var bottom := WaterPolish.band_geometry(1.3, false, 80.0, Main.BANK_BASE, Main.BANK_AMP, Main.BANK_FREQ, col)
+	Runner.T.ok(base["shore"] != bottom["shore"], "top and bottom shores are distinct entries")
+	Runner.T.ok(WaterPolish.cache_size() >= 4, "four inputs, four entries")
+	WaterPolish.clear_cache()
+	Runner.T.eq(WaterPolish.cache_size(), 0, "clear_cache empties every water cache")
+	for i in 200:
+		WaterPolish.band_geometry(float(i) * 0.37, true, 80.0, Main.BANK_BASE, Main.BANK_AMP, Main.BANK_FREQ, col)
+	Runner.T.ok(WaterPolish.cache_size() <= 64, "the cache is bounded (%d)" % WaterPolish.cache_size())
+	WaterPolish.clear_cache()
+
+
+func test_mud_plan_and_notch_caches_equal_the_uncached_values() -> void:
+	WaterPolish.clear_cache()
+	for soot in [0.0, 0.35]:
+		var want := GroundStructure.mud_bank_plan(1, 7, Vector2(640.0, 40.0), soot)
+		var got := WaterPolish.mud_plan(1, 7, Vector2(640.0, 40.0), soot)
+		Runner.T.eq(got["base"], want["base"], "mud plan base matches (soot %.2f)" % soot)
+		Runner.T.eq(got["blobs"].size(), want["blobs"].size(), "mud plan blob count matches")
+		Runner.T.eq(got["blobs"][5]["x"], want["blobs"][5]["x"], "mud plan blobs match")
+	Runner.T.ok(WaterPolish.mud_plan(1, 7, Vector2(640.0, 40.0), 0.0)["base"]
+		!= WaterPolish.mud_plan(1, 7, Vector2(640.0, 40.0), 0.35)["base"], "soot is part of the mud-plan key")
+	var nh := WaterPolish.notch_hashes(12345)
+	for mk in 12:
+		Runner.T.eq(nh[mk], Art.cell_hash(12345 + mk * 31, mk), "notch hash %d matches" % mk)
+	WaterPolish.clear_cache()

@@ -11224,38 +11224,39 @@ func _draw_water() -> void:
 		# churned dark/pale blobs over it, not one flat saturated orange slab. Same rects, same alpha.
 		var mud_b := GroundStructure.biome_at(_ground_campaign, ground_biome(sim.current_sector()),
 			float(w["y"]) * PX, _ground_biome_map)
-		var mud_p := GroundStructure.mud_bank_plan(mud_b, int(w["y"] / 4096), Vector2(640.0, 40.0), soot)
+		var mud_p := WaterPolish.mud_plan(mud_b, int(w["y"] / 4096), Vector2(640.0, 40.0), soot)
 		var mud_c: Color = mud_p["base"]
 		# The fill is the sector's OWN ground card darkened (the old shared "dirt" texture is a
 		# saturated orange that no modulate could desaturate), so the half-speed strip stays
 		# readable as a darker, churned band yet shares the biome's hue.
 		var mud_tex := Art.tex(ground_biome_source(mud_b))
 		var mud_mod: Color = mud_p["tex_mod"]
-		draw_texture_rect(mud_tex, Rect2(0, wy - 6 - 40, 640, 40), true, mud_mod)
-		draw_texture_rect(mud_tex, Rect2(0, wy + wh + 2, 640, 40), true, mud_mod)
-		GroundStructure.paint_mud_bank(self, mud_p, Vector2(0.0, wy - 6 - 40))
-		GroundStructure.paint_mud_bank(self, mud_p, Vector2(0.0, wy + wh + 2))
+		# Each flank is skipped on its own while it is fully off-screen (the band cull above
+		# only tests the whole 80px band; each flank + lip + shore is a few dozen commands).
+		var north_on := wy + 12.0 > -30.0 and wy - 52.0 < 390.0
+		var south_on := wy + wh + 52.0 > -30.0 and wy + wh - 12.0 < 390.0
+		if north_on:
+			draw_texture_rect(mud_tex, Rect2(0, wy - 6 - 40, 640, 40), true, mud_mod)
+			GroundStructure.paint_mud_bank(self, mud_p, Vector2(0.0, wy - 6 - 40))
+		if south_on:
+			draw_texture_rect(mud_tex, Rect2(0, wy + wh + 2, 640, 40), true, mud_mod)
+			GroundStructure.paint_mud_bank(self, mud_p, Vector2(0.0, wy + wh + 2))
 		# Banks: a wobbling polygon (not a ruler-straight strip) that shares the
 		# exact sine curve the shader displaces its shoreline by, so sand and water
 		# edge track each other instead of drifting into two parallel tells.
 		var wph := fmod(float(w["y"]) * 0.00013, 37.0)   # same phase _sync_water gives the shader
 		for shore_top in [true, false]:
-			var base := (wy - BANK_BASE) if shore_top else (wy + wh + BANK_BASE)   # dry-side edge
+			if not (north_on if shore_top else south_on):
+				continue
 			# 5px steps along the SAME irregular line the shader's waterline follows
-			# (slow sines + WaterPolish's high-frequency jitter).
-			var shore := WaterPolish.shore_points(wy, wh, wph, shore_top, BANK_AMP, BANK_FREQ)
-			var pts := PackedVector2Array(shore)
-			var uvs := PackedVector2Array()
-			for sp in shore:
-				uvs.append(Vector2(sp.x / 64.0, sp.y / 64.0))
-			for s in range(WaterPolish.SHORE_STEPS, -1, -1):   # back along the dry edge
-				var ex2 := float(s) / float(WaterPolish.SHORE_STEPS) * 640.0
-				pts.append(Vector2(ex2, base)); uvs.append(Vector2(ex2 / 64.0, base / 64.0))
-			draw_colored_polygon(pts, bank_col, uvs, Art.tex("sand"))
-			# Wet sand: a damp, darker tongue along the waterline fading up the bank,
-			# so land-to-water is a gradient, not a cut.
-			var wet := WaterPolish.wet_strip(shore, shore_top, wph, WaterPolish.wet_tint(bank_col))
-			draw_polygon(wet["pts"], wet["cols"])
+			# (slow sines + WaterPolish's high-frequency jitter). Built once per band/shore
+			# in band-local space and cached; per frame it is only translated by wy.
+			var geo := WaterPolish.band_geometry(wph, shore_top, wh, BANK_BASE, BANK_AMP, BANK_FREQ, bank_col)
+			# The dry edge keeps the original double-precision expression for its y so a flat
+			# edge sitting on a pixel boundary cannot flip a row. Sand polygon + the damp,
+			# darker wet-sand tongue along the waterline (land-to-water is a gradient, not a cut).
+			WaterPolish.paint_shore(self, geo, wy if shore_top else wy + wh,
+				(wy - BANK_BASE) if shore_top else (wy + wh + BANK_BASE), Art.tex("sand"))
 		# Mud OUTER edge (c2 3v): a 2px dark lip + hash notches on the dry
 		# side of both strips — the exact line where half-speed begins reads
 		# before you step in. Same deterministic notch idiom as the banks.
@@ -11263,14 +11264,19 @@ func _draw_water() -> void:
 		# inside), 2.5px and darker so the grass->mud boundary pops.
 		var mud_lip := Color(mud_c.r, mud_c.g, mud_c.b, 1.0).darkened(0.45)
 		var mseed := Art.cell_hash(int(w["y"] / 4096) * 53, 19)
-		draw_rect(Rect2(0, wy - 48.5, 640.0, 2.5), mud_lip)
-		draw_rect(Rect2(0, wy + wh + 42.0, 640.0, 2.5), mud_lip)
+		if north_on:
+			draw_rect(Rect2(0, wy - 48.5, 640.0, 2.5), mud_lip)
+		if south_on:
+			draw_rect(Rect2(0, wy + wh + 42.0, 640.0, 2.5), mud_lip)
+		var mnhs := WaterPolish.notch_hashes(mseed)
 		for mk in 12:
-			var mnh := Art.cell_hash(mseed + mk * 31, mk)
-			draw_rect(Rect2(float(mnh % 630), wy - 48.5 - float(mnh % 3),
-				5.0 + float(mnh % 6), 2.5), mud_lip)
-			draw_rect(Rect2(float((mnh * 13) % 630), wy + wh + 42.0 + float((mnh >> 3) % 3),
-				5.0 + float((mnh >> 5) % 6), 2.5), mud_lip)
+			var mnh := mnhs[mk]
+			if north_on:
+				draw_rect(Rect2(float(mnh % 630), wy - 48.5 - float(mnh % 3),
+					5.0 + float(mnh % 6), 2.5), mud_lip)
+			if south_on:
+				draw_rect(Rect2(float((mnh * 13) % 630), wy + wh + 42.0 + float((mnh >> 3) % 3),
+					5.0 + float((mnh >> 5) % 6), 2.5), mud_lip)
 		# Tumbleweed-skip seed/bounds (used below): kept even though the sand-edge
 		# notches that used to share it were deleted (the curved bank polygon is
 		# the irregularity now) — the tumbleweed scatter still needs them.
@@ -11408,6 +11414,8 @@ func _draw_water() -> void:
 		# rides Art.tint("tumbleweed")'s own march-ramped desert tint instead of
 		# a second hardcoded base stacked on top.
 		for rk in 9:
+			if not (north_on if rk % 2 == 0 else south_on):
+				continue
 			var rh := Art.cell_hash(nseed + rk * 31, rk + 9)
 			var rrx := float(rh % 620) + 10.0
 			if rrx > nford_l and rrx < nford_r:
