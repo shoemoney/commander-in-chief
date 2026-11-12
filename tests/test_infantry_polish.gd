@@ -33,7 +33,7 @@ func test_sniper_and_elite_read_apart_from_rushers() -> void:
 	var rush := _mean_body("res://assets/baked/enemy_assault/idle.png", 0.62)
 	var snip := _mean_body("res://assets/baked/enemy_sniper/idle.png")
 	var elite := _mean_body("res://assets/baked/enemy_elite/idle.png", 0.62)
-	Runner.T.ok(snip.b > rush.b + 0.25, "sniper carries a magenta blue channel the rushers lack")
+	Runner.T.ok(snip.b > snip.r + 0.15 and snip.b > rush.b + 0.25, "sniper reads cold blue-steel, not rusher warm (%s)" % snip)
 	Runner.T.ok(elite.r < rush.r - 0.08, "elite body is a darker maroon than a rusher (%s vs %s)" % [elite, rush])
 
 func test_pad_rules() -> void:
@@ -48,3 +48,28 @@ func test_wired_into_draw_enemies() -> void:
 	Runner.T.ok(i >= 0, "_draw_enemies exists")
 	var j := src.find("\nfunc ", i + 10)
 	Runner.T.ok(src.substr(i, j - i).contains("InfantryPolish.draw_pad("), "_draw_enemies calls the pad")
+
+
+func _hue_gap(a: float, b: float) -> float:
+	var d := absf(a - b)
+	return minf(d, 1.0 - d)
+
+func test_no_enemy_role_wears_the_lethal_bolt_hue() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var rx := RegEx.create_from_string("const LETHAL_BOLT := Color\\(([0-9.]+), ([0-9.]+), ([0-9.]+)\\)")
+	var m := rx.search(src)
+	Runner.T.ok(m != null, "LETHAL_BOLT constant found")
+	var bolt := Color(float(m.get_string(1)), float(m.get_string(2)), float(m.get_string(3)))
+	Runner.T.ok(ProjectilesPolish.ENEMY_BODY.is_equal_approx(bolt), "hostile bullet body is the reserved lethal colour")
+	var window := 40.0 / 360.0
+	for k in ["enemy_assault", "enemy_smg", "enemy_shotgun", "enemy_lmg", "enemy_sniper", "enemy_elite"]:
+		var im := _img("res://assets/baked/%s/idle.png" % k)
+		var bad := 0
+		for y in im.get_height():
+			for x in im.get_width():
+				var c := im.get_pixel(x, y)
+				if c.a < 0.5 or c.s < 0.3 or c.v < 0.3:
+					continue
+				if _hue_gap(c.h, bolt.h) < window:
+					bad += 1
+		Runner.T.eq(bad, 0, "%s has no saturated pixel within 40 degrees of the lethal bolt hue" % k)

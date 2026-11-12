@@ -66,6 +66,12 @@ func test_hero_reads_apart_from_every_hostile_by_value_and_hue() -> void:
 		var s := _tinted_stats(Art.enemy_anim(k, "idle"), key)
 		Runner.T.ok(hero.x > s.x + 0.04,
 			"hero is brighter than %s by >0.04 (%.2f vs %.2f mean luma)" % [k, hero.x, s.x])
+		if k == "enemy_sniper":
+			# The sniper is cold steel-blue (the lethal-bolt magenta is reserved), so it
+			# separates from the hero by being clearly bluer, not warmer.
+			Runner.T.ok(s.y < hero.y - 0.05 and hero.y < 0.0,
+				"%s is bluer (r-b %.2f) than the hero (r-b %.2f)" % [k, s.y, hero.y])
+			continue
 		Runner.T.ok(s.y > 0.12 and hero.y < 0.0,
 			"%s is warm (r-b %.2f) while the hero is cool (r-b %.2f)" % [k, s.y, hero.y])
 

@@ -8,7 +8,7 @@ extends RefCounted
 
 const PX := 1.0 / Fixed.ONE
 const OUTLINE := Color(0.02, 0.01, 0.02, 0.92)
-const ENEMY_BODY := Color(1.0, 0.2, 0.55)
+const ENEMY_BODY := Color(1.0, 0.22, 0.82)
 const ENEMY_CORE := Color(1.0, 0.93, 0.55)
 const SNIPER_CORE := Color(1.0, 0.98, 0.85)
 
@@ -32,7 +32,7 @@ static func draw_enemy_halo(c: CanvasItem, pos: Vector2, speed_ratio: float, fra
 	var halo := enemy_halo_radius(speed_ratio > 1.4)
 	var pulse := 1.0 if motion < 0.5 else 0.88 + 0.12 * sin(float(frame) * 0.5)
 	c.draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2.ONE * halo, Vector2.ONE * halo * 2.0),
-		false, Color(1.0, 0.18, 0.5, 0.8 * pulse))
+		false, Color(1.0, 0.22, 0.82, 0.8 * pulse))
 
 
 ## Pass 2 (over the card): tapered wake, dark outline, saturated body, hot core.
