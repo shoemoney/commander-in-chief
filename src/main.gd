@@ -9687,7 +9687,9 @@ func _draw() -> void:
 			if is_locker:
 				var lp: float = 1.0 if _motion < 0.5 else Art.pulse(0.15)   # steady-bright under reduce-motion
 				Art.arc(self, c, 26.0, 0, TAU, 24, Color(1.0, 0.85, 0.3, 0.4 + lp * 0.4), 2.0)
+			PropsPolish.cast_shadow(self, c, 22.0, PropsPolish.HEIGHT_BUNKER, 0.5)
 			_ground_shadow(c, 17.0, 0.42)
+			PropsPolish.cover_base_rect(self, Rect2(c + Vector2(-22.0, -10.0), Vector2(44.0, 24.0)), 0.9)
 			# Hash-picked bunker variant: bunker / bunker2 / mirrored bunker (the
 			# mirror is a free third look — angle PI + stretch -1 = h-flip).
 			var bv := Art.cell_hash(bk["x"], bk["y"] * 7) % 3
@@ -10816,7 +10818,8 @@ func _draw_rocks() -> void:
 				# stand in this but bullets pass through." Alpha-only mod (no color
 				# multiply) so it rides Art.tint("dry_shrub")'s own march-ramped
 				# desert tint instead of a second fixed tan stacked on top.
-				var g_sway := sin(float(Engine.get_physics_frames()) * 0.04 + float(rh3)) * 0.06 * _motion
+				var g_sway := PropsPolish.sway(rh3, Engine.get_physics_frames(), _motion, 0.10)
+				PropsPolish.cast_shadow(self, pos, 14.0, 4.0, 0.14 * fade)   # decor: faint, no lip
 				var g_tex: String = ROCK_KIND_COVER[1]["sprite"]
 				for gt in 3:
 					var gh := Art.cell_hash(rh3 + gt * 13, gt)
@@ -10825,7 +10828,9 @@ func _draw_rocks() -> void:
 			2:
 				# Ruined wall slab: wide, low, hard — the corridor narrows to
 				# lanes between slabs (40x10 extent → 80x20 footprint).
+				PropsPolish.cast_shadow(self, pos, 40.0, PropsPolish.HEIGHT_SLAB, 0.42 * fade)
 				_ground_shadow(pos, 20.0, 0.45 * fade)
+				PropsPolish.cover_base_rect(self, Rect2(pos + Vector2(-40.0, -10.0), Vector2(80.0, 20.0)), fade)
 				draw_rect(Rect2(pos + Vector2(-40.0, -10.0), Vector2(80.0, 20.0)), Color(0.30, 0.28, 0.26, fade))
 				draw_rect(Rect2(pos + Vector2(-40.0, -10.0), Vector2(80.0, 5.0)), Color(0.42, 0.40, 0.37, fade))
 				for bk2 in 3:
@@ -10846,16 +10851,20 @@ func _draw_rocks() -> void:
 				# tall against 64x48 — under 5% on both axes, still ~2x a classic rock,
 				# and it now reads as a halftrack lying ACROSS the lane. Extents are
 				# sim-side and deliberately untouched (golden re-record for zero gain).
+				PropsPolish.cast_shadow(self, pos + Vector2(0, 4), 30.0, PropsPolish.HEIGHT_WRECK, 0.45 * fade)
 				_ground_shadow(pos + Vector2(0, 8), 26.0, 0.5 * fade)
+				PropsPolish.cover_base_rect(self, Rect2(pos + Vector2(-32.0, -20.0), Vector2(64.0, 40.0)), fade * 0.8)
 				_spr(ROCK_KIND_COVER[3]["sprite"], pos, PI / 2.0 + (float(rh3 % 30) - 15.0) / 100.0,
 					1.1, Color(0.62, 0.56, 0.5, fade))
 			_:
+				PropsPolish.cast_shadow(self, pos, 12.0, PropsPolish.HEIGHT_ROCK, 0.40 * fade)
 				_ground_shadow(pos, 12.0, 0.42 * fade)
+				PropsPolish.cover_base_round(self, pos, 13.0, fade)
 				var rtex: String = ["rock1", "rock2", "cactus_dead2"][rh3 % 3]   # dead cactus is REAL cover too
 				var rcol := Color(0.78, 0.8, 0.78) if rtex != "cactus_dead2" else Color(0.7, 0.62, 0.5)
 				# Weathering: no two boulders share a size or a value — a fixed
 				# per-sprite scale/tint was the "identical stamp" tell.
-				rcol = rcol.lerp(rcol.darkened(0.20), float((rh3 >> 8) % 4) / 3.0)
+				rcol = rcol.lerp(rcol.darkened(0.20), float((rh3 >> 8) % 4) / 3.0) * PropsPolish.tint_variant(rh3)
 				var rsc: float = {"rock1": 1.3, "rock2": 1.05, "cactus_dead2": 0.35}[rtex] \
 					* (0.90 + 0.04 * float((rh3 >> 4) % 5))
 				if (rh3 >> 12) % 3 == 0:
@@ -10956,11 +10965,15 @@ func _draw_sandbags() -> void:
 		if sb.get("vertical", 0) == 1:
 			# Purchased east/west-facing nests swap their collision axes; rotate the
 			# modular segment too so the visible barrier tells the same truth.
+			PropsPolish.cast_shadow(self, pos, 8.0, PropsPolish.HEIGHT_BAG, 0.36 * _bottom_fade(pos.y))
 			_ground_shadow(pos, 6.0, 0.42 * _bottom_fade(pos.y))
+			PropsPolish.cover_base_rect(self, Rect2(pos + Vector2(-6.0, -17.0), Vector2(12.0, 34.0)), _bottom_fade(pos.y))
 			_spr("wall_sandbag_end", pos, PI / 2.0, 0.62,
 				Color(1.02, 0.98, 0.74, _bottom_fade(pos.y)))
 			continue
 		# c2 2v: cover fades off the player's back near the bottom of the ratchet view.
+		PropsPolish.cast_shadow(self, pos + Vector2(0, 2), 17.0, PropsPolish.HEIGHT_BAG, 0.38 * _bottom_fade(pos.y))
+		PropsPolish.cover_base_rect(self, Rect2(pos + Vector2(-18.0, -6.0), Vector2(36.0, 12.0)), _bottom_fade(pos.y))
 		_wall_seg(pos, 0.62, Color(1.02, 0.98, 0.74), sb["x"] / 65536, sb["y"] / 65536,
 			cap_flags(bxs, bys, i), _bottom_fade(pos.y))
 
@@ -11095,6 +11108,7 @@ func _draw_barrels() -> void:
 		# priciest invisible thing in the frame (same idiom as _draw_water).
 		if bp.y < -40.0 or bp.y > 400.0:
 			continue
+		PropsPolish.cast_shadow(self, bp, 5.0, PropsPolish.HEIGHT_BARREL, 0.40)
 		_ground_shadow(bp, 4.0)
 		# Hazard-orange live ordnance, distinct from the mossy scenery barrels.
 		var wb := 1.0 if _motion < 0.5 else Art.pulse(0.09)   # steady under reduce-motion
@@ -11852,6 +11866,7 @@ func _draw_pickups() -> void:
 		# bunkers all cast the soft ellipse) — without it a priced crate read as a
 		# floating sticker. Capsules (kind >= 4) keep their pulsing glow disc instead.
 		if pk["kind"] <= 3:
+			PropsPolish.cast_shadow(self, ppos, 7.0, PropsPolish.HEIGHT_CRATE, 0.36)
 			_ground_shadow(ppos, 6.0)
 		if pk.get("drop", 0) > 0:
 			# Parachute identity (re-review: after the spawn toast faded the
