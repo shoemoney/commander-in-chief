@@ -55,6 +55,7 @@ const TEST_SCRIPTS: Array[String] = [
 	"res://tests/test_spawn_cover.gd",
 	"res://tests/test_mutators.gd",
 	"res://tests/test_colossus.gd",
+	"res://tests/test_atmosphere_polish.gd",
 	"res://tests/test_determinism.gd",
 	"res://tests/test_checksum_coverage.gd",
 	"res://tests/test_event_coverage.gd",
