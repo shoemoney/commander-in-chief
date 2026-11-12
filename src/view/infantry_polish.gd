@@ -5,15 +5,15 @@ extends RefCounted
 ## hostile so a dark-brown soldier is lifted off dark grass and sand alike.
 
 const PAD_KINDS := ["rusher", "smg", "shotgun", "lmg", "sniper", "grenadier", "elite", "sapper", "ghillie"]
-const PAD_SIZE := Vector2(20.0, 12.0)
-const PAD_OFFSET := Vector2(-10.0, -3.0)
-const PAD_COL := Color(1.0, 0.86, 0.62)
+const PAD_SIZE := Vector2(26.0, 16.0)
+const PAD_OFFSET := Vector2(-13.0, -5.0)
+const PAD_COL := Color(1.0, 0.82, 0.55)
 
 
 static func pad_alpha(kind: String, submerged: bool) -> float:
 	if submerged or not PAD_KINDS.has(kind):
 		return 0.0
-	return 0.22 if kind == "sniper" or kind == "ghillie" else 0.17
+	return 0.55 if kind == "sniper" or kind == "ghillie" else 0.45
 
 
 static func pad_rect(pos: Vector2) -> Rect2:

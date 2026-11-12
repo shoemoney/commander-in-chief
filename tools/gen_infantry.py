@@ -81,6 +81,25 @@ HOSTILE = {
     "steel_hi": (214, 206, 196), "flash": (255, 240, 170), "flash2": (255, 190, 80),
     "hair": (70, 44, 34), "band": (222, 196, 98), "brass": (212, 164, 62),
 }
+# Readability pass: the rusher family (assault/smg/shotgun/lmg skins share one job, so one
+# hue) is hot red against every green/sand ground; the sniper is hot magenta, the elite dark maroon
+# with gold. Only colours change: geometry, footprints and anchors are untouched.
+ROLE_PAL = {
+    "enemy_assault": {"cloth": (222, 58, 40), "shade": (150, 30, 30), "pack": (92, 34, 34),
+                      "skin": (246, 184, 140), "band": (255, 236, 150)},
+    "enemy_smg": {"cloth": (236, 84, 36), "shade": (158, 40, 28), "pack": (92, 34, 34),
+                  "skin": (246, 184, 140), "band": (255, 236, 150), "hair": (40, 22, 18)},
+    "enemy_shotgun": {"cloth": (208, 44, 56), "shade": (140, 26, 40), "pack": (88, 30, 38),
+                      "skin": (246, 184, 140), "band": (255, 226, 120)},
+    "enemy_lmg": {"cloth": (200, 48, 36), "shade": (132, 26, 26), "pack": (84, 30, 30),
+                  "skin": (246, 184, 140), "band": (255, 226, 120), "steel": (70, 66, 72)},
+    "enemy_sniper": {"cloth": (222, 78, 158), "shade": (156, 44, 112), "pack": (98, 34, 72),
+                     "helm": (250, 222, 238), "helm_hi": (255, 248, 252), "helm_lo": (196, 140, 170),
+                     "skin": (246, 196, 160), "band": (255, 240, 180)},
+    "enemy_elite": {"cloth": (104, 34, 30), "shade": (70, 20, 20), "pack": (44, 18, 18),
+                    "helm": (252, 206, 70), "helm_hi": (255, 240, 150), "helm_lo": (190, 140, 40),
+                    "skin": (246, 184, 140), "band": (255, 60, 50), "steel": (70, 66, 72)},
+}
 HERO = {
     "cloth": (84, 124, 96), "shade": (58, 92, 76), "pack": (52, 74, 66),
     "helm": (226, 232, 222), "helm_hi": (255, 255, 255), "helm_lo": (160, 176, 176),
@@ -350,7 +369,7 @@ def spec_for(kind, bw, bh, pose):
 
 
 def build(kind, pose, bw, bh):
-    P = HERO if kind == "hero" else (DIVER if kind.startswith("frog") else HOSTILE)
+    P = HERO if kind == "hero" else (DIVER if kind.startswith("frog") else dict(HOSTILE, **ROLE_PAL.get(kind, {})))
     if kind.startswith("frog"):
         return build_diver(kind, bw, bh)
     s, cx, walk_legs, stride, fire, aim, crouch, stun, down = spec_for(kind, bw, bh, pose)
@@ -605,7 +624,7 @@ def render_all():
     for kind, poses in BBOX.items():
         for pose, (bw, bh) in poses.items():
             cv = build(kind, pose, bw, bh)
-            arr = finish(cv, TINTS[kind], RIM_HERO if kind == "hero" else RIM_HOSTILE if kind.startswith("enemy") else None)
+            arr = finish(cv, TINTS[kind], RIM_HERO if kind == "hero" else None)
             if pose == "base":
                 arr = to_base_canvas(kind, arr)
             out[(kind, pose)] = arr
