@@ -2278,6 +2278,9 @@ func _reset() -> void:
 	_flash_col = Color(1, 1, 1)
 	_fx.clear()
 	WeaponFx.reset()
+	_explo_polish.reset()   # blasts/puffs and their view clock belong to the run that spawned them
+	_polish.reset()
+	BossesPolish.reset()
 	_rooted_arrive.clear()   # c4-19: a restart mid-ramp must not inherit the old run's dig-in ages
 	_mote_count = 0
 	_pending_blasts.clear()
@@ -14633,8 +14636,11 @@ func _draw_sector_embers() -> void:
 ## _draw_fx() left the under-pass reading the PREVIOUS frame's index lists (empty
 ## on frame 1, so no explosion body would draw at all until frame 2).
 var _explo_polish := ExplosionsPolish.new()   # layered blasts + impact puffs (view-only)
-func _classify_fx() -> void:
-	_explo_polish.ingest(_fx, sim.events, sim.tick_count, _polish_wet)
+func _classify_fx(advance_clock := true) -> void:
+	var card_up := _debrief or sim.victory   # the sim has stopped stepping: age blasts on the view clock
+	# The second call per frame (from _draw_fx) must not advance the clock again.
+	var vt: int = _explo_polish.view_clock(sim.tick_count, card_up) if advance_clock else _explo_polish._clock
+	_explo_polish.ingest(_fx, [] if card_up else sim.events, vt, _polish_wet)
 	_fx_alpha_idx.clear()
 	_fx_glow_idx.clear()
 	for i in _fx.size():
@@ -14665,7 +14671,7 @@ func _polish_wet(x: int, y: int) -> bool:
 func _draw_fx_under() -> void:
 	# The old single explosion-card body is replaced by the layered blast (shockwave, cooling
 	# fireball, flung chunks, rolling smoke) in src/view/explosions_polish.gd.
-	_explo_polish.draw_under(self, _to_screen, sim.tick_count, _motion)
+	_explo_polish.draw_under(self, _to_screen, _explo_polish._clock, _motion)
 
 
 func _draw_fx() -> void:
@@ -14678,7 +14684,7 @@ func _draw_fx() -> void:
 	# separate draw-signal callback on _glow_root that only fires after _draw()
 	# finishes, so it always sees this tick's fresh classification) into two
 	# reused index lists, so each draw pass only touches its own subset.
-	_classify_fx()
+	_classify_fx(false)
 	# Toast slots already taken this frame: (x, y, half-width) of every floattext DRAWN so far.
 	# A toast that would land on one of them drops an 11px row until it doesn't. Positions, not
 	# anchors — see the stacking block below; the old anchor-proximity test let toasts that
@@ -14966,7 +14972,8 @@ func _draw_glow() -> void:
 	# Vehicle fires: a flickering flame card over burning tanks and fresh wrecks —
 	# additive, so the fire lights the field. Stateless (frame-clock flicker).
 	var flick := 0.82 + 0.18 * sin(float(Engine.get_physics_frames()) * 0.55)
-	_explo_polish.draw_glow(g, _to_screen, sim.tick_count, _motion, _flash_strength())
+	if not ((_debrief or sim.victory) and _result_t > 0.5):   # no blast light over the result panel
+		_explo_polish.draw_glow(g, _to_screen, _explo_polish._clock, _motion, _flash_strength())
 	# Hulk smolder (6v panel: the pulsing rect frame read as a debug gizmo):
 	# live cover now smolders DIEGETICALLY — a warm additive bed + hash-
 	# flickering embers along the hull, all fading out over the last 3s so

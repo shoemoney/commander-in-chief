@@ -200,6 +200,9 @@ func _pose(idx: int) -> void:
 	# Feel decay never runs while posing — scrub prior dress state so one
 	# shot's garnish can't leak into the next.
 	main._fx.clear()
+	main._explo_polish.reset()   # polish state is per-run view state too: shot 01's blast must not ride into later poses
+	main._polish.reset()
+	BossesPolish.reset()
 	main._damage_vignette = 0.0
 	main._banners.clear()
 	# Mutate in place: cross-script assignment of a fresh Array into the

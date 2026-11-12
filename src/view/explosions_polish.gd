@@ -10,7 +10,8 @@ extends RefCounted
 ##
 ## Everything is a pure function of (entry, current sim tick): no per-frame allocation beyond
 ## the draw calls, no RNG (hash-seeded from the world position so a replay looks the same),
-## and ages count SIM ticks so hit-stop and slow-motion freeze/stretch the blast with the world.
+## and ages count a view clock that follows SIM ticks (hit-stop and slow-motion freeze/stretch the blast
+## with the world) but keeps running once the result card is up.
 ## Reduce-motion (`motion < 0.5`) is static: the fireball and smoke fade in place, with no
 ## expansion, sparks, flung chunks, shockwave or impact puffs.
 
@@ -34,6 +35,30 @@ static var _cards: Dictionary = {}
 var blasts: Array[Dictionary] = []
 var puffs: Array[Dictionary] = []
 var _ingested_tick := -999999
+var _clock := 0           # VIEW clock: follows sim ticks, but keeps running while the sim is stopped on a result card
+var _last_sim_tick := -1
+
+
+## Drops every live blast / puff and rewinds the view clock (a restart or return to title).
+func reset() -> void:
+	blasts.clear()
+	puffs.clear()
+	_ingested_tick = -999999
+	_clock = 0
+	_last_sim_tick = -1
+
+
+## The tick every blast / puff is stamped and aged against. It advances with the sim (so hit-stop
+## and slow-motion still freeze / stretch a blast with the world), except when `free_run` is set
+## (the Victory / K.I.A. card, where the sim has stopped for good): then it advances one per call
+## so blasts finish and fade instead of hanging frozen under the result panel.
+func view_clock(sim_tick: int, free_run: bool) -> int:
+	if _last_sim_tick >= 0 and sim_tick > _last_sim_tick:
+		_clock += mini(sim_tick - _last_sim_tick, 4)
+	elif free_run:
+		_clock += 1
+	_last_sim_tick = sim_tick
+	return _clock
 
 
 static func hash01(seed_v: int, k: int) -> float:

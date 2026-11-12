@@ -83,3 +83,46 @@ func test_real_main_classify_pass_feeds_the_module() -> void:
 	Runner.T.eq(main._explo_polish.puffs.size(), 1, "main._classify_fx turns the kill event into a death puff")
 	Runner.T.ok(main._fx[0].has("pf"), "the fx entry is flagged as taken")
 	main.free()
+
+
+func test_blast_ages_out_on_the_view_clock_while_the_sim_is_frozen_on_the_result_card() -> void:
+	var main := _main()
+	main._fx.append({"x": 5000, "y": 6000, "t": 0.0, "kind": "explosion"})
+	main._classify_fx()
+	Runner.T.eq(main._explo_polish.blasts.size(), 1, "the blast is live before the card")
+	var tick_before: int = main.sim.tick_count
+	main._debrief = true
+	for _f in 20:
+		main._classify_fx()
+		main._classify_fx(false)   # _draw_fx's second call must not double-age
+	Runner.T.eq(main._explo_polish.blasts.size(), 1, "20 card frames in, the smoke still lingers")
+	Runner.T.eq(main._explo_polish._clock, 20, "two classify calls per frame age the blast one tick per frame")
+	for _f in ExplosionsPolish.SMOKE_FRAMES + 20:
+		main._classify_fx()
+	Runner.T.eq(main.sim.tick_count, tick_before, "the sim tick never moved")
+	Runner.T.eq(main._explo_polish.blasts.size(), 0, "the blast finished and was pruned although the sim is stopped")
+	main.free()
+
+
+func test_hit_stop_still_freezes_a_blast_when_no_card_is_up() -> void:
+	var p := ExplosionsPolish.new()
+	var t0 := p.view_clock(100, false)
+	Runner.T.eq(p.view_clock(100, false), t0, "an unchanged sim tick (hit-stop) holds the clock")
+	Runner.T.eq(p.view_clock(101, false), t0 + 1, "a stepped sim advances it")
+	Runner.T.eq(p.view_clock(101, true), t0 + 2, "a stopped sim on the result card free-runs")
+
+
+func test_reset_clears_polish_state_through_the_real_main() -> void:
+	var main := _main()
+	main._fx.append({"x": 5000, "y": 6000, "t": 0.0, "kind": "explosion"})
+	main.sim.events = [{"t": "kill", "x": 7000, "y": 8000, "kind": "rusher"}]
+	main._classify_fx()
+	main._polish.hurt_age.append(3)
+	BossesPolish.push_track(0, 1000, 1000, 0.0)
+	Runner.T.ok(not main._explo_polish.blasts.is_empty() and not BossesPolish._trails.is_empty(), "state exists before the reset")
+	main._reset()
+	Runner.T.eq(main._explo_polish.blasts.size() + main._explo_polish.puffs.size(), 0, "_reset drops blasts and puffs")
+	Runner.T.eq(main._explo_polish._clock, 0, "_reset rewinds the view clock")
+	Runner.T.ok(main._polish.hurt_age.is_empty(), "_reset clears the player polish state")
+	Runner.T.ok(BossesPolish._trails.is_empty(), "_reset clears the tank trails")
+	main.free()
