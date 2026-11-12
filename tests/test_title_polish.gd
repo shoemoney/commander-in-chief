@@ -155,3 +155,20 @@ func test_splash_icon_is_masked_to_the_badge() -> void:
 	for p in pts:
 		corner_cut = corner_cut and not (p.x - r.position.x < 8.0 and p.y - r.position.y < 8.0)
 	Runner.T.ok(corner_cut, "the top-left corner of the white square is excluded")
+
+
+func test_wordmark_has_no_slab_behind_it() -> void:
+	var src := FileAccess.get_file_as_string("res://src/view/menu.gd")
+	var a := src.find("func _draw_title_header(")
+	var body := src.substr(a, 2600)
+	Runner.T.ok(body.find("wplate") == -1, "no translucent plate behind COMMANDER IN CHIEF")
+
+
+func test_world_draw_is_skipped_behind_the_opaque_backdrop() -> void:
+	Runner.T.ok(TitlePolish.hides_world(1.0), "settled title hides the world")
+	Runner.T.ok(not TitlePolish.hides_world(0.6), "a fading-in title does not")
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var w := src.find("_wash_load = 0.0   # fresh")
+	var s := src.find("_sync_water()\n", w)
+	var g := src.find("TitlePolish.hides_world(", w)
+	Runner.T.ok(g != -1 and g < s, "the guard sits before the world draw")

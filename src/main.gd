@@ -9671,6 +9671,8 @@ func _draw() -> void:
 	_label_safe_l = _lsafe.position.x
 	_label_safe_r = _lsafe.position.x + _lsafe.size.x
 	_wash_load = 0.0   # fresh full-frame wash budget every frame (see WASH_CAP)
+	if _menu.mode == GameMenu.Mode.TITLE and TitlePolish.hides_world(_menu._open_t):
+		return   # the opaque title backdrop covers the attract fight: skip drawing it (the sim still steps)
 	# Position the water shader quads under the world and requeue the grass base.
 	# Driven from _draw (not _process) so it also runs under the screenshot harness,
 	# which disables main's processing but still calls queue_redraw(). The 1-frame
@@ -15601,6 +15603,8 @@ func _draw_objective_markers() -> void:
 	# objectives get a small bobbing icon overhead; off-screen ones become a
 	# directional diamond pinned to the nearest edge (distinct from the red
 	# threat chevrons — these are objectives, not generic hostiles).
+	if _debrief or sim.victory:
+		return   # the result card owns the screen: no world markers beside its seal
 	var bob := sin(float(Engine.get_physics_frames()) * 0.12) * 2.0 * _motion   # stills under REDUCE MOTION
 	# pr: 0 = mission-critical (gate/boss), 1 = kill targets, 2 = loot. Sorted
 	# before the edge cap so a crate flood can never evict a gate/boss pointer.
@@ -15668,6 +15672,7 @@ func _draw_objective_markers() -> void:
 					break
 			if mclear:
 				BannersPolish.draw_label_plate(self, mplate, m["col"], mp + Vector2(0.0, -2.0 + bob))
+				_label_slots.append(mplate.merge(Rect2(mp + Vector2(-3.0, -8.0 + bob), Vector2(6, 8))))
 			else:
 				draw_texture_rect(Art.tex(m["icon"]),
 					Rect2(mp + Vector2(-4.0, -19.0 + bob), Vector2(10, 10)), false, Color(0, 0, 0, 0.55))
@@ -16488,6 +16493,8 @@ func _draw_banners(top_msg: String) -> void:
 	# Every alert below docks on the band's row 0 — `band_row` is the ONLY place its y and its
 	# string come from, so none of them can wander off the rail the way the objective line did.
 	var trow := band_row(_band, "top")
+	if _debrief or sim.victory:
+		trow = {}   # the result card owns the screen: no world objective line under or beside its seal
 	# Arena-lock directive: the camera holds at closed gates by design, but
 	# the objective must be said out loud (playtest: "scrolling just stops").
 	if top_msg == "boss" and not trow.is_empty():

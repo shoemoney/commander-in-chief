@@ -432,6 +432,12 @@ static func backdrop(t: float, motion: float, a: float) -> Array:
 	return ops
 
 
+## True once the title backdrop (the opaque dusk scene, alpha = the menu's settle envelope)
+## fully covers the screen, so the attract firefight behind it need not be drawn.
+static func hides_world(open_t: float) -> bool:
+	return open_t >= 0.999
+
+
 ## Footer plates: version bottom-left, copyright bottom-right (micro text, baseline y).
 static func footer_items(size: int) -> Array:
 	var cr := COPYRIGHT.replace("(C)", "©") if Art.font().has_char(0xA9) else COPYRIGHT

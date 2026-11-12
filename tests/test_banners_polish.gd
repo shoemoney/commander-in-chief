@@ -116,3 +116,29 @@ func test_draw_paths_are_wired_to_the_module() -> void:
 		"on-screen objective markers wear the shared plate with a pointer")
 	Runner.T.ok(src.substr(src.find("func _banner_plate("), 500).find("BannersPolish.draw_plate(") != -1,
 		"_banner_plate (last stand) routes through the module too")
+
+
+func test_lettering_draws_one_shadow_and_one_ink_pass() -> void:
+	var src := FileAccess.get_file_as_string("res://src/view/banners_polish.gd")
+	var a := src.find("static func draw_lettering(")
+	var body := src.substr(a, src.find("\nstatic func ", a + 10) - a)
+	Runner.T.eq(body.count("ci.draw_string("), 2, "lettering is one shadow string plus one ink string (no doubled shadow, no fake-bold pass)")
+	Runner.T.eq(body.count("draw_string_outline("), 1, "and one rim")
+
+
+func test_plate_ends_are_notches_not_pipe_bars() -> void:
+	var src := FileAccess.get_file_as_string("res://src/view/banners_polish.gd")
+	var a := src.find("static func draw_plate(")
+	var body := src.substr(a, src.find("\n## Solid lettering", a) - a)
+	Runner.T.ok(body.find("b.size.y - 4.0), cap)") == -1, "no full-height accent bar at either end")
+	Runner.T.ok(body.contains("CAP_NOTCH_H"), "the ends are short corner notches")
+	Runner.T.ok(BannersPolish.CAP_NOTCH_H < 6.0, "notch is a tick, not a bar")
+
+
+func test_objective_marker_plates_reserve_their_label_slot() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var d := src.find("func _draw_objective_markers(")
+	var body := src.substr(d, src.find("\nstatic func _marker_icon(", d) - d)
+	var p := body.find("BannersPolish.draw_label_plate(")
+	Runner.T.ok(p != -1 and body.substr(p, 300).contains("_label_slots.append("),
+		"a drawn marker plate appends its rect to _label_slots")

@@ -9,7 +9,8 @@ extends RefCounted
 ## main.band_rows() deals are exactly the pixels that get painted.
 
 const PLATE_FILL := Color(0.035, 0.04, 0.03, 0.93)
-const CAP_W := 3.0           # accent end cap width, inside the plate rect
+const CAP_W := 3.0           # inner inset kept clear at each end of the plate
+const CAP_NOTCH_H := 4.0     # corner notch tick height
 const ENTER_T := 0.92        # banner t (1 -> 0) above which the plate wipes open
 const ENTER_DROP := 4.0      # px the banner rises into place
 const EXIT_T := 0.14         # banner t below which the plate wipes closed
@@ -69,9 +70,13 @@ static func draw_plate(ci: CanvasItem, full: Rect2, accent: Color, a: float, r :
 	var rule := Color(accent.r, accent.g, accent.b, 0.75 * a)
 	ci.draw_rect(Rect2(b.position.x + 1.0, b.position.y, b.size.x - 2.0, 1.0), rule)
 	ci.draw_rect(Rect2(b.position.x + 1.0, b.end.y - 1.0, b.size.x - 2.0, 1.0), rule)
+	# End treatment: four corner notches (a short accent tick tucked under the top rule and over
+	# the bottom rule at each end), so the plate closes like a bracket, not a pipe character.
 	var cap := Color(accent.r, accent.g, accent.b, 0.95 * a)
-	ci.draw_rect(Rect2(b.position.x, b.position.y + 2.0, CAP_W, b.size.y - 4.0), cap)
-	ci.draw_rect(Rect2(b.end.x - CAP_W, b.position.y + 2.0, CAP_W, b.size.y - 4.0), cap)
+	var nh := CAP_NOTCH_H
+	for nx in [b.position.x, b.end.x - 2.0]:
+		ci.draw_rect(Rect2(nx, b.position.y + 1.0, 2.0, nh), cap)
+		ci.draw_rect(Rect2(nx, b.end.y - 1.0 - nh, 2.0, nh), cap)
 	var inner_w := b.size.x - 2.0 * CAP_W - 2.0
 	ci.draw_rect(Rect2(b.position.x + CAP_W + 1.0, b.position.y + 1.0, inner_w, 1.0), Color(1, 1, 1, 0.12 * a))
 	# accent-tinted upper half and a dim inner keyline: a lit enamel plate, not a flat slab
@@ -95,10 +100,7 @@ static func draw_lettering(ci: CanvasItem, txt: String, cx: float, baseline: flo
 	var p := Vector2(floorf(cx - w / 2.0), floorf(baseline))
 	ci.draw_string_outline(f, p, txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, 3, Color(0, 0, 0, 0.9 * a))
 	ci.draw_string(f, p + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, Color(0, 0, 0, 0.8 * a))
-	ci.draw_string(f, p + Vector2(1, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, Color(0, 0, 0, 0.8 * a))
-	var ink := Color(col.r, col.g, col.b, a)
-	ci.draw_string(f, p, txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, ink)
-	ci.draw_string(f, p + Vector2(1, 0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, ink)
+	ci.draw_string(f, p, txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, Color(col.r, col.g, col.b, a))
 
 
 ## The small plate every in-world label, tally and marker shares: dark chamfered slab, a 1px

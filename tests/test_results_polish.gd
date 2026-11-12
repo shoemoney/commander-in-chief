@@ -70,3 +70,15 @@ func test_result_panel_is_wired_through_the_polish_module() -> void:
 	var m = MainScript.new()
 	Runner.T.ok(m.get("_rp") is RP, "the real main carries the polish painter")
 	m.free()
+
+
+func test_world_objective_labels_are_suppressed_under_the_result_card() -> void:
+	var src := FileAccess.get_file_as_string("res://src/main.gd")
+	var a := src.find("func _draw_banners(")
+	var body := src.substr(a, src.find("\nfunc ", a + 10) - a)
+	var t := body.find("var trow := band_row(")
+	Runner.T.ok(t != -1 and body.substr(t, 260).contains("if _debrief or sim.victory:\n\t\ttrow = {}"),
+		"_draw_banners empties the world objective row while the result card is up")
+	var d := src.find("func _draw_objective_markers(")
+	Runner.T.ok(src.substr(d, 700).contains("if _debrief or sim.victory:\n\t\treturn"),
+		"objective markers do not draw beside the rank seal")

@@ -4129,9 +4129,7 @@ func _draw_title_header() -> void:
 	var wbase := title_baseline(TITLE_WORDMARK_TOP, TITLE_WORDMARK_H, TITLE_WORDMARK_FONT)
 	var wback := TitlePolish.backdrop(pt, pm, _open_t) + TitlePolish.emblem_plan(pt, pm, _open_t)
 	TitlePolish.paint(self, wback)
-	var wplate := tplate
-	wplate.a *= 0.45
-	_emit_rect(Rect2(CENTER_X - ttw / 2.0 - TITLE_WORDMARK_PAD_H, TITLE_WORDMARK_TOP, ttw + TITLE_WORDMARK_PAD_H * 2.0, TITLE_WORDMARK_H), wplate)   # a2-04 r2: match sibling plate alpha
+	# The opaque dusk backdrop is the wordmark's ground now: no slab behind it.
 	var wunder := TitlePolish.wordmark_under(CENTER_X, wbase, TITLE_WORDMARK_FONT, _open_t)
 	var wover := TitlePolish.wordmark_over(CENTER_X, wbase, TITLE_WORDMARK_FONT, _open_t, pt, pm)
 	TitlePolish.paint(self, wunder)
