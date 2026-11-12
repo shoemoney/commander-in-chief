@@ -4981,10 +4981,7 @@ const WORLD_TEXT_SITES := {
 	# the shop is a hold-to-open overlay that dims the world, so its text owns the
 	# frame by construction rather than arbitrating for space with live combat.
 	"_draw_wheel|card_txt": {"mode": "exempt-modal", "why": WHEEL_WHY},
-	"_draw_banners|trow[\"text\"]": {"mode": "screen", "why": BANNER_WHY},
-	"_draw_banners|btext": {"mode": "screen", "why": BANNER_WHY},
 	"_draw_banners|hrow[\"text\"]": {"mode": "screen", "why": BANNER_WHY},
-	"_draw_banners|\"LAST STAND — NO REVIVES, 2× KILL SCORE\"": {"mode": "screen", "why": BANNER_WHY},
 	"_draw_banners|\"— REPLAY — %s TO EXIT —\" % _replay_exit_cap()": {"mode": "screen", "why": BANNER_WHY},
 }
 

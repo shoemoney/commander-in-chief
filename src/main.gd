@@ -9572,7 +9572,7 @@ func _draw_ready_tally() -> void:
 	var slot := claim_label_slot(Rect2(320 - width / 2.0, 43, width, bar_y + 6.0), _label_slots,
 		0.0, false, _label_rail_ceiling, _label_safe_l, _label_safe_r)
 	_label_slots.append(slot)
-	draw_rect(slot, LABEL_PLATE_FILL)
+	BannersPolish.draw_label_plate(self, slot, Color(1.0, 0.92, 0.55))
 	var center := slot.get_center().x
 	Art.text_center(self, txt, center, slot.position.y + title_y, title_size, Color(1.0, 0.92, 0.55))
 	Art.text_center(self, detail, center, slot.position.y + detail_y, detail_size, Color.WHITE)
@@ -15590,8 +15590,10 @@ func _draw_objective_markers() -> void:
 		if on:
 			# 1px dark under-copy (Art.text's shadow pattern) — a cyan/amber icon
 			# washed out over bright water/sand where the outlined pips stay crisp.
-			draw_texture_rect(Art.tex(m["icon"]),
-				Rect2(mp + Vector2(-4.0, -19.0 + bob), Vector2(10, 10)), false, Color(0, 0, 0, 0.55))
+			# A small plate with a pointer down to the thing it marks — the shared in-world
+			# label style (BannersPolish.draw_label_plate), so the icon reads on any ground.
+			BannersPolish.draw_label_plate(self, Rect2(mp + Vector2(-7.0, -22.0 + bob), Vector2(14, 14)),
+				m["col"], mp + Vector2(0.0, -2.0 + bob))
 			draw_texture_rect(Art.tex(m["icon"]),
 				Rect2(mp + Vector2(-5.0, -20.0 + bob), Vector2(10, 10)), false, m["col"])
 		elif edge_used < 6:
@@ -16025,10 +16027,13 @@ static func band_rows(y_top: float, top_text: String, top_size: int, top_badge: 
 		# Shrink-to-fit like every other row: the accessibility TEXT SIZE multiplier scales this
 		# label too, and a warning that runs off both edges is not a warning.
 		var gs := banner_fit_size(BAND_GOD_TEXT, BAND_GOD_SIZE)
-		var gp := banner_plate_rect(BAND_GOD_TEXT, band_y, gs, 0.0)
+		# band_y is the row's TOP edge (BannersPolish.baseline_for_top): the plate may never reach
+		# up under the HUD corner plate, so the baseline is dealt DOWN from the rail, not on it.
+		var gb := BannersPolish.baseline_for_top(band_y, gs)
+		var gp := banner_plate_rect(BAND_GOD_TEXT, gb, gs, 0.0)
 		rows.append({"id": "god", "text": BAND_GOD_TEXT, "size": gs, "pad_left": 0.0,
-			"baseline": band_y, "plate": gp, "rect": gp})
-		band_y += BAND_ROW_STRIDE
+			"baseline": gb, "plate": gp, "rect": gp})
+		band_y += BannersPolish.ROW0_H + 2.0
 	if not top_text.is_empty():
 		# Shrink-to-fit EVERY alert, not just the splash banner: the other three carried fixed
 		# sizes chosen against their English literals, so a longer translation walked them off
@@ -16037,17 +16042,14 @@ static func band_rows(y_top: float, top_text: String, top_size: int, top_badge: 
 		# A fronting threat badge sits left of the centered text; the plate reserves its width
 		# so the skull/target never floats off the metal onto bare shaking terrain.
 		var top_pad_left := (float(ts) + 4.0 + 8.0) if top_badge else 0.0
-		var tp := banner_plate_rect(top_text, band_y, ts, top_pad_left)
-		# The splash banner's pop-in is a transform scale about (320, band_y), so its plate
-		# reaches BANNER_PUNCH_MAX further out than the measured rect at the peak of the punch.
-		# Bank that into the footprint or the stride below is only correct once the pop settles.
-		var punched := Rect2(320.0 + (tp.position.x - 320.0) * BANNER_PUNCH_MAX,
-			band_y + (tp.position.y - band_y) * BANNER_PUNCH_MAX,
-			tp.size.x * BANNER_PUNCH_MAX, tp.size.y * BANNER_PUNCH_MAX)
+		var tb := BannersPolish.baseline_for_top(band_y, ts)
+		var tp := banner_plate_rect(top_text, tb, ts, top_pad_left)
+		# The entrance is a wipe INSIDE the plate's own rect (BannersPolish.wiped_rect), not a
+		# scale pop, so the footprint is exactly the plate: nothing paints outside what is reserved.
 		rows.append({"id": "top", "text": top_text, "size": ts, "pad_left": top_pad_left,
-			"baseline": band_y, "plate": tp, "rect": punched})
+			"baseline": tb, "plate": tp, "rect": tp})
 	if not hint_text.is_empty():
-		var hy := band_y + BAND_ROW_STRIDE
+		var hy := band_y + BannersPolish.ROW0_H + 2.0   # row 0 stays RESERVED even when empty
 		# Shrink-to-fit, same helper the splash banner uses: the hint had NO width cap, and the
 		# longest shipped teach line already spans ~525 of the 640px frame at 11px — one longer
 		# translation and it walks off both edges.
@@ -16413,64 +16415,42 @@ func _draw_banners(top_msg: String) -> void:
 	# the objective must be said out loud (playtest: "scrolling just stops").
 	if top_msg == "boss" and not trow.is_empty():
 		var gpulse := 1.0 if _motion < 0.5 else Art.pulse(0.15)
-		_banner_plate(trow["text"], trow["baseline"], trow["size"], 1.0)
-		Art.text_center(self, trow["text"], 320, trow["baseline"], trow["size"],
-			Color(1.0, 0.9, 0.4, gpulse), 0.0, 2)
+		_polish_alert(trow, Color(1.0, 0.9, 0.4), 1.0, gpulse)
 	# Arena hold: a calm statement, not an alarm — the player at the top edge
 	# needs the RULE ("the camera stays until the wave dies"), not a red strobe.
 	if top_msg == "hold" and not trow.is_empty():
-		_banner_plate(trow["text"], trow["baseline"], trow["size"], 0.8)
-		Art.text_center(self, trow["text"], 320, trow["baseline"], trow["size"],
-			Color(0.85, 0.88, 0.75, 0.8), 0.0, 2)
+		_polish_alert(trow, Color(0.85, 0.88, 0.75), 0.85, 1.0)
 	# Stall warning: the observer's clock is running — telegraph the
 	# punishment before it arrives, not after.
 	if top_msg == "mortar" and not trow.is_empty():
 		var pulse := 1.0 if _motion < 0.5 else 0.55 + 0.45 * sin(float(Engine.get_physics_frames()) * 0.25)
-		_banner_plate(trow["text"], trow["baseline"], trow["size"], 1.0)
-		Art.text_center(self, trow["text"], 320, trow["baseline"], trow["size"],
-			Color(1.0, 0.4, 0.25, pulse), 0.0, 2)
+		_polish_alert(trow, Color(1.0, 0.4, 0.25), 1.0, pulse)
 	# Splash banner (wave starts, checkpoints, observer warning).
 	if not _banners.is_empty():
 		var bn: Dictionary = _banners[0]
 		var bt: float = bn["t"]
 		var btext: String = bn["text"]
 		if top_msg == "splash" and not trow.is_empty():
-			var a := minf(1.0, bt * 4.0) * minf(1.0, (1.0 - bt) * 8.0 + 0.2)
-			# The alert band reads or it doesn't — plate, glyphs and badge all clear the same
-			# floor together; a translucent badge next to solid text reads as a render bug.
-			if a > 0.05:
-				a = maxf(a, 0.85)
+			# Wipe open / wipe closed INSIDE the plate's own rect (BannersPolish.anim): plate and
+			# ink clear the same floor together, and reduce-motion holds it static.
+			var an := BannersPolish.anim(bt, _motion)
 			var bc: Color = bn.get("col", Color(1.0, 0.92, 0.55))
-			# y, string and draw size all come from the band's row 0 (which already ducked the
-			# corner plate / boss bars / replay ribbon and shrank the string to BANNER_MAX_W —
-			# fit at the BASE size, since the pop-in punch below is a transform scale, not a
-			# font-size bump, so it can't fight the shrink loop).
-			var by: float = trow["baseline"]
 			var bsize: int = trow["size"]
-			var punch := 1.0
-			if _motion >= 0.5:
-				punch = 1.0 + (BANNER_PUNCH_MAX - 1.0) * clampf((bt - 0.9) * 10.0, 0.0, 1.0)
-			# A badge (if any) sits left of the centered text — the row already reserved the
-			# plate width for it, or the skull/target/lightning would float off the metal
-			# onto bare shaking terrain (the plate exists to prevent exactly that).
 			var bic: String = bn.get("icon", "")
 			var bis := float(bsize) + 4.0
-			var pad_left: float = trow["pad_left"]
-			if punch > 1.0:
-				draw_set_transform_matrix(get_transform().affine_inverse()
-					* Transform2D(0.0, Vector2.ONE * punch, 0.0, Vector2(320.0, by) * (1.0 - punch)))
-			_banner_plate(btext, by, bsize, a, pad_left)
-			# Pop-in scale (bsize above) keys off bt, not a, so the entry animation is unaffected.
-			Art.text_center(self, btext, 320, by, bsize, Color(bc.r, bc.g, bc.b, a), 0.0, 2)
-			# Threat-callout badge (skull/target/lightning) fronting the text —
-			# only set by the alarm banners, so routine splashes stay clean.
-			if not bic.is_empty():
+			var plate: Rect2 = trow["plate"]
+			var bdy: float = an["dy"]
+			plate.position.y += bdy
+			BannersPolish.draw_plate(self, plate, bc, an["a"], an["r"])
+			var by: float = float(trow["baseline"]) + bdy
+			BannersPolish.draw_lettering(self, btext, 320.0, by, bsize, bc, an["a"])
+			# Threat-callout badge (skull/target/lightning) fronting the text — only set by the
+			# alarm banners, so routine splashes stay clean. The row reserved its width.
+			if not bic.is_empty() and an["a"] > 0.05:
 				var biw := Art.tw(btext, bsize)
 				draw_texture_rect(Art.tex(bic),
 					Rect2(320.0 - biw / 2.0 - bis - 6.0, by - float(bsize) / 2.0 - bis / 2.0, bis, bis),
-					false, Color(bc.r, bc.g, bc.b, a))
-			if punch > 1.0:
-				draw_set_transform_matrix(get_transform().affine_inverse())
+					false, Color(bc.r, bc.g, bc.b, an["a"]))
 	if sim.victory:
 		var vpulse := 1.0 if _motion < 0.5 else 0.85 + 0.15 * sin(float(Engine.get_physics_frames()) * 0.12)
 		var vrr := _run_rank()
@@ -16595,8 +16575,9 @@ func _draw_banners(top_msg: String) -> void:
 	elif sim.last_stand:
 		# Every other alert plates first. Foundry floor is already orange-red;
 		# drop-shadow alone does not clear the AA. Same helper as boss/hold banners.
-		_banner_plate("LAST STAND — NO REVIVES, 2× KILL SCORE", HudIcons.LAST_STAND_Y, 10, 1.0)
-		Art.text_center(self, "LAST STAND — NO REVIVES, 2× KILL SCORE", 320.0, HudIcons.LAST_STAND_Y, 10, Color(0.95, 0.4, 0.3))
+		_banner_plate("LAST STAND — NO REVIVES, 2× KILL SCORE", HudIcons.LAST_STAND_Y, 10, 1.0, 0.0,
+			Color(0.95, 0.4, 0.3))
+		BannersPolish.draw_lettering(self, "LAST STAND — NO REVIVES, 2× KILL SCORE", 320.0, HudIcons.LAST_STAND_Y, 10, Color(0.95, 0.4, 0.3))
 	# Black fade covering the title→combat cut.
 	if _fade > 0.01:
 		draw_rect(Rect2(0, 0, SCREEN_W, SCREEN_H), Color(0, 0, 0, _fade))
@@ -16619,7 +16600,7 @@ func _draw_banners(top_msg: String) -> void:
 		# badge, not a nine-patch — stretched to text width it smears, so it
 		# fronts the plate as the hint's icon instead).
 		var hplate: Rect2 = hrow["plate"]
-		_metal_plate(hplate, ha)
+		BannersPolish.draw_plate(self, hplate, Color(1.0, 0.95, 0.7), ha)
 		draw_texture_rect(Art.tex("ui_tooltip"),
 			Rect2(hplate.position.x - BAND_HINT_BADGE_W, hplate.position.y - 2.0,
 				BAND_HINT_BADGE_W, BAND_HINT_BADGE_W), false, Color(1.0, 0.95, 0.75, ha))
@@ -16662,10 +16643,18 @@ static func banner_plate_rect(txt: String, y: float, size: int, pad_left: float,
 	return Rect2(safe_cx - w / 2.0 - 5.0 - pad_left, y - size - 2.0, w + 10.0 + pad_left, size + 7.0)
 
 
-func _banner_plate(txt: String, y: float, size: int, a: float, pad_left := 0.0) -> void:
+func _banner_plate(txt: String, y: float, size: int, a: float, pad_left := 0.0,
+		accent := Color(1.0, 0.9, 0.4)) -> void:
 	# Dark under-plate behind top-strip text: bare glyphs smear over bright
 	# jungle + shake; the plate is what makes the words instant.
-	_metal_plate(banner_plate_rect(txt, y, size, pad_left), _banner_plate_alpha(a))
+	BannersPolish.draw_plate(self, banner_plate_rect(txt, y, size, pad_left), accent, _banner_plate_alpha(a))
+
+
+## One top-band alert (objective / hold / mortar): the shared plate + solid lettering on the
+## band row's own rect. `pulse` rides the ink only, so the plate never strobes.
+func _polish_alert(trow: Dictionary, col: Color, plate_a: float, pulse: float) -> void:
+	BannersPolish.draw_plate(self, trow["plate"], col, plate_a)
+	BannersPolish.draw_lettering(self, trow["text"], 320.0, trow["baseline"], trow["size"], col, pulse)
 
 
 func _metal_plate(r: Rect2, a: float) -> void:
