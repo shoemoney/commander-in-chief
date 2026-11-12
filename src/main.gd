@@ -12251,6 +12251,7 @@ func _draw_enemies() -> void:
 				and not (e["kind"] == "ghillie" and e.get("submerged", false)):
 			# a1-02: warm-dark footprint so a hostile separates from the cool/neutral
 			# decor shadows even before its fill resolves (the eye reads "threat here").
+			InfantryPolish.draw_pad(self, Art.tex("fx_softspot"), epos, ekind, e.get("submerged", false))
 			_ground_shadow(epos, 6.0, 0.34, Color(0.12, 0.03, 0.0))
 		if e.get("marked", false):
 			# Bounty target: a pulsing gold halo + a little crown so the 3× payoff

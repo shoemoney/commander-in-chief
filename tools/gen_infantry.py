@@ -142,10 +142,33 @@ class Cv:
         self.px(self.w - 1 - x, y, c)
 
 
-def finish(cv, tint):
+RIM_HOSTILE = (255, 226, 160)   # warm pale rim: lifts the silhouette off dark ground
+RIM_HERO = (226, 244, 255)
+
+
+def rim_light(a, solid, rim, k_lit, k_shade):
+    """Lighten the solid pixels that touch the keyline (the inner rim). Edges facing the
+    upper-left light get the stronger lift. Footprint and alpha are untouched."""
+    h, w = solid.shape
+    pad = np.pad(solid, 1)
+    up, dn = ~pad[:-2, 1:-1], ~pad[2:, 1:-1]
+    lf, rt = ~pad[1:-1, :-2], ~pad[1:-1, 2:]
+    edge = solid & (up | dn | lf | rt)
+    lit = solid & (up | lf)
+    out = a.copy()
+    rimc = np.array(rim, float)
+    for m, k in ((edge & ~lit, k_shade), (lit, k_lit)):
+        c = out[..., :3][m].astype(float)
+        out[..., :3][m] = np.clip(np.round(c + (rimc - c) * k), 0, 255).astype(np.uint8)
+    return out
+
+
+def finish(cv, tint, rim=None):
     """Add the 1px ink keyline, centre in a PAD canvas, store final/tint colours."""
     a = cv.a
     solid = a[..., 3] > 0
+    if rim is not None:
+        a = rim_light(a, solid, rim, 0.5, 0.26)
     grown = solid.copy()
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
@@ -582,7 +605,7 @@ def render_all():
     for kind, poses in BBOX.items():
         for pose, (bw, bh) in poses.items():
             cv = build(kind, pose, bw, bh)
-            arr = finish(cv, TINTS[kind])
+            arr = finish(cv, TINTS[kind], RIM_HERO if kind == "hero" else RIM_HOSTILE if kind.startswith("enemy") else None)
             if pose == "base":
                 arr = to_base_canvas(kind, arr)
             out[(kind, pose)] = arr
