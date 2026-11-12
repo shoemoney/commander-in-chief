@@ -633,7 +633,7 @@ flowchart TB
   runs (1,500 frames of a bot campaign, headless so it counts the sim and every draw call but no
   GPU raster, four alternating rounds on one desktop): **2.95 ms → 3.12 ms mean, 3.8 → 4.2 ms
   p95**. Those are one machine's numbers, not a guarantee for yours.
-- 🚧 **Status:** on the `polish/steam-visual-pass` branch, not in a published release yet.
+- 🚧 **Status:** merged to `main` on 2026-11-12. Not in a published release yet: the download line above is still v1.4.4.
 
 </details>
 
@@ -683,7 +683,7 @@ flowchart LR
 | ✅ | **Playable start→finish** | 6 gated sectors → Foundry Colossus, with the Bridge Gunship and Siege Tank fights, the flamethrower and rocket launcher, plus Arcade/Chapter Select, Endless War, Boss Rush, Daily Run, replay, local 2P |
 | ✅ | **Owned art + audio** | Every shipped sprite has a recorded source (procedural, or CC0 for the FX base). The score is composed in-house. Voice recordings have provenance notes that are still open. Provenance map in [`ASSETS.md`](ASSETS.md) |
 | ✅ | **Public release** | Clean git history, MIT on the code, binaries for macOS (arm64 + universal) · Linux · Windows. The latest published build is **v1.4.4** |
-| 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame The **1.5 visual pass** — fifteen view-only packages, see [🎨 Art](#-art) — is on the `polish/steam-visual-pass` branch, reviewed and measured (frame cost within about 6% of the pre-pass build), not yet in a published release |
+| 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame The **1.5 visual pass** — fifteen view-only packages, see [🎨 Art](#-art) — is merged to `main`, reviewed and measured (frame cost within about 6% of the pre-pass build), not yet in a published release |
 | ⬜ | **Online netplay** | `src/net/lockstep.gd` is **~260 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
 | ⬜ | **Steam release** | `SteamBridge` is an offline-first *facade* — it no-ops without the SDK. No store page, no Playtest |
 | ⬜ | **Localization freeze** | 3 languages shipped (`locale/strings.{es,fr,ja}.po`), not the 12-language freeze the plan costs |
