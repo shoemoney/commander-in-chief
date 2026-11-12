@@ -13922,7 +13922,15 @@ static func _cactus_instance(h2: int) -> Dictionary:
 	return {"scale_mul": 0.85 + float(h2 % 7) * 0.048, "dead": h2 % 11 == 0}
 
 
+var _polish := PlayerPolish.new()   # hero presence: muzzle flash, brass, dust, reticle overlay (view-only, see player_polish.gd)
+
+
 func _draw_players() -> void:
+	var pp_water: Array = []
+	for pw in sim.players:
+		pp_water.append(sim._in_water(pw["x"], pw["y"]))
+	_polish.observe(sim.players, sim.tick_count, _motion, pp_water)
+	_polish.draw_ground(self, float(sim.camera_top) * PX, Art.tex("fx_softspot"), sim.players, _flash_strength())
 	for i in sim.players.size():
 		var p := sim.players[i]
 		if p["in_tank"] >= 0:
@@ -14153,8 +14161,22 @@ func _draw_players() -> void:
 			# colorblind-safe ident color) so co-op heroes read apart at a glance — the
 			# ring was the only differentiator; the pale-white bodies were identical.
 			mod = mod * _body_ident_lean(i)
+			# Soft identity-coloured halo behind the body so the hero is a presence, not a dot.
+			var pp_id := _player_ident_color(i, 1.0)
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-14, -12), Vector2(28, 28)), false,
+				Color(pp_id.r, pp_id.g, pp_id.b, 0.2))
 			_spr_texture(Art.player_anim(anim_state), tex_name, pos - Vector2(0, idle_bob),
 				angle, 0.52, mod, 1.0, PLAYER_POSE_X_STRETCH)
+			_polish.draw_flash(self, i, pos, _flash_strength())
+			var pp_hurt := PlayerPolish.hurt_look(_polish.hurt_age[i] if i < _polish.hurt_age.size() else -1, _flash_strength())
+			if not pp_hurt.is_empty():
+				Art.arc(self, pos, pp_hurt["r"], 0, TAU, 20, pp_hurt["ring"], 2.0)
+				draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2(13, 13), Vector2(26, 26)), false, pp_hurt["body"])
+			if _two_players:
+				for pip in PlayerPolish.ident_pips(i, pp_id):
+					var pc: Vector2 = pos + Vector2(0, -15.0) + pip["c"]
+					Art.circle(self, pc, pip["r"] + 1.0, Color(0, 0, 0, 0.8))
+					Art.circle(self, pc, pip["r"], pip["col"])
 			# a4-03 (AD#4): the hero is the VALUE APEX — a small constant COOL catch-light on
 			# the golden hair crown (an implied overhead key) makes the soldier the brightest AND
 			# coolest point in every frame, so the eye snaps to HIM first, not the reticle or a
@@ -14319,6 +14341,8 @@ func _draw_players() -> void:
 							false, Color(0, 0, 0, ha))
 				for rd in rects:
 					draw_texture_rect(rtex, rd, false, rcol)
+				PlayerPolish.draw_segments(self, Vector2.ZERO,
+					PlayerPolish.reticle_segments(rcol, _player_ident_color(i, 1.0), rgrow))
 				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 				# Hitmarker: reticle flicks bright + kicks four ticks on a landed hit.
 				if i < _hitmarker.size() and _hitmarker[i] > 0.01:
@@ -14359,6 +14383,10 @@ func _draw_players() -> void:
 			var dcol := Color(1, 1, 1, 1).lerp(Color(0.35, 0.35, 0.35, 0.6), de)
 			_spr(tex_name, pos, dpose, 0.52 * (1.0 + (1.0 - de) * 0.12), dcol)
 			Art.arc(self, pos, 12.0, 0, TAU, 24, Color(0.8, 0.3, 0.25, 0.8 * da), 1.5)
+			var pp_dn := PlayerPolish.downed_marker(_player_ident_color(i, 1.0),
+				float(Engine.get_physics_frames() % 60) / 60.0, _motion < 0.5)
+			Art.arc(self, pos, pp_dn["ring_r"], 0, TAU, 24, pp_dn["ring"], 1.5)
+			PlayerPolish.draw_segments(self, pos + Vector2(0, -12.0), pp_dn["segs"])
 			# Broke-respawn clock: a downed player with no coins to revive earns a
 			# free reinforcement at broke_timer==0 (BROKE_RESPAWN_TICKS from the KO).
 			# The co-op partner — and the solo player — had no idea when help lands;
