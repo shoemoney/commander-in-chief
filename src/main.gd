@@ -14161,22 +14161,24 @@ func _draw_players() -> void:
 			# colorblind-safe ident color) so co-op heroes read apart at a glance — the
 			# ring was the only differentiator; the pale-white bodies were identical.
 			mod = mod * _body_ident_lean(i)
-			# Soft identity-coloured halo behind the body so the hero is a presence, not a dot.
+			# Presence stack under the body: contact shadow, strong identity glow, 1px dark keyline.
 			var pp_id := _player_ident_color(i, 1.0)
-			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-14, -12), Vector2(28, 28)), false,
-				Color(pp_id.r, pp_id.g, pp_id.b, 0.2))
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-13, 1), Vector2(26, 11)), false,
+				Color(0, 0, 0, 0.55 * mod.a))
+			draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos + Vector2(-21, -19), Vector2(42, 42)), false,
+				Color(pp_id.r, pp_id.g, pp_id.b, 0.6 * mod.a))
+			for pk in PlayerPolish.KEYLINE_OFFSETS:
+				_spr_texture(Art.player_anim(anim_state), tex_name, pos - Vector2(0, idle_bob) + pk,
+					angle, 0.58, Color(0, 0, 0, 0.9 * mod.a), 1.0, PLAYER_POSE_X_STRETCH, false)
 			_spr_texture(Art.player_anim(anim_state), tex_name, pos - Vector2(0, idle_bob),
-				angle, 0.52, mod, 1.0, PLAYER_POSE_X_STRETCH)
+				angle, 0.58, mod, 1.0, PLAYER_POSE_X_STRETCH)
 			_polish.draw_flash(self, i, pos, _flash_strength())
 			var pp_hurt := PlayerPolish.hurt_look(_polish.hurt_age[i] if i < _polish.hurt_age.size() else -1, _flash_strength())
 			if not pp_hurt.is_empty():
 				Art.arc(self, pos, pp_hurt["r"], 0, TAU, 20, pp_hurt["ring"], 2.0)
 				draw_texture_rect(Art.tex("fx_softspot"), Rect2(pos - Vector2(13, 13), Vector2(26, 26)), false, pp_hurt["body"])
-			if _two_players:
-				for pip in PlayerPolish.ident_pips(i, pp_id):
-					var pc: Vector2 = pos + Vector2(0, -15.0) + pip["c"]
-					Art.circle(self, pc, pip["r"] + 1.0, Color(0, 0, 0, 0.8))
-					Art.circle(self, pc, pip["r"], pip["col"])
+			PlayerPolish.draw_segments(self, pos + Vector2(0, -19.0),
+				PlayerPolish.marker_segments(pp_id, _two_players, i))
 			# a4-03 (AD#4): the hero is the VALUE APEX — a small constant COOL catch-light on
 			# the golden hair crown (an implied overhead key) makes the soldier the brightest AND
 			# coolest point in every frame, so the eye snaps to HIM first, not the reticle or a

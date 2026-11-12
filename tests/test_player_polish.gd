@@ -59,7 +59,7 @@ func test_observe_is_idempotent_per_tick_and_reduce_motion_skips_flight() -> voi
 
 func test_flash_layers_directional_and_accessible() -> void:
 	var full := PlayerPolish.flash_layers(0, 1.0)
-	Runner.T.ok(full.size() >= 4, "full flash: cone layers plus crack spikes")
+	Runner.T.ok(full.size() >= 3, "full flash: spike layers plus crack spike")
 	var tip := 0.0
 	for l in full:
 		for v: Vector2 in l["pts"]:
@@ -101,6 +101,12 @@ func test_reticle_ident_hurt_downed_shapes() -> void:
 		if s["col"].r == 0.0:
 			dark += 1
 	Runner.T.ok(dark >= 5, "reticle ticks carry dark keylines")
+	var solo := PlayerPolish.marker_segments(Color.GREEN, false, 0)
+	var duo := PlayerPolish.marker_segments(Color.GOLD, true, 1)
+	Runner.T.eq(solo.size(), 4, "solo marker is a keylined chevron")
+	Runner.T.eq(duo.size(), 4 + 4, "P2 marker adds two keylined pip bars")
+	Runner.T.eq(solo[0]["col"].r, 0.0, "marker keyline comes first")
+	Runner.T.eq(PlayerPolish.KEYLINE_OFFSETS.size(), 4, "body keyline is a 4-way dark outline")
 	Runner.T.eq(PlayerPolish.ident_pips(0, Color.GREEN).size(), 1, "P1 one pip")
 	Runner.T.eq(PlayerPolish.ident_pips(1, Color.GOLD).size(), 2, "P2 two pips")
 	Runner.T.ok(PlayerPolish.hurt_look(0, 1.0)["ring"].a > PlayerPolish.hurt_look(10, 1.0)["ring"].a, "hurt ring fades")
@@ -113,7 +119,7 @@ func test_wired_through_real_main() -> void:
 	var body := src.substr(src.find("func _draw_players()"))
 	body = body.substr(0, body.find("\nfunc _coin_trail"))
 	for needle in ["_polish.observe(", "_polish.draw_ground(", "_polish.draw_flash(",
-			"PlayerPolish.reticle_segments(", "PlayerPolish.downed_marker(", "PlayerPolish.hurt_look(", "PlayerPolish.ident_pips("]:
+			"PlayerPolish.reticle_segments(", "PlayerPolish.downed_marker(", "PlayerPolish.hurt_look(", "PlayerPolish.marker_segments(", "PlayerPolish.KEYLINE_OFFSETS"]:
 		Runner.T.ok(body.contains(needle), "_draw_players calls " + needle)
 	var m := Main.new()
 	Runner.T.ok(m.get("_polish") is PlayerPolish, "main holds a PlayerPolish")

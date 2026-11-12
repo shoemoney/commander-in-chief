@@ -10,7 +10,7 @@ extends RefCounted
 ## Geometry helpers are static and pure so tests measure exactly what is drawn.
 
 const FLASH_TICKS := 6
-const FLASH_LEN := 26.0          # px of the cone at age 0
+const FLASH_LEN := 34.0          # px of the cone at age 0
 const MUZZLE_OFF := 12.0         # px from body centre to the muzzle
 const CASING_MAX := 48
 const CASING_LIFE := 70
@@ -19,6 +19,8 @@ const DUST_LIFE := 22
 const STEP_EVERY := 7            # ticks between footstep puffs while moving
 const HURT_TICKS := 14
 const FIRE_CD := 8               # mirrors SimWorld.FIRE_COOLDOWN_TICKS (a view copy, asserted in tests)
+
+const KEYLINE_OFFSETS := [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]
 
 const CASING_BRASS := Color(0.95, 0.78, 0.32)
 const CASING_HI := Color(1.0, 0.95, 0.7)
@@ -228,10 +230,7 @@ static func flash_layers(age: int, strength: float) -> Array:
 	var len := FLASH_LEN * (1.0 - 0.45 * t) * (0.7 if calm else 1.0)
 	var wid := 7.0 * (1.0 - 0.3 * t)
 	var a := clampf(fade * 1.15, 0.0, 1.0) * clampf(strength, 0.0, 1.0)
-	# wide orange outer cone, narrower yellow, hot white core spike
-	out.append({"pts": PackedVector2Array([Vector2(-1, -wid), Vector2(len * 0.55, -wid * 0.55),
-		Vector2(len, 0), Vector2(len * 0.55, wid * 0.55), Vector2(-1, wid)]),
-		"col": Color(1.0, 0.5, 0.12, 0.78 * a)})
+	# ONE punchy spike (the engine's round crack-pop sits at its base): amber body, hot white core
 	out.append({"pts": PackedVector2Array([Vector2(-1, -wid * 0.55), Vector2(len * 0.42, -wid * 0.3),
 		Vector2(len * 0.8, 0), Vector2(len * 0.42, wid * 0.3), Vector2(-1, wid * 0.55)]),
 		"col": Color(1.0, 0.86, 0.38, 0.92 * a)})
@@ -272,6 +271,24 @@ static func reticle_segments(col: Color, ident: Color, grow: float) -> Array:
 
 
 ## Identity pips floating above the head in co-op: P1 one diamond, P2 two. {c, r, col}.
+## Always-on identity marker above the head: a keylined down-chevron (solo) with 1 / 2 pip
+## bars in co-op. Returned as draw_segments() lines around the origin (dark keyline first).
+static func marker_segments(ident: Color, coop: bool, slot: int) -> Array:
+	var out: Array = []
+	var col := Color(ident.r, ident.g, ident.b, 1.0)
+	var dark := Color(0, 0, 0, 0.9)
+	for pass_i in 2:
+		var w := 3.0 if pass_i == 0 else 1.0
+		var c := dark if pass_i == 0 else col
+		out.append({"a": Vector2(-3, -2), "b": Vector2(0, 1), "w": w, "col": c})
+		out.append({"a": Vector2(0, 1), "b": Vector2(3, -2), "w": w, "col": c})
+		if coop:
+			for k in slot + 1:
+				var y := -5.0 - float(k) * 3.0
+				out.append({"a": Vector2(-2, y), "b": Vector2(2, y), "w": w, "col": c})
+	return out
+
+
 static func ident_pips(slot: int, ident: Color) -> Array:
 	var out: Array = []
 	var n := slot + 1
