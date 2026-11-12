@@ -1168,6 +1168,8 @@ func _sync_water() -> void:
 			mat.set_shader_parameter("ford_center", wp["ford_center"])
 			mat.set_shader_parameter("ford_halfw", wp["ford_halfw"])
 			mat.set_shader_parameter("flow_dir", wp["flow_dir"])
+			mat.set_shader_parameter("surge", 1.0 if wclosed else 0.0)
+			mat.set_shader_parameter("surge_halfw", WaterPolish.surge_halfw(wb))
 			# De-sync ripples per band: derive a stable phase from the band's world y.
 			mat.set_shader_parameter("phase", fmod(float(w["y"]) * 0.00013, 37.0))
 			mat.set_shader_parameter("shallow_col", w_shallow)
@@ -11202,19 +11204,22 @@ func _draw_water() -> void:
 		# edge track each other instead of drifting into two parallel tells.
 		var wph := fmod(float(w["y"]) * 0.00013, 37.0)   # same phase _sync_water gives the shader
 		for shore_top in [true, false]:
-			var pts := PackedVector2Array()
-			var uvs := PackedVector2Array()
 			var base := (wy - BANK_BASE) if shore_top else (wy + wh + BANK_BASE)   # dry-side edge
-			for s in 33:                                   # 20px steps across 640
-				var u := float(s) / 32.0
-				var ex := u * 640.0
-				var ey := (wy + _bank_offset(u, wph, true)) if shore_top \
-					else (wy + wh - _bank_offset(u, wph, false))
-				pts.append(Vector2(ex, ey)); uvs.append(Vector2(ex / 64.0, ey / 64.0))
-			for s in range(32, -1, -1):                    # back along the dry edge
-				var ex2 := float(s) / 32.0 * 640.0
+			# 5px steps along the SAME irregular line the shader's waterline follows
+			# (slow sines + WaterPolish's high-frequency jitter).
+			var shore := WaterPolish.shore_points(wy, wh, wph, shore_top, BANK_AMP, BANK_FREQ)
+			var pts := PackedVector2Array(shore)
+			var uvs := PackedVector2Array()
+			for sp in shore:
+				uvs.append(Vector2(sp.x / 64.0, sp.y / 64.0))
+			for s in range(WaterPolish.SHORE_STEPS, -1, -1):   # back along the dry edge
+				var ex2 := float(s) / float(WaterPolish.SHORE_STEPS) * 640.0
 				pts.append(Vector2(ex2, base)); uvs.append(Vector2(ex2 / 64.0, base / 64.0))
 			draw_colored_polygon(pts, bank_col, uvs, Art.tex("sand"))
+			# Wet sand: a damp, darker tongue along the waterline fading up the bank,
+			# so land-to-water is a gradient, not a cut.
+			var wet := WaterPolish.wet_strip(shore, shore_top, wph, WaterPolish.wet_tint(bank_col))
+			draw_polygon(wet["pts"], wet["cols"])
 		# Mud OUTER edge (c2 3v): a 2px dark lip + hash notches on the dry
 		# side of both strips — the exact line where half-speed begins reads
 		# before you step in. Same deterministic notch idiom as the banks.
@@ -11271,16 +11276,9 @@ func _draw_water() -> void:
 			# WASHED OUT. The sim slows infantry and reverts armour across this exact
 			# span, so it is painted as the river it is: a flood wash at the water
 			# shader's own deep colour plus a drifting debris line. Never a plank.
-			var wcol: Color = _WATER_DEEP_STOPS[clampi(int(_sector_march() * 5.0 + 0.0001), 0, 4)]
-			# Feathered, not a panel: four stacked layers widening outward ramp the alpha
-			# 0.20 -> 0.59 across ~4px of each edge, and every layer's edge drifts with the
-			# same slow bob the debris uses. One flat rect with ruler-straight sides read
-			# as a missing sprite over animated water.
+			# The flood itself (white-water churn with noise-broken edges) is painted by
+			# water.gdshader's `surge` uniform; stacked flat rects here read as a dark box.
 			var dbob := Art.pulse(0.07)
-			for fi in 4:
-				var fo := float(3 - fi) * 1.4 + sin(dbob * TAU + float(fi)) * 0.9
-				draw_rect(Rect2(ford_left - fo, wy, ford_w + fo * 2.0, wh),
-					Color(wcol.r, wcol.g, wcol.b, 0.20))
 			for dbi in 3:
 				var dby := wy + wh * (0.2 + 0.3 * float(dbi))
 				var dbx := ford_left + ford_w * fposmod(0.15 + 0.31 * float(dbi) + dbob * 0.6, 1.0)
