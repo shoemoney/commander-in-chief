@@ -117,3 +117,41 @@ func test_wordmark_full_layers_in_order() -> void:
 	var ops := TitlePolish.wordmark_full(320.0, 90.0, 32, 1.0, 0.0, 0.0)
 	Runner.T.eq(String(ops[0]["k"]), "outline", "outline first")
 	Runner.T.ok(ops[ops.size() - 1]["col"].is_equal_approx(Color(TitlePolish.GOLD, 1.0)), "flat gold face last when static")
+
+
+func test_backdrop_is_a_solid_composed_scene_not_dimmed_gameplay() -> void:
+	var img := TitlePolish.build_scene_image()
+	Runner.T.eq(img.get_size(), Vector2i(640, 360), "scene bakes at native size")
+	var opaque := true
+	for p in [Vector2i(0, 0), Vector2i(639, 0), Vector2i(320, 180), Vector2i(0, 359), Vector2i(639, 359)]:
+		opaque = opaque and img.get_pixelv(p).a >= 0.999
+	Runner.T.ok(opaque, "every sampled backdrop pixel is fully opaque (no gameplay shows through)")
+	Runner.T.ok(img.get_pixel(320, 20).get_luminance() < img.get_pixel(330, 232).get_luminance(), "sky brightens toward the horizon glow")
+	Runner.T.ok(TitlePolish.ridge_y(100.0, true) < TitlePolish.ridge_y(100.0, false), "far ridge sits above the near ridge")
+	var bd := TitlePolish.backdrop(1.0, 1.0, 1.0)
+	Runner.T.ok(bd[0]["k"] == "tex" and bd[0]["rect"] == Rect2(0, 0, 640, 360), "backdrop leads with the full-screen scene texture")
+
+
+func test_searchlight_beams_are_bright_enough_to_read() -> void:
+	var ops := TitlePolish.searchlights(0.0, 1.0, 1.0)
+	var peak := 0.0
+	for op in ops:
+		if op["k"] == "tri":
+			peak = maxf(peak, op["cols"][0].a)
+	Runner.T.ok(peak >= 0.3, "beam base alpha %.2f is clearly visible" % peak)
+
+
+func test_splash_icon_is_masked_to_the_badge() -> void:
+	var tex := ImageTexture.create_from_image(Image.create(8, 8, false, Image.FORMAT_RGBA8))
+	var ops := TitlePolish.icon_ops(tex, Rect2(100, 50, 100, 100), 1.0)
+	Runner.T.eq(ops.size(), 1, "one masked polygon")
+	var pts: PackedVector2Array = ops[0]["pts"]
+	var r := Rect2(100, 50, 100, 100)
+	var inside := true
+	for p in pts:
+		inside = inside and r.grow(0.1).has_point(p)
+	Runner.T.ok(inside and pts.size() >= 12, "mask polygon stays inside the rect (no square white corners)")
+	var corner_cut := true
+	for p in pts:
+		corner_cut = corner_cut and not (p.x - r.position.x < 8.0 and p.y - r.position.y < 8.0)
+	Runner.T.ok(corner_cut, "the top-left corner of the white square is excluded")

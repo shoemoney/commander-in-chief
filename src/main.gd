@@ -959,9 +959,10 @@ func _draw_splash_title(et: float, veil: float) -> void:
 	var cy := 140.0
 	var scl := 1.0 if _motion < 0.5 else _splash_back(clampf(et / 0.45, 0.0, 1.0))
 	var ia := clampf(et / 0.28, 0.0, 1.0) * veil
+	TitlePolish.paint(_splash_root, TitlePolish.backdrop(et, _motion, 0.85 * ia))   # title-polish: the title's dusk scene behind the stamp
 	if _splash_icon != null and ia > 0.001:
 		var w := 156.0 * scl
-		_splash_root.draw_texture_rect(_splash_icon, Rect2(320.0 - w / 2.0, cy - w / 2.0, w, w), false, Color(1, 1, 1, ia))
+		TitlePolish.paint(_splash_root, TitlePolish.icon_ops(_splash_icon, Rect2(320.0 - w / 2.0, cy - w / 2.0, w, w), ia))
 	var flash := clampf(1.0 - absf(et - 0.45) / 0.12, 0.0, 1.0) * 0.4 * veil
 	if flash > 0.01 and _motion >= 0.5:   # skipped entirely under reduce motion, like the letterbox
 		_splash_root.draw_rect(Rect2(0.0, 0.0, 640.0, 360.0), Color(1.0, 1.0, 1.0, flash))

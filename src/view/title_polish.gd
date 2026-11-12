@@ -48,6 +48,8 @@ static func paint(ci: CanvasItem, ops: Array) -> void:
 				ci.draw_texture_rect(op["tex"], op["rect"], false, op["col"])
 			"tri":
 				ci.draw_polygon(op["pts"], op["cols"])
+			"ptex":
+				ci.draw_polygon(op["pts"], PackedColorArray([op["col"]]), op["uvs"], op["tex"])
 			"circle":
 				ci.draw_circle(op["c"], float(op["r"]), op["col"])
 			"rect":
@@ -286,23 +288,130 @@ static func beam_angle(i: int, t: float, motion: float) -> float:
 	return base + 0.32 * sin(t * 0.37 + float(i) * 2.1)
 
 
+const SMOKE := [[40.0, 120.0, 90.0, 9.0], [260.0, 300.0, 110.0, 6.0], [470.0, 70.0, 80.0, 11.0],
+	[600.0, 250.0, 100.0, 7.0], [150.0, 210.0, 70.0, 12.0]]   # x, y, radius, drift px/s
+
+
+static var _scene: ImageTexture
+
+
+static func _fill_rect_img(img: Image, x: int, y: int, w: int, h: int, col: Color) -> void:
+	for yy in range(maxi(y, 0), mini(y + h, img.get_height())):
+		for xx in range(maxi(x, 0), mini(x + w, img.get_width())):
+			img.set_pixel(xx, yy, col)
+
+
+static func _fill_tri_img(img: Image, cx: int, top: int, hw: int, h: int, col: Color) -> void:
+	for yy in h:
+		var half := int(round(float(hw) * float(yy + 1) / float(h)))
+		_fill_rect_img(img, cx - half, top + yy, half * 2 + 1, 1, col)
+
+
+static func ridge_y(x: float, far: bool) -> float:
+	if far:
+		return 226.0 + 10.0 * sin(x * 0.012 + 1.0) + 6.0 * sin(x * 0.031) + 3.0 * sin(x * 0.07)
+	return 268.0 + 8.0 * sin(x * 0.02 + 2.0) + 4.0 * sin(x * 0.05)
+
+
+## The static composed scene baked ONCE: dusk sky with stars and a low sun glow, two ridgelines,
+## and a silhouetted skyline (watchtower, pines, a tank on the near ridge). One 640x360 texture.
+static func build_scene_image() -> Image:
+	var img := Image.create(640, 360, false, Image.FORMAT_RGBA8)
+	var sky_top := Color(0.02, 0.04, 0.06)
+	var sky_mid := Color(0.12, 0.17, 0.2)
+	var sky_hz := Color(0.78, 0.46, 0.2)
+	for y in 360:
+		var k := clampf(float(y) / 236.0, 0.0, 1.0)
+		var col := sky_top.lerp(sky_mid, minf(k * 1.6, 1.0)).lerp(sky_hz, pow(k, 3.2))
+		for x in 640:
+			img.set_pixel(x, y, col)
+	var sun := Vector2(330.0, 236.0)
+	for y in range(90, 260):
+		for x in range(110, 560):
+			var d := Vector2(x, y).distance_to(sun)
+			if d < 150.0:
+				var g := pow(1.0 - d / 150.0, 2.2) * 0.55
+				var c := img.get_pixel(x, y)
+				img.set_pixel(x, y, c.lerp(Color(1.0, 0.72, 0.34), g))
+	for i in 60:
+		var sx := (i * 97 + 31) % 640
+		var sy := (i * 53 + 7) % 130
+		img.set_pixel(sx, sy, Color(0.85, 0.9, 1.0) if i % 3 != 0 else Color(0.6, 0.7, 0.8))
+	var far_c := Color(0.13, 0.17, 0.15)
+	var near_c := Color(0.035, 0.05, 0.04)
+	for x in 640:
+		var fy := int(ridge_y(float(x), true))
+		for y in range(fy, 360):
+			var t := clampf(float(y - fy) / 50.0, 0.0, 1.0)
+			img.set_pixel(x, y, far_c.lerp(Color(0.07, 0.09, 0.08), t))
+	# far skyline details: haze-grey chimneys of a distant factory
+	for cx in [88, 96, 540, 552]:
+		_fill_rect_img(img, cx, int(ridge_y(float(cx), true)) - 16, 3, 16, far_c.darkened(0.25))
+	for x in 640:
+		var ny := int(ridge_y(float(x), false))
+		for y in range(ny, 360):
+			var t := clampf(float(y - ny) / 90.0, 0.0, 1.0)
+			img.set_pixel(x, y, near_c.lerp(Color(0.02, 0.03, 0.025), t))
+	# near silhouettes: watchtower, pines, a tank, sandbags
+	_fill_rect_img(img, 60, int(ridge_y(60.0, false)) - 34, 3, 34, near_c)
+	_fill_rect_img(img, 70, int(ridge_y(70.0, false)) - 34, 3, 34, near_c)
+	_fill_rect_img(img, 56, int(ridge_y(60.0, false)) - 42, 21, 9, near_c)
+	_fill_tri_img(img, 66, int(ridge_y(60.0, false)) - 50, 14, 8, near_c)
+	for px in [24, 40, 150, 168, 575, 596, 618]:
+		var by := int(ridge_y(float(px), false))
+		_fill_rect_img(img, px, by - 6, 2, 8, near_c)
+		_fill_tri_img(img, px, by - 30, 8, 26, near_c)
+		_fill_tri_img(img, px, by - 20, 11, 16, near_c)
+	var ty := int(ridge_y(470.0, false))
+	_fill_rect_img(img, 452, ty - 8, 40, 8, near_c)
+	_fill_rect_img(img, 458, ty - 15, 22, 8, near_c)
+	_fill_rect_img(img, 480, ty - 13, 26, 3, near_c)
+	_fill_rect_img(img, 450, ty - 3, 44, 3, Color(0.0, 0.0, 0.0))
+	for bx in [264, 280, 296]:
+		_fill_rect_img(img, bx, int(ridge_y(float(bx), false)) - 4, 14, 5, near_c)
+	return img
+
+
+## icon.png ships on an opaque near-white square; this outline (icon pixel space) hugs the
+## rounded tile plus the shield apex/tip so the badge draws with no white box around it.
+const ICON_OUTLINE := [Vector2(98, 132), Vector2(112, 88), Vector2(152, 72), Vector2(430, 72),
+	Vector2(512, 48), Vector2(594, 72), Vector2(872, 72), Vector2(912, 88), Vector2(924, 132),
+	Vector2(924, 876), Vector2(910, 902), Vector2(872, 914), Vector2(600, 928), Vector2(512, 972),
+	Vector2(424, 928), Vector2(152, 914), Vector2(114, 902), Vector2(98, 876)]
+
+
+static func icon_ops(tex: Texture2D, rect: Rect2, a: float) -> Array:
+	var pts := PackedVector2Array()
+	var uvs := PackedVector2Array()
+	for q: Vector2 in ICON_OUTLINE:
+		var u := q / 1024.0
+		uvs.append(u)
+		pts.append(rect.position + u * rect.size)
+	return [{"k": "ptex", "pts": pts, "uvs": uvs, "tex": tex, "col": Color(1, 1, 1, a)}]
+
+
+static func scene_tex() -> Texture2D:
+	if _scene == null:
+		_scene = ImageTexture.create_from_image(build_scene_image())
+	return _scene
+
+
+## Searchlight beams rise from the near ridge; bright enough to read against the dusk sky.
 static func searchlights(t: float, motion: float, a: float) -> Array:
 	var ops: Array = []
 	for i in 2:
-		var o := Vector2(-10.0, 372.0) if i == 0 else Vector2(650.0, 372.0)
+		var o := Vector2(96.0, 262.0) if i == 0 else Vector2(544.0, 262.0)
 		var ang := beam_angle(i, t, motion)
-		var far := 620.0
-		var spread := 0.075
+		var far := 420.0
+		var spread := 0.085
 		var p1 := o + Vector2(cos(ang - spread), sin(ang - spread)) * far
 		var p2 := o + Vector2(cos(ang + spread), sin(ang + spread)) * far
 		var tip := Color(1.0, 0.96, 0.8, 0.0)
 		ops.append({"k": "tri", "pts": PackedVector2Array([o, p1, p2]),
-			"cols": PackedColorArray([Color(1.0, 0.96, 0.8, 0.17 * a), tip, tip])})
+			"cols": PackedColorArray([Color(1.0, 0.96, 0.8, 0.4 * a), tip, tip])})
+		ops.append({"k": "circle", "c": o, "r": 6.0, "col": Color(1.0, 0.95, 0.7, 0.35 * a)})
+		ops.append({"k": "circle", "c": o, "r": 3.0, "col": Color(1.0, 1.0, 0.9, 0.7 * a)})
 	return ops
-
-
-const SMOKE := [[40.0, 120.0, 90.0, 9.0], [260.0, 300.0, 110.0, 6.0], [470.0, 70.0, 80.0, 11.0],
-	[600.0, 250.0, 100.0, 7.0], [150.0, 210.0, 70.0, 12.0]]   # x, y, radius, drift px/s
 
 
 static func smoke(t: float, motion: float, a: float) -> Array:
@@ -310,14 +419,15 @@ static func smoke(t: float, motion: float, a: float) -> Array:
 	for s in SMOKE:
 		var x: float = s[0] if motion < 0.5 else fposmod(float(s[0]) + t * float(s[3]) + 140.0, 780.0) - 140.0
 		for i in 4:
-			ops.append({"k": "circle", "c": Vector2(x, float(s[1]) + sin(t * 0.2 + float(s[0])) * (0.0 if motion < 0.5 else 4.0)),
-				"r": float(s[2]) * (1.0 - 0.22 * float(i)), "col": Color(0.6, 0.6, 0.55, 0.028 * a)})
+			ops.append({"k": "circle", "c": Vector2(x, float(s[1]) * 0.8 + 30.0 + sin(t * 0.2 + float(s[0])) * (0.0 if motion < 0.5 else 4.0)),
+				"r": float(s[2]) * (1.0 - 0.22 * float(i)), "col": Color(0.05, 0.06, 0.06, 0.07 * a)})
 	return ops
 
 
 static func backdrop(t: float, motion: float, a: float) -> Array:
-	var ops := smoke(t, motion, a)
+	var ops: Array = [{"k": "tex", "tex": scene_tex(), "rect": Rect2(0, 0, 640, 360), "col": Color(1, 1, 1, a)}]
 	ops.append_array(searchlights(t, motion, a))
+	ops.append_array(smoke(t, motion, a))
 	ops.append_array(vignette(a))
 	return ops
 
