@@ -18,9 +18,15 @@ concurrency:
 # -- the `resolve-godot-version` step below reads it so this file never
 # drifts from what the sim's determinism goldens were recorded against.
 
+# Where the Linux jobs run is a repo VARIABLE, not a line in this file. CI_LINUX_RUNNER unset ->
+# GitHub-hosted ubuntu-latest, as before. Set to a JSON label list, e.g.
+#   gh variable set CI_LINUX_RUNNER --body '["self-hosted","Linux","X64","swarm"]'
+# -> the self-hosted runners with those labels. The macOS and Windows legs are always hosted.
+# Delete the variable to go back; no commit needed either way.
+
 jobs:
   resolve-godot-version:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_LINUX_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 5
     outputs:
       version: ${{ steps.read.outputs.version }}
@@ -46,7 +52,7 @@ jobs:
   # .import sidecar. Both were committed and then run by nothing until now.
   lint:
     needs: resolve-godot-version
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_LINUX_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -107,7 +113,7 @@ jobs:
             name: macos-arm64
           - os: windows-latest
             name: windows-x86_64
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && fromJSON(vars.CI_LINUX_RUNNER || '"ubuntu-latest"') || matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -255,7 +261,7 @@ jobs:
   # continue-on-error, runs on push/PR (not just nightly).
   gl-capture:
     needs: resolve-godot-version
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_LINUX_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -358,7 +364,7 @@ jobs:
             name: macos-arm64
             preset: macOS (Apple Silicon + Intel universal)
             artifact: CommanderInChief-macos.zip
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && fromJSON(vars.CI_LINUX_RUNNER || '"ubuntu-latest"') || matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -432,7 +438,7 @@ jobs:
   # timing-free.
   perf:
     needs: resolve-godot-version
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_LINUX_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 20
     continue-on-error: true
     steps:
@@ -458,7 +464,7 @@ jobs:
   soak:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: resolve-godot-version
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CI_LINUX_RUNNER || '"ubuntu-latest"') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
