@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import plistlib
 import subprocess
@@ -58,6 +59,31 @@ class NativeExportTests(unittest.TestCase):
         self.assertEqual(receipt["runtime"], str(engine))
         self.assertEqual(receipt["runtime_sha256"], subject.sha(engine))
         self.assertNotEqual(receipt["runtime_sha256"], receipt["executable_sha256"])
+
+    def test_engine_name_resolves_through_extensionless_windows_symlink(self):
+        real = self.root / "install" / "Godot_v4_win64.exe"
+        real.parent.mkdir()
+        real.write_bytes(b"standard editor engine")
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir()
+        try:
+            (bin_directory / "godot").symlink_to(real)
+        except OSError as error:
+            self.skipTest(f"symlinks unavailable: {error}")
+        search_path = os.pathsep.join([str(self.root / "absent"), str(bin_directory)])
+        with patch.object(subject.shutil, "which", return_value=None):
+            self.assertEqual(subject.resolve_engine("godot", windows=True, search_path=search_path), real)
+            with self.assertRaises(FileNotFoundError):
+                subject.resolve_engine("godot", windows=False, search_path=search_path)
+            with self.assertRaises(FileNotFoundError):
+                subject.resolve_engine("godot", windows=True, search_path=str(self.root / "absent"))
+
+    def test_engine_resolution_prefers_which_and_accepts_explicit_paths(self):
+        engine = self.root / "standard-engine"
+        engine.write_bytes(b"standard editor engine")
+        with patch.object(subject.shutil, "which", return_value=str(engine)):
+            self.assertEqual(subject.resolve_engine("godot", windows=True, search_path=""), engine)
+        self.assertEqual(subject.resolve_engine(engine), engine)
 
     def test_standard_engine_drift_is_rejected_without_success_receipt(self):
         engine = self.root / "standard-engine"

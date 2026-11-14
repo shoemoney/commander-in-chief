@@ -55,6 +55,26 @@ def unpack_artifact(artifact, directory, version):
     return executable, packs[0]
 
 
+def resolve_engine(engine, windows=None, search_path=None):
+    """Return the real engine binary for a command name or path.
+
+    Windows needs more than shutil.which: CI's setup-godot action installs the engine
+    as an extensionless symlink (bin\\godot -> Godot_vX_win64.exe). Git Bash runs that,
+    but which() only matches PATHEXT suffixes and CreateProcess appends .exe to a bare
+    name, so the link is looked up on PATH by hand and followed to its target.
+    """
+    windows = os.name == "nt" if windows is None else windows
+    found = shutil.which(str(engine))
+    if found is None and windows and Path(str(engine)).name == str(engine):
+        search_path = os.environ.get("PATH", "") if search_path is None else search_path
+        for directory in filter(None, search_path.split(os.pathsep)):
+            candidate = Path(directory) / str(engine)
+            if candidate.is_file():
+                found = candidate
+                break
+    return Path(found or engine).resolve(strict=True)
+
+
 def verify(artifact, log_directory, version, routes=ROUTES, timeout=60, engine=None):
     artifact = artifact.resolve(strict=True)
     log_directory.mkdir(parents=True, exist_ok=False)
@@ -68,7 +88,7 @@ def verify(artifact, log_directory, version, routes=ROUTES, timeout=60, engine=N
             raise ValueError("Release executable or adjacent game pack is missing")
         receipt["executable_sha256"] = sha(executable)
         receipt["pack_sha256"] = sha(pack)
-        runtime = Path(shutil.which(str(engine)) or engine).resolve(strict=True) if engine else executable
+        runtime = resolve_engine(engine) if engine else executable
         receipt["runtime"] = str(runtime)
         receipt["runtime_sha256"] = sha(runtime)
         external_driver = isolated / "native_driver.gd"
