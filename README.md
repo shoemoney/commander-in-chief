@@ -22,7 +22,7 @@
 ![Determinism](https://img.shields.io/badge/determinism-bit--identical%20x86__64%20%E2%87%84%20arm64-gold)
 ![Milestone](https://img.shields.io/badge/milestone-1.5%20%C2%B7%20in%20progress-gold)
 ![Assets](https://img.shields.io/badge/assets-owned%20or%20CC0%20%C2%B7%20history%20purged-2ea44f)
-![Release](https://img.shields.io/badge/release-v1.4.4%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
+![Release](https://img.shields.io/badge/release-v1.5.0%20%C2%B7%20mac%20%C2%B7%20linux%20%C2%B7%20windows-blueviolet)
 
 **A modern remake of the 1986 vertical run-and-gun** (*Ikari Warriors*, SNK) —
 twin-stick chaos, grenades-vs-armor, one-hit deaths, and the **War Chest 💰**:
@@ -65,8 +65,8 @@ after</a>).</sub>
 
 </div>
 
-> ⚠️ **Status: 1.5 — in progress** (`project.godot` is 1.5.0; the download line below is the last
-> published build). Campaign runs studio splash → Foundry Colossus 🏭 through six sectors, with a
+> ✅ **Status: 1.5 — released** (`project.godot` is 1.5.0, and v1.5.0 is the published build
+> below). Campaign runs studio splash → Foundry Colossus 🏭 through six sectors, with a
 > Bridge Gunship, a Siege Tank and the Colossus as its bosses. Endless War is deep, all side modes
 > ship (Boss Rush · Arcade · Chapter Select · Daily Run), and the feel stack is real. Art is
 > **owned procedural art** (`tools/gen_*.py`, plus `tools/blender_vehicles.py` for the vehicles and
@@ -87,18 +87,17 @@ after</a>).</sub>
 
 ## 📥 Download & Play
 
-**[⬇️ Latest release — v1.4.4](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
+**[⬇️ Latest release — v1.5.0](https://github.com/shoemoney/commander-in-chief/releases/latest)** — no build step, just unzip and run. 🎮
 
 | 🖥️ Platform | 📦 File | 📏 | 📝 |
 |---|---|---|---|
-| 🍎 **macOS — Apple Silicon** | `CommanderInChief-macos-arm64.zip` | **41 MB** | arm64-only, recommended for M-series |
-| 🍏 **macOS — universal** | `CommanderInChief-macos.zip` | 70 MB | Apple Silicon **and** Intel |
-| 🐧 **Linux** | `CommanderInChief-linux.zip` | 39 MB | x86_64 — keep the `.pck` beside the binary |
-| 🪟 **Windows** | `CommanderInChief-windows.zip` | 48 MB | x86_64 — keep the `.pck` beside the `.exe` |
+| 🍏 **macOS — universal** | `CommanderInChief-macos.zip` | 87 MB | Apple Silicon **and** Intel |
+| 🐧 **Linux** | `CommanderInChief-linux.zip` | 55 MB | x86_64 — keep the `.pck` beside the binary |
+| 🪟 **Windows** | `CommanderInChief-windows.zip` | 64 MB | x86_64 — keep the `.pck` beside the `.exe` |
 
-> 🔐 Both macOS builds are **ad-hoc signed, not notarized** — first launch needs
-> **right-click → Open**. Godot ships no arm64-only macOS template, so the native build is the
-> universal one thinned with `lipo` and re-signed (see the note in `export_presets.cfg`).
+> 🔐 The macOS build is **ad-hoc signed, not notarized** — first launch needs
+> **right-click → Open**. All three archives are the exact files the CI `export-smoke` job built
+> and played through on that platform for the tagged commit.
 
 <details><summary>🏷️ <b>Version history</b></summary>
 
@@ -114,6 +113,7 @@ gitGraph
    commit id: "v1.0.0 · launch" tag: "v1.0.0"
    commit id: "v1.1.0 · polish" tag: "v1.1.0"
    commit id: "v1.2.0 · gold" tag: "v1.2.0"
+   commit id: "v1.5.0 · visual pass" tag: "v1.5.0"
 ```
 
 | 🏷️ | 📅 | 🎯 What it marks |
@@ -125,6 +125,7 @@ gitGraph
 | `v1.0.0` | 2026-08-24 | **1.0 launch** — safe-area docs + HUD/menu 1.0 sweep, ultrawide pillarbox verified |
 | `v1.1.0` | 2026-08-24 | **1.1 polish** — HUD Container, GL gate, roll gate, filter NEAREST, safe-area |
 | `v1.2.0` | 2026-08-24 | **1.2 gold** — final AAA sweep, all 5 tells closed, store-ready |
+| `v1.5.0` | 2026-11-14 | **1.5 visual pass** — fifteen view-only polish packages, perf paid back, first published build since v0.3.0 |
 
 </details>
 
@@ -633,7 +634,7 @@ flowchart TB
   runs (1,500 frames of a bot campaign, headless so it counts the sim and every draw call but no
   GPU raster, four alternating rounds on one desktop): **2.95 ms → 3.12 ms mean, 3.8 → 4.2 ms
   p95**. Those are one machine's numbers, not a guarantee for yours.
-- 🚧 **Status:** merged to `main` on 2026-11-12. Not in a published release yet: the download line above is still v1.4.4.
+- ✅ **Status:** merged to `main` on 2026-11-12 and published in **v1.5.0** on 2026-11-14.
 
 </details>
 
@@ -682,8 +683,8 @@ flowchart LR
 | ✅ | **Deterministic core** | 16.16 fixed-point, seeded xoshiro128\*\*, no floats/RNG/wall-clock/scene-tree in `src/sim` — enforced by `tools/lint_sim.gd` in CI, not by convention. Golden-checksum suite proves bit-identical x86_64 ⇄ arm64 |
 | ✅ | **Playable start→finish** | 6 gated sectors → Foundry Colossus, with the Bridge Gunship and Siege Tank fights, the flamethrower and rocket launcher, plus Arcade/Chapter Select, Endless War, Boss Rush, Daily Run, replay, local 2P |
 | ✅ | **Owned art + audio** | Every shipped sprite has a recorded source (procedural, or CC0 for the FX base). The score is composed in-house. Voice recordings have provenance notes that are still open. Provenance map in [`ASSETS.md`](ASSETS.md) |
-| ✅ | **Public release** | Clean git history, MIT on the code, binaries for macOS (arm64 + universal) · Linux · Windows. The latest published build is **v1.4.4** |
-| 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame The **1.5 visual pass** — fifteen view-only packages, see [🎨 Art](#-art) — is merged to `main`, reviewed and measured (frame cost within about 6% of the pre-pass build), not yet in a published release |
+| ✅ | **Public release** | Clean git history, MIT on the code, binaries for macOS (universal) · Linux · Windows. The latest published build is **v1.5.0** |
+| 🔨 | **AAA polish pass** | A blind consumer reviewer plus a sim-reading behaviour lens grade the build each cycle and the findings get fixed. **1 of 16 cycles run.** Known-open from cycle 1: boss health bar clips the bottom edge, rebind helper text bleeds its frame The **1.5 visual pass** — fifteen view-only packages, see [🎨 Art](#-art) — is merged to `main`, reviewed and measured (frame cost within about 6% of the pre-pass build), published in v1.5.0 |
 | ⬜ | **Online netplay** | `src/net/lockstep.gd` is **~260 lines with zero production callers** and no transport. The determinism proof it depends on is real; the netplay is not. Don't read the file as a feature |
 | ⬜ | **Steam release** | `SteamBridge` is an offline-first *facade* — it no-ops without the SDK. No store page, no Playtest |
 | ⬜ | **Localization freeze** | 3 languages shipped (`locale/strings.{es,fr,ja}.po`), not the 12-language freeze the plan costs |
