@@ -304,7 +304,14 @@ jobs:
           # delta to exactly 1/60s regardless of how long xvfb actually took to draw,
           # which is the same fix tools/screenshots.gd already documents for this
           # exact failure mode ("so the time-driven pulses land on the same phase").
-          xvfb-run -a godot --path . --rendering-method gl_compatibility --fixed-fps 60 -s res://tools/probe_concussion_hud.gd 2>&1 | tee probe.log
+          # --audio-driver Dummy: a runner has no sound card, so ALSA fails to open a device
+          # and Godot prints an engine `ERROR: ... ERR_CANT_OPEN` before falling back to the
+          # dummy driver by itself. verify_runtime_log.py below fails any log with an ERROR
+          # line, so without this flag the step cannot pass on ANY runner, hosted included
+          # (the verifier was added here on 2026-11-10 and first ran on 2026-11-14).
+          # tools/ci_local.sh has carried the same flag for the same reason. The probe
+          # measures pixels; the audio driver changes none of them.
+          xvfb-run -a godot --path . --rendering-method gl_compatibility --fixed-fps 60 --audio-driver Dummy -s res://tools/probe_concussion_hud.gd 2>&1 | tee probe.log
           if ! grep -q "PROBE OK" probe.log; then
             echo "::error::probe_concussion_hud did not report PROBE OK — see probe.log"
             cat probe.log
@@ -416,6 +423,11 @@ jobs:
 
       - name: Upload native release and verification evidence
         uses: actions/upload-artifact@v7
+        # While CI_LINUX_RUNNER routes Linux to self-hosted runners, an upload that GitHub
+        # refuses ("Artifact storage quota has been hit" -- an account billing state, not
+        # anything this job built) is reported as a warning instead of failing a job whose
+        # export and verification steps all passed. With the variable unset this is strict.
+        continue-on-error: ${{ vars.CI_LINUX_RUNNER != '' }}
         if: always()
         with:
           name: CommanderInChief-${{ matrix.name }}-release

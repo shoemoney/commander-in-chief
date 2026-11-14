@@ -89,7 +89,7 @@ suite() {
 }
 gl_probe() {
 	command -v xvfb-run >/dev/null 2>&1 || { echo "xvfb-run not installed"; return 1; }
-	# --audio-driver Dummy is the one deliberate difference from ci.yml: a headless box
+	# --audio-driver Dummy (ci.yml's probe step carries the same flag): a headless box
 	# with no sound card makes ALSA fail to open a device, Godot prints an engine
 	# `ERROR: ... ERR_CANT_OPEN` and falls back to the dummy driver anyway — and
 	# verify_runtime_log.py (correctly) fails any log carrying an ERROR line. Asking for
