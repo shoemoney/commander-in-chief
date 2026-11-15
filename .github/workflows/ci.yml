@@ -423,11 +423,6 @@ jobs:
 
       - name: Upload native release and verification evidence
         uses: actions/upload-artifact@v7
-        # While CI_LINUX_RUNNER routes Linux to self-hosted runners, an upload that GitHub
-        # refuses ("Artifact storage quota has been hit" -- an account billing state, not
-        # anything this job built) is reported as a warning instead of failing a job whose
-        # export and verification steps all passed. With the variable unset this is strict.
-        continue-on-error: ${{ vars.CI_LINUX_RUNNER != '' }}
         if: always()
         with:
           name: CommanderInChief-${{ matrix.name }}-release
