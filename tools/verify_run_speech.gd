@@ -6,6 +6,10 @@ var main: Node2D
 var failures: Array[String] = []
 var checks := 0
 
+## Wall-clock slack on top of the probe stream's length before the "narration
+## finishes naturally" wait gives up. Only ever spent on a real failure.
+const STARTUP_LINE_SLACK_MSEC := 30000
+
 
 func _initialize() -> void:
 	_run.call_deferred()
@@ -89,9 +93,24 @@ func _run() -> void:
 		"reset keeps the startup caption and clears queued combat captions")
 	check(sfx._vo_pending.is_empty() and sfx.is_startup_audio_locked(),
 		"reset clears old pending speech without releasing the startup lock")
-	var deadline := Time.get_ticks_msec() + 4000
-	while sfx._startup_line_playing and Time.get_ticks_msec() < deadline:
+	# Condition-based wait: poll until the line's own `finished` handler clears the
+	# flag and releases the lock. The deadline only bounds a narration that NEVER
+	# finishes, so it is derived from the stream's real length plus generous slack.
+	# The old flat 4000 ms left ~2 s of headroom over a 2.0 s stream, and the
+	# headless audio thread advances on sleep-paced mixes, not wall time: a loaded
+	# macOS runner overshot it twice (CI run 45316598317).
+	var wait_start := Time.get_ticks_msec()
+	var deadline := wait_start + int(ceil(old_line.get_length() * 1000.0)) \
+		+ STARTUP_LINE_SLACK_MSEC
+	while (sfx._startup_line_playing or sfx.is_startup_audio_locked()) \
+			and Time.get_ticks_msec() < deadline:
 		await create_timer(0.01, true, false, true).timeout
+	print("RUN SPEECH: startup narration wait %d ms of %d ms allowed (stream %.2f s)" % [
+		Time.get_ticks_msec() - wait_start, deadline - wait_start, old_line.get_length()])
+	if sfx._startup_line_playing or sfx.is_startup_audio_locked():
+		print("RUN SPEECH: timed out with line_playing=%s locked=%s dry_playing=%s position=%.3f s" % [
+			sfx._startup_line_playing, sfx.is_startup_audio_locked(),
+			sfx._vo_dry.playing, sfx._vo_dry.get_playback_position()])
 	check(not sfx._startup_line_playing and not sfx.is_startup_audio_locked(),
 		"preserved narration finishes naturally and releases startup audio")
 	await Quiesce.teardown(self, main)
